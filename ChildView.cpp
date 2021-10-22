@@ -131,7 +131,6 @@ void CChildView::Z2Dir(int z, int &dx, int &dy)
 	dy = (int)(30*sin(a));
 }
 
-extern int g_ign, g_ian;
 
 void CChildView::OnPaint() 
 {
@@ -182,11 +181,9 @@ void CChildView::OnPaint()
 			SVoxImg<SWorkImg<realnum>> &dismap = (!m_bsee && !m_curvsee) ? m_liftedEikonal.m_phasefield.m_distance[ii]:
 				(!m_bsee && m_curvsee == 1) ? m_liftedEikonal.m_phasefield.m_Sumcurvature[ii]:
 				(!m_bsee && m_curvsee == 2) ?m_liftedEikonal.m_phasefield.m_Sumcurvature[ii]:
-				(m_bsee && !m_curvsee) ? m_liftedEikonal.m_phasefield.m_smoothdist[ii]:
-				(m_bsee && m_curvsee == 1) ? m_liftedEikonal.m_phasefield.m_Gaucurvature[ii]:
-				/*(m_bsee && m_curvsee == 2)*/ m_liftedEikonal.m_phasefield.m_Gaucurvature[ii]
+				m_liftedEikonal.m_phasefield.m_smoothdist[ii]
 			;
-			/*m_Sumcurvature[ii],m_expdist[ii],m_smoothdist[ii],m_distance[ii],m_thicknes[ii],m_Gaucurvature[ii]*/
+			/*m_Sumcurvature[ii],m_expdist[ii],m_smoothdist[ii],m_distance[ii],m_thicknes[ii]*/
 
 			int zsee = 0;
 			if (m_pControl) {
@@ -328,7 +325,7 @@ void CChildView::OnPaint()
 	// Do not call CWnd::OnPaint() for painting messages
 }
 
-void CChildView::InitTrasport()
+void CChildView::InitTransport()
 {
 	//m_liftedEikonal.m_imageOp.GetXTestBound(m_xsee, m_liftedEikonal.m_boundcontour);
 	m_liftedEikonal.m_imageOp.GetPlaneDistMap(m_liftedEikonal.m_inicountourCalculator.RetrieveBound());//
@@ -379,7 +376,7 @@ UINT BackgroundThread(LPVOID params)
 			if (++cyc > 7) { view->Invalidate(FALSE); cyc = 0; }
 		}
 		else if (view->m_threadactivated == 4) {
-			view->InitTrasport();
+			view->InitTransport();
 			//view->m_prevthreadactivated = 2;
 			Sleep(300);
 			view->m_threadactivated = 5;

@@ -45,17 +45,17 @@ public:
 	bool m_bInited;
 	int m_npos;
 	int m_nall;
-	realnum m_relpos;
 	int m_nect;
 	int m_nfct;
 	SWorkImg<realnum> m_gx2D;
 	SWorkImg<realnum> m_gy2D;
 	SWorkImg<realnum> m_field2D;
 	SWorkImg<realnum> m_velo2D;
-
+	// get the distance gradients along the selected x slice from the two neighboring slices
 	void GetDistancemean(SVoxImg<SWorkImg<realnum>> &distance, SVoxImg<SWorkImg<realnum>>& counterdistance);
 	void Iterate();
 	std::unordered_set<unsigned long> m_bound;
+	// collects bounding points into a set
 	std::unordered_set<unsigned long> &RetrieveBound();
 };
 
@@ -63,16 +63,22 @@ class CPhaseContainer
 {
 public:
 	// Resolve path
+	/*
+	Smooth distance map state
+	-4: neither map nor gradient
+	0<: was smoothed along every dimension
+	*/
 	SVoxImg<SWorkImg<int>> m_smoothstate[2];
 	SVoxImg<SWorkImg<int>> m_thickstate[2];
 	SVoxImg<SWorkImg<realnum>> m_thicknes[2];
-	SVoxImg<SWorkImg<realnum>> m_Gaucurvature[2];
 	SVoxImg<SWorkImg<realnum>> m_Sumcurvature[2];
 	//SVoxImg<SWorkImg<realnum>> m_Hessian[6];
 
 	SVoxImg<SWorkImg<realnum>> m_distance[2];
 
 	// expansion
+
+	// gradients of the distance maps
 	SVoxImg<SWorkImg<realnum>> m_distgrad[2][3];
 	SVoxImg<SWorkImg<realnum>> m_expdist[2];
 
@@ -101,11 +107,14 @@ public:
 
 	// phase field stuff
 	CPhaseContainer m_phasefield;
+	// Initialize phasefield, including the surrounding area around the initial points
 	void PhaseInit(IPoi reginit, IPoi arrival, int initz = 0, int arravz = 0, int xSection = -1);
 	void RegularizePhaseField(SVoxImg<SWorkImg<realnum>> &field, SVoxImg<SWorkImg<realnum>> &velo);
+	// Creates a smoother version of the distance map in smoothdist
 	void SmoothDistanceMap(int i = 0);
-	void SmoothMap(SVoxImg<SWorkImg<realnum>> &map, int i = 0);
+	// Calculate fundamental quantities, like distance gradient, sum curvature and thick state(?)
 	void CalculateFundQuant(int i = 0, int test = 0);
+	// Update velocity, then phase field based on velocity, and distance map, where phase field passes threshold value
 	void Iterate(int i = 0);
 	realnum m_currentdistance[2];
 	CVec3 m_reference[2];
@@ -144,94 +153,3 @@ public:
 	// not used
 
 };
-
-
-//SmoothMap USES thstat
-void inline CCurvEikonal::SmoothMap(SVoxImg<SWorkImg<realnum>>& map, int i)
-{
-	SVoxImg<SWorkImg<realnum>>& sou = map;//!t ? m_phasefield.m_Gaucurvature[i]: 
-		//t == 1 ? m_phasefield.m_Sumcurvature[i]:m_phasefield.m_thicknes[i]; // source/dest
-	SVoxImg<SWorkImg<realnum>>& out = sou; // output
-	SVoxImg<SWorkImg<realnum>>& aux1 = m_phasefield.m_aux;
-	SVoxImg<SWorkImg<realnum>>& aux2 = m_phasefield.m_velo;
-	SVoxImg<SWorkImg<int>>& thstat = m_phasefield.m_thickstate[i];
-
-	int xs = sou.xs, ys = sou.ys, zs = sou.zs;
-
-#pragma omp parallel for
-	for (int zz = 0; zz < zs; ++zz) {
-		for (int yy = 0; yy < ys; ++yy) {
-			for (int xx = 0; xx < xs; ++xx) {
-				if (thstat[zz][yy][xx] != 0) {
-					aux1[zz][yy][xx] = sou[zz][yy][xx];
-					continue;
-				}
-				int xm(xx - 1); if (xm == -1) xm = 1;
-				int xp(xx + 1); if (xp == xs) xp = xs - 2;
-				realnum s = sou[zz][yy][xx]; int w = 0;
-				if (thstat[zz][yy][xp] >= 0) {
-					s += sou[zz][yy][xp]; ++w;
-				}
-				if (thstat[zz][yy][xm] >= 0) {
-					s += sou[zz][yy][xm]; ++w;
-				}
-				if (!w) aux1[zz][yy][xx] = s;
-				else {
-					s += sou[zz][yy][xx];
-					if (w == 1) aux1[zz][yy][xx] = (1.0 / 3.0) * s;
-					else aux1[zz][yy][xx] = 0.25 * s;
-				}
-			}
-		}
-	}
-#pragma omp parallel for
-	for (int zz = 0; zz < zs; ++zz) {
-		for (int yy = 0; yy < ys; ++yy) {
-			int ym(yy - 1); if (ym == -1) ym = 1;
-			int yp(yy + 1); if (yp == ys) yp = ys - 2;
-			for (int xx = 0; xx < xs; ++xx) {
-				if (thstat[zz][yy][xx] != 0) {
-					aux2[zz][yy][xx] = aux1[zz][yy][xx];
-					continue;
-				}
-				realnum s = aux1[zz][yy][xx]; int w = 0;
-				if (thstat[zz][yp][xx] >= 0) {
-					s += aux1[zz][yp][xx]; ++w;
-				}
-				if (thstat[zz][ym][xx] >= 0) {
-					s += aux1[zz][ym][xx]; ++w;
-				}
-				if (!w) aux2[zz][yy][xx] = s;
-				else {
-					s += aux1[zz][yy][xx];
-					if (w == 1) aux2[zz][yy][xx] = (1.0 / 3.0) * s;
-					else aux2[zz][yy][xx] = 0.25 * s;
-				}
-			}
-		}
-	}
-#pragma omp parallel for
-	for (int zz = 0; zz < zs; ++zz) {
-		int zm(zz - 1); if (zm == -1) zm = 1;
-		int zp(zz + 1); if (zp == zs) zp = zs - 2;
-		for (int yy = 0; yy < ys; ++yy) {
-			for (int xx = 0; xx < xs; ++xx) {
-				if (thstat[zz][yy][xx] != 0) continue;
-				realnum s = aux2[zz][yy][xx]; int w = 0;
-				if (thstat[zp][yy][xx] >= 0) {
-					s += aux2[zp][yy][xx]; ++w;
-				}
-				if (thstat[zm][yy][xx] >= 0) {
-					s += aux2[zm][yy][xx]; ++w;
-				}
-				if (!w) out[zz][yy][xx] = s;
-				else {
-					s += aux2[zz][yy][xx];
-					if (w == 1) out[zz][yy][xx] = (1.0 / 3.0) * s;
-					else out[zz][yy][xx] = 0.25 * s;
-				}
-			}
-		}
-	}
-
-}

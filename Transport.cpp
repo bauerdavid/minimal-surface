@@ -4,6 +4,13 @@
 
 void CTransport::TrInit(SVoxImg<SWorkImg<realnum>> &distmap, SVoxImg<SWorkImg<realnum>>& inimap, realnum maxdistance)
 {
+	/*
+		called with:
+			distmap = m_liftedEikonal.m_phasefield.m_distance[0]
+			inimap = passi
+			maxdistance = m_liftedEikonal.currentdistance[0]
+	*/
+
 	int xs = distmap.xs, ys = distmap.ys, zs = distmap.zs;
 	if (inimap.xs != xs) return;
 	if (inimap.ys != ys) return;
@@ -74,13 +81,16 @@ void CTransport::TrIterate(int bev)
 	SVoxImg<SWorkImg<int>>& bound = m_isboundary;
 
 	int xs(trf.xs), ys(trf.ys), zs(trf.zs);
-	realnum alpha = 0.003;// -0.00000000000001;
+	realnum alpha = 0.003;// small value
 
 	#pragma omp parallel for
 	for (int zz = 1; zz < zs-1; ++zz)
 		for (int yy = 1; yy < ys-1; ++yy)
 			for (int xx = 1; xx < xs-1; ++xx) {
-				if (bound[zz][yy][xx] < 0) continue; // boundary to completely omit (no transport from uninitialized distance map)
+				if (bound[zz][yy][xx] != 0) {
+					continue; // boundary to completely omit (no transport from uninitialized distance map)
+				}
+				
 				realnum val;
 				int x, y, z;
 				realnum gx(m_gx[zz][yy][xx]), gy(m_gy[zz][yy][xx]), gz(m_gz[zz][yy][xx]);

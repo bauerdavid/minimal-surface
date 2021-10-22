@@ -9,11 +9,7 @@ class CImageOp
 public:
 	CImageOp(void);
 	~CImageOp(void);
-	void CImageOp::GaussFilterImage(int nGauss);
-	void CalcOneComponent(realnum r, SWorkImg<realnum> &comp);
-	void CalculateCircularGradientFlow(realnum r, SWorkImg<realnum> &img);
-	int GetDirectionalFlow(realnum r, CVec2 dir, SWorkImg<realnum> &img, SWorkImg<realnum> &out, bool bForced = false, int expcoef = 5, bool bReverse = false, int nG = 3);
-
+	
 	SWorkImg<realnum> m_gxx;
 	SWorkImg<realnum> m_gxy;
 	SWorkImg<realnum> m_gyy;
@@ -21,13 +17,19 @@ public:
 	SWorkImg<realnum> m_loc;
 
 	std::unordered_set<unsigned long> m_bound;
+	// Replace object mask with distances from the bounds
 	void GetXTestDisTrans();
-	void GetXTestIntern();
+	// fill m_loc with ones inside the bound (including the bounding pixels), and set to zero everywhere else
 	void XTestfill(short x, short y);
 	static const int m_bandthick = 25;
 public:
+	/*
+	Create data, where every values is _NO_BOU_, except for the selected x slice, where it will be the same as m_loc
+	Should be initialized based on the meeting of the two flow
+	*/
 	SVoxImg<SWorkImg<realnum>>& CImageOp::GetIniMap(int ix);
 	void GetXTestBound(int ix, std::vector<CVec3>& out);
+	// Calculate the distance from the bounds. Distances will be positive inside the object, and negative outside of it.
 	void GetPlaneDistMap(std::unordered_set<unsigned long> &boundset);
 	SWorkImg<realnum> &GetXTestSigDis()
 	{

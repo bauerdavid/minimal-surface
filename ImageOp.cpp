@@ -10,127 +10,7 @@ CImageOp::~CImageOp(void)
 {
 }
 
-void CImageOp::GaussFilterImage(int nGauss)
-{
-	int xs = m_aux.xs, ys = m_aux.ys;
-	if (xs != m_loc.xs || ys != m_loc.ys) return;
 
-	int gg = nGauss*2-1;
-	for (int kk = 0; kk < gg; ++kk) {
-		SWorkImg<realnum> &sou = (kk&1) ? m_aux:m_loc;
-		SWorkImg<realnum> &des = (kk&1) ? m_loc:m_aux;
-		for (int ii = 1; ii < ys-1; ++ii) {
-			for (int jj = 1; jj < xs-1; ++jj) {
-				des[ii][jj] = 0.25f*sou[ii][jj];
-				des[ii][jj] += 0.125f*sou[ii+1][jj];
-				des[ii][jj] += 0.125f*sou[ii-1][jj];
-				des[ii][jj] += 0.125f*sou[ii][jj+1];
-				des[ii][jj] += 0.125f*sou[ii][jj-1];
-				des[ii][jj] += 0.0625f*sou[ii+1][jj+1];
-				des[ii][jj] += 0.0625f*sou[ii-1][jj-1];
-				des[ii][jj] += 0.0625f*sou[ii-1][jj+1];
-				des[ii][jj] += 0.0625f*sou[ii+1][jj-1];
-			}
-		}
-	}
-}
-
-void CImageOp::CalcOneComponent(realnum r, SWorkImg<realnum> &comp)
-{
-	int xs = comp.xs, ys = comp.ys;
-
-	int ir = (int)(r+1.0);
-	for (int yy = 0; yy < ys; ++yy) {
-		for (int xx = 0; xx < xs; ++xx) {
-
-			m_aux[yy][xx] = 0;
-			for (int qq = -ir; qq <= ir; ++qq) {
-				int iy = yy+qq;
-				if (iy < 0) iy = 0; else if (iy >= ys) iy = ys-1;
-				for (int pp = -ir; pp <= ir; ++pp) {
-					int ix = xx+pp;
-					if (ix < 0) ix = 0; else if (ix >= xs) ix = xs-1;
-					if ((realnum)(pp*pp+qq*qq) <= r*r) {
-						m_aux[yy][xx] += comp[iy][ix];
-					}
-				}
-			}
-
-		}
-	}
-
-	m_aux *= 1.0/r;
-	comp = m_aux;
-
-}
-
-void CImageOp::CalculateCircularGradientFlow(realnum r, SWorkImg<realnum> &img)
-{
-	m_bOk = false;
-	int xs = img.xs, ys = img.ys;
-	if (!xs || !ys) return;
-	img.GetImgHesse(m_gxx,m_gxy,m_gyy);
-	m_aux.Set(xs,ys);
-	if (xs != m_gxx.xs || ys != m_gxx.ys) return;
-	if (xs != m_gxy.xs || ys != m_gxy.ys) return;
-	if (xs != m_gyy.xs || ys != m_gyy.ys) return;
-	if (xs != m_aux.xs || ys != m_aux.ys) return;
-
-	CalcOneComponent(r,m_gxx);
-	CalcOneComponent(r,m_gxy);
-	CalcOneComponent(r,m_gyy);
-		
-	m_bOk = true;
-}
-
-int CImageOp::GetDirectionalFlow(realnum r, CVec2 dir, SWorkImg<realnum> &img, SWorkImg<realnum> &out, bool bForced, int expcoef, bool bReverse, int nG)
-{
-	int xs = img.xs, ys = img.ys;
-	if (m_loc.xs != xs || m_loc.ys != ys || bForced) {
-		m_loc = img;
-		if (!bReverse) m_loc *= -1;
-		m_aux = m_loc;
-		GaussFilterImage(nG);
-
-		CalculateCircularGradientFlow(r,m_loc);
-		if (!m_bOk) return 0;
-	}
-
-	{	// orientation score
-		for (int yy = 0; yy < ys; ++yy) {
-			for (int xx = 0; xx < xs; ++xx) {
-				m_aux[yy][xx] = dir.x*dir.x*m_gxx[yy][xx]+2*dir.x*dir.y*m_gxy[yy][xx]+dir.y*dir.y*m_gyy[yy][xx];
-				m_aux[yy][xx] -= 0.25*2; // NEW
-				if (m_aux[yy][xx] < 0) m_aux[yy][xx] = 0;
-			}
-		}
-	}
-
-	realnum maxv(-1); 
-	for (int yy = 0; yy < ys; ++yy) {
-		for (int xx = 0; xx < xs; ++xx) {
-			if (m_aux[yy][xx] > maxv) maxv = m_aux[yy][xx];
-		}
-	}
-
-	out = m_aux;
-	if (xs != out.xs || ys != out.ys) return 0;
-	if (maxv <= 1e-22) return 0;
-	out *= 1.0/maxv;
-
-	
-	{	// data coefficient
-		realnum cf = (realnum) expcoef;
-		for (int yy = 0; yy < ys; ++yy) {
-			for (int xx = 0; xx < xs; ++xx) {
-				out[yy][xx] = 0.001+0.999*exp(-cf*out[yy][xx]);
-				//if (out[yy][xx] < 1e-6) out[yy][xx] = 1e-6; //!!!
-			}
-		}
-	}
-
-	return 1;
-}
 
 
 //-----------------------------------------------------------------------------------------
@@ -230,40 +110,10 @@ SVoxImg<SWorkImg<realnum>>& CImageOp::CreateTestImage(int xs, int ys, int zs, in
 	return m_testimage;
 }
 
-SWorkImg<realnum>& CImageOp::GetXImageSlice(int ix)
-{
-	int xs(m_testimage.xs), ys(m_testimage.ys), zs(m_testimage.zs);
-	m_loc.Set(ys,zs);
-	for (int zz = 0; zz < zs; ++zz)
-		for (int yy = 0; yy < ys; ++yy)
-			m_loc[zz][yy] = m_testimage[zz][yy][ix];
-
-	return m_loc;
-}
 
 void CImageOp::GetXTestDisTrans()
 {
 	int xs(m_loc.xs), ys(m_loc.ys);
-
-	/*m_gxx = m_loc;
-	m_gyy.Set(xs, ys, 0.0);
-
-	for (int ii = 0; ii < m_bandthick; ++ii) {
-		SWorkImg<realnum>& sou = !(ii & 1) ? m_gxx : m_gyy;
-		SWorkImg<realnum>& des = (ii & 1) ? m_gxx : m_gyy;
-		for (int yy = 0 + 1; yy < ys - 1; ++yy) {
-			for (int xx = 0 + 1; xx < xs - 1; ++xx) {
-				des[yy][xx] = m_loc[yy][xx];
-				realnum minn = sou[yy + 1][xx];
-				if (sou[yy - 1][xx] < minn) minn = sou[yy - 1][xx];
-				if (sou[yy][xx - 1] < minn) minn = sou[yy][xx - 1];
-				if (sou[yy][xx + 1] < minn) minn = sou[yy][xx + 1];
-				des[yy][xx] += minn;
-			}
-		}
-	}
-
-	m_loc = m_gyy;*/
 
 	std::unordered_set<unsigned long>::const_iterator pe = m_bound.end();
 	std::unordered_set<unsigned long>::const_iterator pb = m_bound.begin();
@@ -273,7 +123,7 @@ void CImageOp::GetXTestDisTrans()
 	for (int yy = 0; yy < ys; ++yy) {
 		for (int xx = 0; xx < xs; ++xx) {
 			std::unordered_set<unsigned long>::const_iterator pp ;
-			int d2m(1 << 30);
+			int max_dist(1 << 30); // big number
 			for (pp = pb; pp != pe; ++pp) {
 				unsigned long da = *pp;
 				int cx = (da & 0xffff);
@@ -285,15 +135,15 @@ void CImageOp::GetXTestDisTrans()
 				if (cy < 0) cy *= -1;
 				if (cy > m_bandthick) continue;
 				int d2 = cx * cx + cy * cy;
-				if (d2 < d2m) d2m = d2;
+				if (d2 < max_dist) max_dist = d2;
 			}
-			realnum dd = sqrt((realnum)d2m);
+			realnum dd = sqrt((realnum)max_dist);
 			if (dd <= bandthick) m_loc[yy][xx] = m_loc[yy][xx] > 0.5 ? dd:-dd; // actually 1.0 (that is > 0.5)
 			//else m_loc[yy][xx] = _NO_BOU_;
 			//else m_loc[yy][xx] = 0;
 			else m_loc[yy][xx] = m_loc[yy][xx] > 0.5 ? bandthick : -bandthick; // -bandthick try this instead
 
-			//if (!d2m) m_loc[yy][xx] = 0; // temporal (test)
+			//if (!max_dist) m_loc[yy][xx] = 0; // temporal (test)
 		}
 	}
 
@@ -312,57 +162,6 @@ void CImageOp::XTestfill(short x, short y)
 		if (x > 0) XTestfill(x - 1, y);
 		if (y > 0) XTestfill(x, y - 1);
 	}
-
-}
-
-
-void CImageOp::GetXTestIntern()
-{
-	int xs(m_loc.xs), ys(m_loc.ys);
-	m_aux.Set(xs, ys);
-
-	std::unordered_set<unsigned long>::const_iterator pp;
-	std::unordered_set<unsigned long>::const_iterator pe = m_bound.end();
-
-	for (int zz = 0; zz < ys; ++zz) {
-		int out(2);
-		for (int yy = 0; yy < xs; ++yy) {
-			pp = m_bound.find((zz << 16) + yy);
-			if (pp != pe) { // contour point
-				if (out == 2) out = 1; // 1st boundary
-				if (out == -2) out = -1;
-			}
-			else {
-				if (out == 1) out = -2;
-				if (out == -1) out = 2;
-			}
-			if (out == 1 || out == -2)
-				m_loc[zz][yy] = 1;
-			else 
-				m_loc[zz][yy] = 0;
-		}
-	}
-
-	/*m_aux = m_loc;
-	for (int zz = 0+1; zz < ys-1; ++zz) {
-		for (int yy = 0; yy < xs; ++yy) {
-			if (m_aux[zz][yy] < 0.5) {
-				if (m_aux[zz + 1][yy] > 0.5 && m_aux[zz - 1][yy] > 0.5)
-					m_loc[zz][yy] = 1;
-			}
-			else {
-				if (m_aux[zz + 1][yy] < 0.5 && m_aux[zz - 1][yy] < 0.5)
-					m_loc[zz][yy] = 0;
-			}
-		}
-	}
-	for (int zz = 0; zz < ys; ++zz)
-		m_loc[zz][0] = m_loc[zz][xs-1] = 0;
-	for (int yy = 0; yy < xs; ++yy)
-		m_loc[0][yy] = m_loc[ys-1][yy] = 0;*/
-
-
-	//GetXTestDisTrans();
 
 }
 
@@ -394,7 +193,6 @@ void CImageOp::GetPlaneDistMap(std::unordered_set<unsigned long>& boundset)
 {
 	int xs(m_testimage.xs), ys(m_testimage.ys), zs(m_testimage.zs);
 	m_bound = boundset;
-
 	m_loc.Set(ys, zs, 1);
 	XTestfill(0, 0);
 	GetXTestDisTrans();
