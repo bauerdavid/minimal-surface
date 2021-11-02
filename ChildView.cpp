@@ -5,12 +5,14 @@
 #include "stdafx.h"
 #include "MinArea.h"
 #include "ChildView.h"
+#include "FitPlane.h"
 
 #ifdef _DEBUG
 #define new DEBUG_NEW
 #endif
+#include <iostream>
 
-
+using namespace std;
 // CChildView
 
 CChildView::CChildView()
@@ -175,8 +177,9 @@ void CChildView::OnPaint()
 		//char txt[100];
 		//sprintf_s(txt, 99, "%d %d         ", g_ign, g_ian);
 		//dc.TextOutA(300, 10, txt);
-		for (int ii = 0; ii < 2-1; ++ii) {
+		for (int ii = 0; ii < 2; ++ii) {
 			SVoxImg<SWorkImg<realnum>> &field = m_liftedEikonal.m_phasefield.m_field[ii];
+			SVoxImg<SWorkImg<int>>& meeting_plane = m_liftedEikonal.meeting_plane_positions;
 
 			SVoxImg<SWorkImg<realnum>> &dismap = (!m_bsee && !m_curvsee) ? m_liftedEikonal.m_phasefield.m_distance[ii]:
 				(!m_bsee && m_curvsee == 1) ? m_liftedEikonal.m_phasefield.m_Sumcurvature[ii]:
@@ -194,25 +197,33 @@ void CChildView::OnPaint()
 			int pasi = m_liftedEikonal.m_minpath[ii][00].size();
 
 			if (m_threadactivated != 3) {
-				if (m_disp.xs && !m_btransportview) for (int yy = 0; yy < field.ys; ++yy) {
-					for (int xx = 0; xx < field.xs; ++xx) {
-						if (m_threadactivated == 1) {
-							if (field[zsee][yy][xx] > -0.6f && field[zsee][yy][xx] < 0.6f)
-								dc.SetPixelV(xx, yy, !ii ? 0xff : 0xff00);
-						}
-						else if (!pasi) {
-							realnum tocc(dismap[zsee][yy][xx]);
-							/*if (m_curvsee == 0) tocc *= 0.5;*/
-							if (!m_bsee) {
-								if (m_curvsee == 1) tocc *= 8;
-								if (m_curvsee == 2) tocc *= -8;
+				if (m_disp.xs && !m_btransportview) {
+					for (int yy = 0; yy < field.ys; ++yy) {
+						for (int xx = 0; xx < field.xs; ++xx) {
+							if (m_threadactivated == 1 || m_threadactivated == 5) {
+								if (abs(plane_normal.second.x*xx+plane_normal.second.y*yy+plane_normal.second.z*zsee+plane_offset) < 1.0) {
+									dc.SetPixelV(xx, yy, 0xff00ff);
+								}
+								else if (meeting_plane[zsee][yy][xx]) {
+									dc.SetPixelV(xx, yy, 0xff0000);
+								}
+								else if (field[zsee][yy][xx] > -0.6f && field[zsee][yy][xx] < 0.6f)
+									dc.SetPixelV(xx, yy, !ii ? 0xff : 0xff00);
 							}
-							else {
-								if (m_curvsee == 1) tocc *= 80;
-								if (m_curvsee == 2) tocc *= -80;
+							else if (!pasi) {
+								realnum tocc(dismap[zsee][yy][xx]);
+								/*if (m_curvsee == 0) tocc *= 0.5;*/
+								if (!m_bsee) {
+									if (m_curvsee == 1) tocc *= 8;
+									if (m_curvsee == 2) tocc *= -8;
+								}
+								else {
+									if (m_curvsee == 1) tocc *= 80;
+									if (m_curvsee == 2) tocc *= -80;
+								}
+								if (tocc > 0)
+									dc.SetPixelV(xx, yy, GetDepthColor(tocc * 100.0));
 							}
-							if (tocc > 0)
-								dc.SetPixelV(xx, yy, GetDepthColor(tocc * 100.0));
 						}
 					}
 				}
@@ -220,8 +231,14 @@ void CChildView::OnPaint()
 
 			if (m_dispd1.xs) for (int zz = 0; zz < field.zs; ++zz) {
 				for (int xx = 0; xx < field.xs; ++xx) {
-					if (m_threadactivated  == 1) {
-						if (field[zz][m_ysee][xx] > -0.6f && field[zz][m_ysee][xx] < 0.6f)
+					if (m_threadactivated  == 1 || m_threadactivated == 5) {
+						if (abs(plane_normal.second.x * xx + plane_normal.second.y * m_ysee + plane_normal.second.z * zz + plane_offset) < 1.0) {
+							dc.SetPixelV(m_disp.xs + 1 + xx, zz, 0xff00ff);
+						}
+						else if (meeting_plane[zz][m_ysee][xx]) {
+							dc.SetPixelV(m_disp.xs + 1 + xx, zz, 0xff0000);
+						}
+						else if (field[zz][m_ysee][xx] > -0.6f && field[zz][m_ysee][xx] < 0.6f)
 							dc.SetPixelV(m_disp.xs+1+xx,zz,!ii?0xff:0xff00);
 					}
 					/*else if (!pasi) {
@@ -234,8 +251,14 @@ void CChildView::OnPaint()
 			if (m_dispd2.xs) { // xslice
 				for (int zz = 0; zz < field.zs; ++zz) {
 					for (int yy = 0; yy < field.ys; ++yy) {
-						if (m_threadactivated == 1) {
-							if (field[zz][yy][m_xsee] > -0.6f && field[zz][yy][m_xsee] < 0.6f)
+						if (m_threadactivated == 1 || m_threadactivated == 5) {
+							if (abs(plane_normal.second.x * m_xsee + plane_normal.second.y * yy + plane_normal.second.z * zz + plane_offset) < 1.0) {
+								dc.SetPixelV(2 * (m_disp.xs + 1) + yy, zz, 0xff00ff);
+							}
+							else if (meeting_plane[zz][yy][m_xsee]) {
+								dc.SetPixelV(2 * (m_disp.xs + 1) + yy, zz, 0xff0000);
+							}
+							else if (field[zz][yy][m_xsee] > -0.6f && field[zz][yy][m_xsee] < 0.6f)
 								dc.SetPixelV(2 * (m_disp.xs + 1) + yy, zz, !ii ? 0xff : 0xff00);
 						}
 						if (m_threadactivated == 3) {
@@ -330,8 +353,10 @@ void CChildView::InitTransport()
 	//m_liftedEikonal.m_imageOp.GetXTestBound(m_xsee, m_liftedEikonal.m_boundcontour);
 	m_liftedEikonal.m_imageOp.GetPlaneDistMap(m_liftedEikonal.m_inicountourCalculator.RetrieveBound());//
 	if (m_liftedEikonal.m_phasefield.m_distance[0].xs > 0) {
-		SVoxImg<SWorkImg<realnum>>& passi = m_liftedEikonal.m_imageOp.GetIniMap(m_xsee);
-		m_transport.TrInit(m_liftedEikonal.m_phasefield.m_distance[0], passi, m_liftedEikonal.m_currentdistance[0]);
+		SVoxImg<SWorkImg<realnum>>& passi = m_liftedEikonal.m_imageOp.GetIniMap(plane_normal.first.x);
+		//realnum maxdist = min(m_liftedEikonal.m_currentdistance[0], m_liftedEikonal.m_currentdistance[1]);
+		realnum maxdist = m_liftedEikonal.m_currentdistance[0];
+		m_transport.TrInit(m_liftedEikonal.m_phasefield.m_combined_distance, passi, maxdist);
 
 		m_transport.GetDispSlice(Talox, m_xsee, m_dispd2); // TaloX - enum
 		m_transport.GetDispSlice(Taloy, m_ysee, m_dispd1);
@@ -353,18 +378,30 @@ UINT BackgroundThread(LPVOID params)
 
 		if (view->m_threadactivated == 1) { // 3D
 
-			view->m_liftedEikonal.Iterate(0);
-			//view->m_liftedEikonal.Iterate(1);
+			view->m_liftedEikonal.Iterate();
 			if (++cyc > 7) { view->Invalidate(FALSE); cyc = 0; }
 
 			if (view->m_liftedEikonal.m_bdone) { 
-				view->m_threadactivated = 2; 
-				view->Invalidate(FALSE); 
+				for (int zz = 1; zz < view->m_liftedEikonal.meeting_plane_positions.zs - 1; ++zz) {
+					for (int yy = 1; yy < view->m_liftedEikonal.meeting_plane_positions.ys - 1; ++yy) {
+						for (int xx = 1; xx < view->m_liftedEikonal.meeting_plane_positions.xs - 1; ++xx) {
+							if (view->m_liftedEikonal.meeting_plane_positions[zz][yy][xx])
+								view->m_liftedEikonal.meeting_plane.insert(IPoi3<double>(xx, yy, zz));
+							view->m_liftedEikonal.m_phasefield.m_combined_distance[zz][yy][xx] =
+								view->m_liftedEikonal.m_phasefield.m_distance[0][zz][yy][xx] >= 0 ? view->m_liftedEikonal.m_phasefield.m_distance[0][zz][yy][xx] : view->m_liftedEikonal.m_phasefield.m_distance[1][zz][yy][xx];
+						}
+					}
+				}
+				view->plane_normal = best_plane_from_points(view->m_liftedEikonal.meeting_plane);
+				view->plane_offset = -(view->plane_normal.first.x * view->plane_normal.second.x + view->plane_normal.first.y * view->plane_normal.second.y + view->plane_normal.first.z * view->plane_normal.second.z);
+				view->m_threadactivated = 2;
+				view->Invalidate(FALSE);
+				
 			}
 
 		}
 		else if (view->m_threadactivated == 2) {
-			view->m_liftedEikonal.m_inicountourCalculator.GetDistancemean(view->m_liftedEikonal.m_phasefield.m_distance[0], view->m_liftedEikonal.m_phasefield.m_distance[1]);
+			view->m_liftedEikonal.m_inicountourCalculator.GetDistancemean(view->m_liftedEikonal.m_phasefield.m_combined_distance, view->plane_normal.first.x);
 			Sleep(300);
 			if (view->m_liftedEikonal.m_inicountourCalculator.m_bInited)
 				view->m_threadactivated = 3;

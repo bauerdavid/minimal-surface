@@ -20,12 +20,24 @@ struct IPoi {
 	IPoi():x(0),y(0) {}
 	IPoi(int xx, int yy):x(xx),y(yy) {}
 };
+template<typename T>
 struct IPoi3 {
-	int x;
-	int y;
-	int z;
-	IPoi3():x(0),y(0),z(0) {}
-	IPoi3(int xx, int yy, int zz):x(xx),y(yy),z(zz) {}
+	T x;
+	T y;
+	T z;
+	IPoi3():x(T()),y(T()),z(T()) {}
+	IPoi3(T xx, T yy, T zz):x(xx),y(yy),z(zz) {}
+	bool operator==(const IPoi3<T>& p) const {
+		return this->x == p.x && this->y == p.y && this->z == p.z;
+	}
+};
+
+template<typename T>
+struct IPoi3Hash {
+public:
+	size_t operator()(const IPoi3<T>& p) const {
+		return ((((long) p.x) * 73856093) ^ (((long) p.y) * 19349663) ^ (((long)p.z) * 83492791)) % 1000000;
+	}
 };
 
 struct SCurvatureTest {
@@ -52,7 +64,7 @@ public:
 	SWorkImg<realnum> m_field2D;
 	SWorkImg<realnum> m_velo2D;
 	// get the distance gradients along the selected x slice from the two neighboring slices
-	void GetDistancemean(SVoxImg<SWorkImg<realnum>> &distance, SVoxImg<SWorkImg<realnum>>& counterdistance);
+	void GetDistancemean(SVoxImg<SWorkImg<realnum>> &distance, int xslice);
 	void Iterate();
 	std::unordered_set<unsigned long> m_bound;
 	// collects bounding points into a set
@@ -75,6 +87,7 @@ public:
 	//SVoxImg<SWorkImg<realnum>> m_Hessian[6];
 
 	SVoxImg<SWorkImg<realnum>> m_distance[2];
+	SVoxImg<SWorkImg<realnum>> m_combined_distance;
 
 	// expansion
 
@@ -86,13 +99,13 @@ public:
 	SVoxImg<SWorkImg<realnum>> m_field[2];
 	//SVoxImg<SWorkImg<realnum>> m_gradlen;
 	//SVoxImg<SWorkImg<realnum>> m_n[3];
-	SVoxImg<SWorkImg<realnum>> m_aux;
-	SVoxImg<SWorkImg<realnum>> m_smoothaux[2];
-	SVoxImg<SWorkImg<realnum>> m_smoothaux2[2];
-	SVoxImg<SWorkImg<realnum>> m_smoothdist[2];
+	SVoxImg<SWorkImg<realnum>> m_aux; // temp
+	SVoxImg<SWorkImg<realnum>> m_smoothaux[2]; // temp
+	SVoxImg<SWorkImg<realnum>> m_smoothaux2[2]; // temp
+	SVoxImg<SWorkImg<realnum>> m_smoothdist[2]; // temp
 
-	SVoxImg<SWorkImg<realnum>> m_velo;
-	// Data driver
+	SVoxImg<SWorkImg<realnum>> m_velo[2];
+	// Image data
 	SVoxImg<SWorkImg<realnum>> m_data;
 };
 
@@ -114,8 +127,11 @@ public:
 	void SmoothDistanceMap(int i = 0);
 	// Calculate fundamental quantities, like distance gradient, sum curvature and thick state(?)
 	void CalculateFundQuant(int i = 0, int test = 0);
+	realnum CCurvEikonal::UpdateVelo(int i);
+	void CCurvEikonal::UpdateField(int i, realnum maxv);
+	void CCurvEikonal::UpdateDistance(int i);
 	// Update velocity, then phase field based on velocity, and distance map, where phase field passes threshold value
-	void Iterate(int i = 0);
+	void Iterate();
 	realnum m_currentdistance[2];
 	CVec3 m_reference[2];
 	void ResolvePath(realnum x, realnum y, realnum z, bool bClear = true, int i = 0, int j = 0);
@@ -123,10 +139,8 @@ public:
 	std::vector<CVec3> m_minpath[2][MAXMINPATH];
 
 	/**/
-	int m_resolvready;
-	int m_inittype;
 	bool m_bdone;
-	IPoi3 m_distanceto;
+	IPoi3<int> m_distanceto;
 
 	int m_j[2];
 	std::vector<CVec3> m_boundcontour;
@@ -151,5 +165,6 @@ public:
 	// test
 	std::vector<SCurvatureTest> m_ctest;
 	// not used
-
+	std::unordered_set<IPoi3<double>, IPoi3Hash<double>> meeting_plane;
+	SVoxImg<SWorkImg<int>> meeting_plane_positions;
 };

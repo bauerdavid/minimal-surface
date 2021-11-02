@@ -39,6 +39,9 @@
     <ClCompile Include="Transport.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="FitPlane.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="AreaEikonal.h">
@@ -74,6 +77,9 @@
     <ClInclude Include="Transport.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="FitPlane.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <Image Include="res\MinArea.ico">
@@ -89,6 +95,7 @@
     <None Include="res\MinArea.rc2">
       <Filter>Resource Files</Filter>
     </None>
+    <None Include="packages.config" />
   </ItemGroup>
   <ItemGroup>
     <Text Include="ReadMe.txt" />

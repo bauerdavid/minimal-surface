@@ -1,9 +1,12 @@
 #include "StdAfx.h"
 #include "AreaEikonal.h"
 #include "math.h"
+#include <omp.h>
 
 #define BIG_NUMBER 1e11
-
+#define MAX_THREADS 32
+const int max_threads = omp_get_max_threads();
+int a = 0;
 CCurvEikonal::CCurvEikonal(void)
 {
 	m_valid = 0;
@@ -38,7 +41,7 @@ void CCurvEikonal::PhaseInit(IPoi reginit, IPoi arrival, int zdeparture, int zar
 	m_phasefield.m_thicknes[1].Set(spacex,spacey,spacez);
 	m_phasefield.m_Sumcurvature[0].Set0(spacex,spacey,spacez);
 	m_phasefield.m_Sumcurvature[1].Set0(spacex,spacey,spacez);
-
+	meeting_plane_positions.Set0(spacex, spacey, spacez);
 	// expansion
 	m_phasefield.m_distgrad[0][0].Set0(spacex,spacey,spacez);
 	m_phasefield.m_distgrad[0][1].Set0(spacex,spacey,spacez);
@@ -57,8 +60,10 @@ void CCurvEikonal::PhaseInit(IPoi reginit, IPoi arrival, int zdeparture, int zar
 	m_phasefield.m_field[1].Set(spacex,spacey,spacez);
 	m_phasefield.m_distance[0].Set(spacex,spacey,spacez);
 	m_phasefield.m_distance[1].Set(spacex,spacey,spacez);
+	m_phasefield.m_combined_distance.Set(spacex, spacey, spacez);
 
-	m_phasefield.m_velo.Set0(spacex,spacey,spacez);
+	m_phasefield.m_velo[0].Set0(spacex,spacey,spacez);
+	m_phasefield.m_velo[1].Set0(spacex, spacey, spacez);
 	m_phasefield.m_aux.Set0(spacex,spacey,spacez);
 	m_phasefield.m_smoothdist[0].Set(spacex,spacey,spacez);
 	m_phasefield.m_smoothdist[1].Set(spacex,spacey,spacez);
@@ -123,10 +128,10 @@ void CCurvEikonal::PhaseInit(IPoi reginit, IPoi arrival, int zdeparture, int zar
 					realnum dd = (realnum)(dx*dx+dy*dy+dz*dz);
 					if ((int)dd < 10*10/1/*4 hs*hs/4*/) {
 						//TODO: initialize the two starting points on different distance maps (instead of [0]: [ii])
-						m_phasefield.m_field[0][zz][yy][xx] = 1.0; // ii->0
+						m_phasefield.m_field[ii][zz][yy][xx] = 1.0; // ii->0
 						dd = sqrt(dd);
-						m_phasefield.m_distance[0][zz][yy][xx] = dd; // ii->0
-						m_phasefield.m_thicknes[0][zz][yy][xx] = 1.0; // ii->0
+						m_phasefield.m_distance[ii][zz][yy][xx] = dd; // ii->0
+						m_phasefield.m_thicknes[ii][zz][yy][xx] = 1.0; // ii->0
 						if (m_currentdistance[ii] < dd) m_currentdistance[ii] = dd;
 						
 						// curvatures
@@ -142,30 +147,12 @@ void CCurvEikonal::PhaseInit(IPoi reginit, IPoi arrival, int zdeparture, int zar
 	}
 
 	for (int ii = 0; ii < 10-10; ++ii) {
-		RegularizePhaseField(m_phasefield.m_field[0],m_phasefield.m_velo);
-		RegularizePhaseField(m_phasefield.m_field[1],m_phasefield.m_velo);
+		RegularizePhaseField(m_phasefield.m_field[0],m_phasefield.m_velo[0]);
+		RegularizePhaseField(m_phasefield.m_field[1],m_phasefield.m_velo[1]);
 	}
 	m_phasefield.m_aux[0] = 0;
 	m_phasefield.m_aux[1] = 0;
 
-	m_inittype = arrival.x > 0 ? 2:1;
-
-	// new
-	if (xSection > 0/*arrival.x < 0 && zarrival > 0*/) { // designated x plane
-
-		for (int zz = 0; zz < spacez; ++zz) {
-			for (int yy = 0; yy < spacey; ++yy) {
-				//for (int xx = zarrival+1; xx < spacex; ++xx) {
-				//	m_phasefield.m_distance[1][zz][yy][xx] = 1e11;
-				//}
-				//TODO: this will be responsible for extracting the transform function from the selected x coordinate. If this is corrected, this is not needed
-				m_phasefield.m_distance[1][zz][yy][xSection] = BIG_NUMBER;
-			}
-		}
-		m_inittype = 3;
-
-	}
-	// new
 
 	m_reference[0].x = (realnum)reginit.x;
 	m_reference[0].y = (realnum)reginit.y;
@@ -174,8 +161,7 @@ void CCurvEikonal::PhaseInit(IPoi reginit, IPoi arrival, int zdeparture, int zar
 	m_reference[1].y = (realnum)arrival.y;
 	m_reference[1].z = (realnum)zarrival;
 
-	m_distanceto = IPoi3(arrival.x,arrival.y,zarrival);
-	m_resolvready = 0; // arrival bumping
+	m_distanceto = IPoi3<int>(arrival.x,arrival.y,zarrival);
 
 	m_bdone = false;
 }
@@ -233,36 +219,40 @@ void CCurvEikonal::RegularizePhaseField(SVoxImg<SWorkImg<realnum>> &field, SVoxI
 
 void CCurvEikonal::SmoothDistanceMap(int i)
 {
-	SVoxImg<SWorkImg<realnum>> &sou = m_phasefield.m_distance[i]; // source
-	SVoxImg<SWorkImg<realnum>> &aux2 = m_phasefield.m_smoothaux2[i];
-	SVoxImg<SWorkImg<realnum>> &aux = m_phasefield.m_smoothaux[i];
-	SVoxImg<SWorkImg<realnum>> &out = m_phasefield.m_smoothdist[i]; // output
+	int j = 0;
+	// int j = i;
+	SVoxImg<SWorkImg<realnum>> &sou1 = m_phasefield.m_distance[i]; // source
+	SVoxImg<SWorkImg<realnum>>& sou2 = m_phasefield.m_distance[(i+1)%2]; // source
+	SVoxImg<SWorkImg<realnum>> &aux2 = m_phasefield.m_smoothaux2[j];
+	SVoxImg<SWorkImg<realnum>> &aux = m_phasefield.m_smoothaux[j];
+	SVoxImg<SWorkImg<realnum>> &out = m_phasefield.m_smoothdist[j]; // output
 	
-	SVoxImg<SWorkImg<int>> &smstat = m_phasefield.m_smoothstate[i];
+	SVoxImg<SWorkImg<int>> &smstat = m_phasefield.m_smoothstate[j];
 
-	int xs = sou.xs, ys = sou.ys, zs = sou.zs;
+	int xs = sou1.xs, ys = sou1.ys, zs = sou1.zs;
 
-	#pragma omp parallel for
+	#pragma omp parallel for collapse(3)
 	for (int zz = 0; zz < zs; ++zz) {
 		for (int yy = 0; yy < ys; ++yy) {
 			for (int xx = 0; xx < xs; ++xx) {
 				int smst = smstat[zz][yy][xx];
 				if (smst > 0) continue;
 				smstat[zz][yy][xx] = -2;
-				if (sou[zz][yy][xx] < 0) {
-					aux[zz][yy][xx] = sou[zz][yy][xx];
+				if (sou1[zz][yy][xx] < 0 && sou2[zz][yy][xx] < 0) {
+					aux[zz][yy][xx] = sou1[zz][yy][xx];
 					continue;
 				}
 				int xm(xx-1); if (xm == -1) xm = 1;
 				int xp(xx+1); if (xp == xs) xp = xs-2;
-				realnum s  = sou[zz][yy][xx]; int w = 0;
-				realnum comp = sou[zz][yy][xp];
+				realnum s  = sou1[zz][yy][xx] >= 0 ? sou1[zz][yy][xx] : sou2[zz][yy][xx];
+				int w = 0;
+				realnum comp = sou1[zz][yy][xp] >= 0 ? sou1[zz][yy][xp] : sou2[zz][yy][xp];
 				if (comp >= 0) { s += comp; ++w; }
-				comp = sou[zz][yy][xm];
+				comp = sou1[zz][yy][xm] >= 0 ? sou1[zz][yy][xm] : sou2[zz][yy][xm];
 				if (comp >= 0) { s += comp; ++w; }
 				if (!w) aux[zz][yy][xx] = s;
 				else {
-					s += sou[zz][yy][xx];
+					s += sou1[zz][yy][xx] >= 0 ? sou1[zz][yy][xx] : sou2[zz][yy][xx];
 					if (w == 1) aux[zz][yy][xx] = (1.0/3.0)*s;
 					else {
 						aux[zz][yy][xx] = 0.25*s;
@@ -272,12 +262,12 @@ void CCurvEikonal::SmoothDistanceMap(int i)
 			}
 		}
 	}
-	#pragma omp parallel for
+	#pragma omp parallel for collapse(3)
 	for (int zz = 0; zz < zs; ++zz) {
 		for (int yy = 0; yy < ys; ++yy) {
-			int ym(yy-1); if (ym == -1) ym = 1;
-			int yp(yy+1); if (yp == ys) yp = ys-2;
 			for (int xx = 0; xx < xs; ++xx) {
+				int ym(yy - 1); if (ym == -1) ym = 1;
+				int yp(yy + 1); if (yp == ys) yp = ys - 2;
 				int smst = smstat[zz][yy][xx];
 				if (smst > 0) continue; 
 				if (aux[zz][yy][xx] < 0) {
@@ -301,12 +291,12 @@ void CCurvEikonal::SmoothDistanceMap(int i)
 			}
 		}
 	}
-	#pragma omp parallel for
+	#pragma omp parallel for collapse(3)
 	for (int zz = 0; zz < zs; ++zz) {
-		int zm(zz-1); if (zm == -1) zm = 1;
-		int zp(zz+1); if (zp == zs) zp = zs-2;
 		for (int yy = 0; yy < ys; ++yy) {
 			for (int xx = 0; xx < xs; ++xx) {
+				int zm(zz - 1); if (zm == -1) zm = 1;
+				int zp(zz + 1); if (zp == zs) zp = zs - 2;
 				int smst = smstat[zz][yy][xx];
 				if (smst > 0) continue; 
 				if (aux2[zz][yy][xx] < 0) {
@@ -336,14 +326,16 @@ void CCurvEikonal::SmoothDistanceMap(int i)
 
 void CCurvEikonal::CalculateFundQuant(int i, int test)
 {
-	SVoxImg<SWorkImg<int>> &thstat = m_phasefield.m_thickstate[i];
-	SVoxImg<SWorkImg<realnum>> &Sum = m_phasefield.m_Sumcurvature[i];
-	SVoxImg<SWorkImg<realnum>> &unx = m_phasefield.m_distgrad[i][0];
-	SVoxImg<SWorkImg<realnum>> &uny = m_phasefield.m_distgrad[i][1];
-	SVoxImg<SWorkImg<realnum>> &unz = m_phasefield.m_distgrad[i][2];
+	int j = 0;
+	// int j = i;
+	SVoxImg<SWorkImg<int>> &thstat = m_phasefield.m_thickstate[j];
+	SVoxImg<SWorkImg<realnum>> &Sum = m_phasefield.m_Sumcurvature[j];
+	SVoxImg<SWorkImg<realnum>> &unx = m_phasefield.m_distgrad[j][0];
+	SVoxImg<SWorkImg<realnum>> &uny = m_phasefield.m_distgrad[j][1];
+	SVoxImg<SWorkImg<realnum>> &unz = m_phasefield.m_distgrad[j][2];
 
-	SmoothDistanceMap(i);	SVoxImg<SWorkImg<realnum>>& distance = m_phasefield.m_smoothdist[i]; // m_phasefield.m_distance[i];
-	SVoxImg<SWorkImg<int>>& smstat = m_phasefield.m_smoothstate[i];
+	SmoothDistanceMap(i);	SVoxImg<SWorkImg<realnum>>& distance = m_phasefield.m_smoothdist[j]; // m_phasefield.m_distance[i];
+	SVoxImg<SWorkImg<int>>& smstat = m_phasefield.m_smoothstate[j];
 
 	int xs = distance.xs, ys = distance.ys, zs = distance.zs;
 
@@ -353,14 +345,14 @@ void CCurvEikonal::CalculateFundQuant(int i, int test)
 	static int nsh; nsh = 0;
 	//int ign(0), ian(0);
 
-	#pragma omp parallel for
+	#pragma omp parallel for collapse(3)
 	for (int zz = 0; zz < zs; ++zz) {
-		int zm(zz-1); if (zm == -1) zm = 1;
-		int zp(zz+1); if (zp == zs) zp = zs-2;
 		for (int yy = 0; yy < ys; ++yy) {
-			int yp(yy+1); if (yp == ys) yp = ys-2;
-			int ym(yy-1); if (ym == -1) ym = 1;
 			for (int xx = 0; xx < xs; ++xx) {
+				int zm(zz - 1); if (zm == -1) zm = 1;
+				int zp(zz + 1); if (zp == zs) zp = zs - 2;
+				int yp(yy + 1); if (yp == ys) yp = ys - 2;
+				int ym(yy - 1); if (ym == -1) ym = 1; 
 				int xp(xx+1); if (xp == xs) xp = xs-2;
 				int xm(xx-1); if (xm == -1) xm = 1;
 
@@ -447,200 +439,251 @@ void CCurvEikonal::CalculateFundQuant(int i, int test)
 
 bool g_modeswitch = false;
 
-void CCurvEikonal::Iterate(int i)
-{
-	// m_phasefield.m_field[i]
-	SVoxImg<SWorkImg<realnum>> &field = m_phasefield.m_field[i];
+realnum CCurvEikonal::UpdateVelo(int i) {
+	SVoxImg<SWorkImg<realnum>>& field = m_phasefield.m_field[i];
+
+	SVoxImg<SWorkImg<realnum>>& counterfield = m_phasefield.m_field[(i + 1) % 2];
 
 	// m_phasefield.m_velo
-	SVoxImg<SWorkImg<realnum>> &velo = m_phasefield.m_velo;
-
+	SVoxImg<SWorkImg<realnum>>& velo = m_phasefield.m_velo[i];
+	//I guess here we should use the same data for both processes
+	int j = 0;
+	//int j = i;
 	// m_phasefield.m_distance[i]
-	SVoxImg<SWorkImg<realnum>> &distance = m_phasefield.m_distance[i];
+	SVoxImg<SWorkImg<realnum>>& distance = m_phasefield.m_distance[i];
 
 	// m_phasefield.m_distance[(i+1)&1]
-	SVoxImg<SWorkImg<realnum>> &counterd = m_phasefield.m_distance[(i+1)&1];
+	SVoxImg<SWorkImg<realnum>>& counterd = m_phasefield.m_distance[(i + 1) & 1];
 
 	// m_phasefield.m_data
-	SVoxImg<SWorkImg<realnum>> &data = m_phasefield.m_data;
+	SVoxImg<SWorkImg<realnum>>& data = m_phasefield.m_data;
 
 	// m_phasefield.m_Sumcurvature[i]
-	SVoxImg<SWorkImg<realnum>> &Sum = m_phasefield.m_Sumcurvature[i];
+	SVoxImg<SWorkImg<realnum>>& Sum = m_phasefield.m_Sumcurvature[j];
 
 	// m_phasefield.m_thicknes[i]
-	SVoxImg<SWorkImg<realnum>> &thick = m_phasefield.m_thicknes[i];
+	SVoxImg<SWorkImg<realnum>>& thick = m_phasefield.m_thicknes[j];
 
 	// m_phasefield.m_distgrad[i][0]
-	SVoxImg<SWorkImg<realnum>> &unx = m_phasefield.m_distgrad[i][0];
+	SVoxImg<SWorkImg<realnum>>& unx = m_phasefield.m_distgrad[j][0];
 
 	// m_phasefield.m_distgrad[i][1]
-	SVoxImg<SWorkImg<realnum>> &uny = m_phasefield.m_distgrad[i][1];
+	SVoxImg<SWorkImg<realnum>>& uny = m_phasefield.m_distgrad[j][1];
 
 	// m_phasefield.m_distgrad[i][2]
-	SVoxImg<SWorkImg<realnum>> &unz = m_phasefield.m_distgrad[i][2];
+	SVoxImg<SWorkImg<realnum>>& unz = m_phasefield.m_distgrad[j][2];
 
 	// m_phasefield.m_thickstate[i]
-	SVoxImg<SWorkImg<int>> &thstat = m_phasefield.m_thickstate[i];
+	SVoxImg<SWorkImg<int>>& thstat = m_phasefield.m_thickstate[j];
 
 	int xs = field.xs, ys = field.ys, zs = field.zs;
 
 	////////////////////////////////////////////////////////////////////
 	// fundamental quantities
 	////////////////////////////////////////////////////////////////////
-	
+
 	CalculateFundQuant(i); // for object-level evolution
 
 	////////////////////////////////////////////////////////////////////
 	// evolution logic
 	////////////////////////////////////////////////////////////////////
-
+	typedef struct {
+		double val;
+		char pad[128];
+	} tvals;
+	tvals maxinfo[MAX_THREADS];
 	realnum maxv(0);
+	unsigned long counts[MAX_THREADS];
+	for (int i = 0; i < MAX_THREADS; i++) {
+		maxinfo[i].val = 0;
+		counts[i] = 0;
 
-	int ites(0);
-
+	}
 	// Inhomogeneous
 	// Calculate the velocity at every point (velo[zz][yy][xx]), and the maximum velocity (maxv)
-	#pragma omp parallel for shared(maxv)
-	for (int zz = 1; zz < zs-1; ++zz) {
-		int zp = zz+1, zm = zz-1;
-		for (int yy = 1; yy < ys-1; ++yy) {
-			int yp = yy+1, ym = yy-1;
-			for (int xx = 1; xx < xs-1; ++xx) {
-
-				velo[zz][yy][xx] = 0; // zero out
-				if (counterd[zz][yy][xx] >= 0) continue;
-				int xp = xx+1, xm = xx-1;
-
-				if (!(distance[zz][yp][xx] >= 0 || distance[zz][ym][xx] >= 0
-					|| distance[zz][yy][xp] >= 0 || distance[zz][yy][xm] >= 0
-					|| distance[zp][yy][xx] >= 0 || distance[zm][yy][xx] >= 0)) continue;
-			
-				 
-				if (field[zz][yy][xx] >= 0.95) continue;
-				
-				realnum xn = field[zz][yy][xp]-field[zz][yy][xm];
-				realnum yn = field[zz][yp][xx]-field[zz][ym][xx];
-				realnum zn = field[zp][yy][xx]-field[zm][yy][xx];
-				realnum gradlen = sqrt(xn*xn+yn*yn+zn*zn+1e-99);
-						
-
-				realnum sumcur(0.0);
-				
-				//Sum[zz][yy][xx] = 0;
-				realnum wAct(0.0);
-				int iok = -1;
-				for (int rr = 1; rr <= 25; ++rr) {
-					for (int iz = -rr; iz <= rr; ++iz) {
-						for (int iy = -rr; iy <= rr; ++iy) {
-							for (int ix = -rr; ix <= rr; ++ix) {
-								if (!ix && !iy && !iz) continue;
-								realnum r2 = (realnum)ix*ix + (realnum)iy*iy + (realnum)iz * iz;
-
-								if (r2 <= rr*rr) {
-									int pz = zz+iz; if (pz < 1) pz = 1; if (pz > zs-2) pz = zs-2;
-									int py = yy+iy; if (py < 1) py = 1; if (py > ys-2) py = ys-2;
-									int px = xx+ix; if (px < 1) px = 1; if (px > xs-2) px = xs-2;
-									if (thstat[pz][py][px] < 0) continue;
-									realnum dot = unx[pz][py][px]*ix+uny[pz][py][px]*iy+unz[pz][py][px]*iz;
-									dot *= -1;
-									if (dot < 0.82) continue;
-									++iok; if (dot > 0.94) ++iok;
-									wAct += dot/r2;
-									sumcur += (dot/r2)*Sum[pz][py][px];
-								}
-
-
-							} // for ix
-						} // for iy
-					}// for iz
-					if (wAct > 0 && iok > 0) {
-						/*Gau[zz][yy][xx] = gcw / wAct;
-						Sum[zz][yy][xx] = sumcur/wAct;
-						++g_rr[rr];*/
-						sumcur /= wAct;
-						break;
+	velo.Set0(xs, ys, zs);
+	{
+#pragma omp parallel for collapse(3) shared(maxinfo)
+		for (int zz = 1; zz < zs - 1; ++zz) {
+			for (int yy = 1; yy < ys - 1; ++yy) {
+				for (int xx = 1; xx < xs - 1; ++xx) {
+					int id = omp_get_thread_num();
+					counts[id]++;
+					// velo[zz][yy][xx] = 0; // zero out
+					/*IPoi3<int>* pos = new IPoi3(xx, yy, zz);
+					bool should_run = true;
+					#pragma omp critical(meeting_plane)
+					if (meeting_plane.count(*pos)) {
+						delete pos;
+						should_run = false;
 					}
+					if (!should_run) continue;
+					delete pos;*/
+					if (meeting_plane_positions[zz][yy][xx]) {
+						continue;
+					}
+					int zp = zz + 1, zm = zz - 1;
+					int yp = yy + 1, ym = yy - 1;
+					int xp = xx + 1, xm = xx - 1;
 
-				} // for rr
+					if (distance[zz][yp][xx] < 0 && distance[zz][ym][xx] < 0
+						&& distance[zz][yy][xp] < 0 && distance[zz][yy][xm] < 0
+						&& distance[zp][yy][xx] < 0 && distance[zm][yy][xx] < 0) continue;
 
-				realnum eikon = data[zz][yy][xx];
 
-				realnum d0 = data[zz][yy][xx];
-				if (d0 < 1e-33) d0 = 1e-33;
+					if (field[zz][yy][xx] >= 0.95) continue;
 
-				realnum squar = -1.0;
-				realnum discr = 1 + 4 * sumcur * d0 * 1;// *gradlen;
+					if (counterd[zz][yy][xx] >= 0) {
+						// meeting_plane.insert(IPoi3<int>(xx, yy, zz));
+						if ((distance[zz][yp][xx] >= 0 && !meeting_plane_positions[zz][yp][xx])
+							|| (distance[zz][ym][xx] >= 0 && !meeting_plane_positions[zz][ym][xx])
+							|| (distance[zz][yy][xp] >= 0 && !meeting_plane_positions[zz][yy][xp])
+							|| (distance[zz][yy][xm] >= 0 && !meeting_plane_positions[zz][yy][xm])
+							|| (distance[zp][yy][xx] >= 0 && !meeting_plane_positions[zp][yy][xx])
+							|| (distance[zm][yy][xx] >= 0 && !meeting_plane_positions[zm][yy][xx]))
+							meeting_plane_positions[zz][yy][xx] = 1;
+						continue;
+					}
+					realnum xn = field[zz][yy][xp] - field[zz][yy][xm];
+					realnum yn = field[zz][yp][xx] - field[zz][ym][xx];
+					realnum zn = field[zp][yy][xx] - field[zm][yy][xx];
+					realnum gradlen = sqrt(xn * xn + yn * yn + zn * zn + 1e-99);
 
-				if (abs(sumcur) > 1e-33) {
-					squar = -1.0+sqrt(discr);
-					squar /= 2*sumcur;
-				}
-				else {
-					squar = d0;
-				}
-						
-				if (g_modeswitch) {
-					//realnum den = 1.0 + sumcur/1.2; if (den < 1e-6) den = 1e-6;	eikon = data[zz][yy][xx]/den;
-					if (squar > 0) {
-						eikon = squar;
-						//eikon *= exp(-sumcur); // best
+
+					realnum sumcur(0.0);
+
+					//Sum[zz][yy][xx] = 0;
+					realnum wAct(0.0);
+					int iok = -1;
+					for (int rr = 1; rr <= 25; ++rr) {
+						for (int iz = -rr; iz <= rr; ++iz) {
+							for (int iy = -rr; iy <= rr; ++iy) {
+								for (int ix = -rr; ix <= rr; ++ix) {
+									if (!ix && !iy && !iz) continue;
+									realnum r2 = (realnum)ix * ix + (realnum)iy * iy + (realnum)iz * iz;
+
+									if (r2 <= rr * rr) {
+										int pz = zz + iz; if (pz < 1) pz = 1; if (pz > zs - 2) pz = zs - 2;
+										int py = yy + iy; if (py < 1) py = 1; if (py > ys - 2) py = ys - 2;
+										int px = xx + ix; if (px < 1) px = 1; if (px > xs - 2) px = xs - 2;
+										if (thstat[pz][py][px] < 0) continue;
+										realnum dot = unx[pz][py][px] * ix + uny[pz][py][px] * iy + unz[pz][py][px] * iz;
+										dot *= -1;
+										if (dot < 0.82) continue;
+										++iok; if (dot > 0.94) ++iok;
+										wAct += dot / r2;
+										sumcur += (dot / r2) * Sum[pz][py][px];
+									}
+
+
+								} // for ix
+							} // for iy
+						}// for iz
+						if (wAct > 0 && iok > 0) {
+							/*Gau[zz][yy][xx] = gcw / wAct;
+							Sum[zz][yy][xx] = sumcur/wAct;
+							++g_rr[rr];*/
+							sumcur /= wAct;
+							break;
+						}
+
+					} // for rr
+
+					realnum eikon = data[zz][yy][xx];
+
+					realnum d0 = data[zz][yy][xx];
+					if (d0 < 1e-33) d0 = 1e-33;
+
+					realnum squar = -1.0;
+					realnum discr = 1 + 4 * sumcur * d0 * 1;// *gradlen;
+
+					if (abs(sumcur) > 1e-33) {
+						squar = -1.0 + sqrt(discr);
+						squar /= 2 * sumcur;
 					}
 					else {
-						eikon = data[zz][yy][xx];
+						squar = d0;
 					}
-				}
-				else 
-					eikon = data[zz][yy][xx];
 
-				eikon *= gradlen; // normalize
-				if (eikon < 1e-11) eikon = 1e-11;
-				velo[zz][yy][xx] = eikon; // dS = 1
+					if (g_modeswitch) {
+						//realnum den = 1.0 + sumcur/1.2; if (den < 1e-6) den = 1e-6;	eikon = data[zz][yy][xx]/den;
+						if (squar > 0) {
+							eikon = squar;
+							//eikon *= exp(-sumcur); // best
+						}
+						else {
+							eikon = data[zz][yy][xx];
+						}
+					}
+					else
+						eikon = data[zz][yy][xx];
 
-				#pragma omp critical
-				{
-				if (eikon > maxv) maxv = eikon;
-				if (++ites >= 9999) ites = 0;
-				}
+					eikon *= gradlen; // normalize
+					if (eikon < 1e-11) eikon = 1e-11;
+					velo[zz][yy][xx] = eikon; // dS = 1
 
-				
-			
-				//loop body
-			} //for xx
-		} // for yy
-	} // for zz
+					/*#pragma omp critical(meeting_plane)
+					{
+						if (eikon > maxv) maxv = eikon;
+						if (counterd[zz][yy][xx] >= 0) {
+							// meeting_plane.insert(IPoi3<int>(xx, yy, zz));
+							meeting_plane_positions[zz][yy][xx] = 1;
+						}
+					}*/
+					if (eikon > maxinfo[id].val) maxinfo[id].val = eikon;
+					if (counterd[zz][yy][xx] >= 0) {
+						// meeting_plane.insert(IPoi3<int>(xx, yy, zz));
+						meeting_plane_positions[zz][yy][xx] = 1;
+					}
 
-	
-	
+					//loop body
+				} //for xx
+			} // for yy
+		} // for zz
+		for (int i = 0; i < MAX_THREADS; i++) {
+			if (maxinfo[i].val > maxv)
+				maxv = maxinfo[i].val;
+		}
+		for (int i = 0; i < MAX_THREADS; i++)
+			counts[i] = 0;
+	}
+
+
+
 	////////////////////////////////////////////////////////////////////
 	// conditioning (speed limitation)
 	////////////////////////////////////////////////////////////////////
-	if (maxv < 1e-11) maxv = 1e-11;
+	return maxv;
+}
+void CCurvEikonal::UpdateField(int i, realnum maxv) {
+	SVoxImg<SWorkImg<realnum>>& field = m_phasefield.m_field[i];
+	SVoxImg<SWorkImg<realnum>>& velo = m_phasefield.m_velo[i];
 
-	realnum mdatspedmax = 0.5 *4; //*2 set max speed
-	maxv = mdatspedmax/maxv;
-	m_currentdistance[i] += maxv;
-	//m_currentdistance[i] += 1;
-
-	// update phase field values
-	#pragma omp parallel for
-	for (int zz = 1; zz < zs-1; ++zz) {
-		for (int yy = 0+1; yy < ys-1; ++yy) {
-			for (int xx = 0+1; xx < xs-1; ++xx) {
-				field[zz][yy][xx] += velo[zz][yy][xx]*maxv;// ;
+	int xs = field.xs, ys = field.ys, zs = field.zs;
+#pragma omp parallel for
+	for (int zz = 1; zz < zs - 1; ++zz) {
+		for (int yy = 0 + 1; yy < ys - 1; ++yy) {
+			for (int xx = 0 + 1; xx < xs - 1; ++xx) {
+				field[zz][yy][xx] += velo[zz][yy][xx] * maxv;// ;
 				if (field[zz][yy][xx] > 1.25) field[zz][yy][xx] = 1.25;
 			}
 		}
 	}
+}
+void CCurvEikonal::UpdateDistance(int i) {
+	SVoxImg<SWorkImg<realnum>>& field = m_phasefield.m_field[i];
+	// m_phasefield.m_distance[i]
+	SVoxImg<SWorkImg<realnum>>& distance = m_phasefield.m_distance[i];
 
-	m_bdone = true;
-	// TODO: check for collision
-	// updating the distance map to the current value, and checking if it is complete
-	#pragma omp parallel for
+	// m_phasefield.m_distance[(i+1)&1]
+	SVoxImg<SWorkImg<realnum>>& counterd = m_phasefield.m_distance[(i + 1) & 1];
+	int xs = field.xs, ys = field.ys, zs = field.zs;
+#pragma omp parallel for
 	for (int zz = 1; zz < zs - 1; ++zz) {
-		for (int yy = 0+1; yy < ys-1; ++yy) {
-			for (int xx = 0+1; xx < xs-1; ++xx) {
+		for (int yy = 0 + 1; yy < ys - 1; ++yy) {
+			for (int xx = 0 + 1; xx < xs - 1; ++xx) {
 				if (field[zz][yy][xx] > 0 && distance[zz][yy][xx] < -0.5f) {
-					distance[zz][yy][xx] = m_currentdistance[i];
+					distance[zz][yy][xx] = m_currentdistance[0];
 				}
 				if (distance[zz][yy][xx] < -0.5f && counterd[zz][yy][xx] < -0.5f) {
 					m_bdone = false;
@@ -648,31 +691,46 @@ void CCurvEikonal::Iterate(int i)
 			}
 		}
 	}
+}
+void CCurvEikonal::Iterate()
+{
+	SVoxImg<SWorkImg<realnum>>& field = m_phasefield.m_field[0];
+	int xs = field.xs, ys = field.ys, zs = field.zs;
+	// m_phasefield.m_field[i]
+	realnum maxv0 = UpdateVelo(0);
+	realnum maxv1 = UpdateVelo(1);
+	realnum maxv = max(maxv0, maxv1);
+	if (maxv < 1e-11) maxv = 1e-11;
+
+	realnum mdatspedmax = 0.5 * 4; //*2 set max speed
+	maxv = mdatspedmax / maxv;
+	m_currentdistance[0] += maxv;
+	m_currentdistance[1] += maxv;
+	//m_currentdistance[i] += 1;
+
+	// update phase field values
+	UpdateField(0, maxv);
+	UpdateField(1, maxv);
+	m_bdone = true;
+	UpdateDistance(0);
+	UpdateDistance(1);
+	// TODO: check for collision
+	// updating the distance map to the current value, and checking if it is complete
+	
 	////////////////////////////////////////////////////////////////////
 	// phase field regularization w/o velocity zeroed out
 	////////////////////////////////////////////////////////////////////
 
-	if (m_inittype == 2) { 
-		if (field[m_distanceto.z][m_distanceto.y][m_distanceto.x] > 0.9f) {
-			++m_resolvready; 
-		}
-	}
+
 }
 
 // only for xslice
-void CPlanePhaseField::GetDistancemean(SVoxImg<SWorkImg<realnum>>& distance, SVoxImg<SWorkImg<realnum>>& counterdistance)
+void CPlanePhaseField::GetDistancemean(SVoxImg<SWorkImg<realnum>>& distance, int xslice)
 {
 	//TODO: instead of searching for the selected x slice, locate the meeting surface of the two processes, and use that
 	int xs = distance.xs, ys = distance.ys, zs = distance.zs;
 	m_nall = m_npos = 0;
 	m_bInited = false;
-	int xslice(0);
-	for (int xx = 1; xx < xs - 1; ++xx) {
-		if (counterdistance[zs / 2][ys / 2][xx] > 0) {
-			xslice = xx;
-			break;
-		}
-	}
 	if (!xslice) return;
 
 	m_gx2D.Set(ys, zs, 0.0f);
@@ -858,8 +916,6 @@ void CCurvEikonal::ResolvePath(realnum x, realnum y, realnum z, bool bClear, int
 
 void CCurvEikonal::ResolvePath(int i)
 {
-	m_inittype = 0; 
-	m_resolvready = 0;
 	ResolvePath(m_distanceto.x,m_distanceto.y,m_distanceto.z,true,i,m_j[i]);
 	if (m_minpath[i][m_j[i]].size()) ++m_j[i];
 }
