@@ -138,13 +138,6 @@ public:
 	// phase field stuff
 	CPhaseContainer m_phasefield;
 
-	// Initialize phasefield, including the surrounding area around the initial points
-	void PhaseInit(SVoxImg<SWorkImg<realnum>>& data, CVec3& start_point, CVec3& end_point);
-	
-	CVec3 m_reference[2];
-
-	/**/
-	IPoi3<int> m_distanceto;
 
 	std::vector<CVec3> m_boundcontour;
 

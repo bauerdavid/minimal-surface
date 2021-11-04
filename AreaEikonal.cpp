@@ -25,18 +25,6 @@ CCurvEikonal::~CCurvEikonal(void)
 
 realnum g_w = 2.75;
 
-void CCurvEikonal::PhaseInit(SVoxImg<SWorkImg<realnum>>& data, CVec3& start_point, CVec3& end_point)
-{
-	m_phasefield.Initialize(data, start_point, end_point);
-
-
-	m_reference[0] = start_point;
-	m_reference[1] = end_point;
-
-	m_distanceto = IPoi3<int>(end_point.x, end_point.y, end_point.z);
-
-}
-
 void CPhaseContainer::RegularizePhaseField(SVoxImg<SWorkImg<realnum>> &field, SVoxImg<SWorkImg<realnum>> &velo)
 {
 	//++g_cyc;
