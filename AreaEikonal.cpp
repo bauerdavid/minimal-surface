@@ -26,13 +26,9 @@ CCurvEikonal::~CCurvEikonal(void)
 
 realnum g_w = 2.75;
 
-void CCurvEikonal::PhaseInit(IPoi reginit, IPoi arrival, int zdeparture, int zarrival, int xSection)
+void CCurvEikonal::PhaseInit(SVoxImg<SWorkImg<realnum>>& data, IPoi reginit, IPoi arrival, int zdeparture, int zarrival, int xSection)
 {
-	if (!m_valid) return;
-	if (!m_grays && !m_color) return;
-	int spacex, spacey, spacez(ZS_);
-	if (m_grays) { spacex = m_work.xs; spacey = m_work.ys; }
-	else { spacex = m_workr.xs; spacey = m_workr.ys; }
+	int spacex(data.xs), spacey(data.ys), spacez(data.zs);
 	//g_cyc = 0;
 	m_phasefield.m_thickstate.Set(spacex,spacey,spacez);
 	m_phasefield.m_Sumcurvature.Set0(spacex,spacey,spacez);
@@ -59,8 +55,7 @@ void CCurvEikonal::PhaseInit(IPoi reginit, IPoi arrival, int zdeparture, int zar
 	m_phasefield.m_smoothaux2.Set0(spacex,spacey,spacez);
 
 	m_phasefield.m_data.Set0(spacex,spacey,spacez);
-	SVoxImg<SWorkImg<realnum>> &data = m_phasefield.m_data;
-	data = m_imageOp.GetTestInput();
+	m_phasefield.m_data = data;
 
 
 	int hs = 11-0;//5 (int)(1.5f*g_w/2);

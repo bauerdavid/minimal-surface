@@ -134,8 +134,9 @@ public:
 
 	// phase field stuff
 	CPhaseContainer m_phasefield;
+
 	// Initialize phasefield, including the surrounding area around the initial points
-	void PhaseInit(IPoi reginit, IPoi arrival, int initz = 0, int arravz = 0, int xSection = -1);
+	void PhaseInit(SVoxImg<SWorkImg<realnum>>& data, IPoi reginit, IPoi arrival, int initz = 0, int arravz = 0, int xSection = -1);
 	void RegularizePhaseField(SVoxImg<SWorkImg<realnum>> &field, SVoxImg<SWorkImg<realnum>> &velo);
 	
 	CVec3 m_reference[2];
