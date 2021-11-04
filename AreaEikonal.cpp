@@ -25,78 +25,9 @@ CCurvEikonal::~CCurvEikonal(void)
 
 realnum g_w = 2.75;
 
-void CCurvEikonal::PhaseInit(SVoxImg<SWorkImg<realnum>>& data, IPoi reginit, IPoi arrival, int zdeparture, int zarrival, int xSection)
+void CCurvEikonal::PhaseInit(SVoxImg<SWorkImg<realnum>>& data, IPoi reginit, IPoi arrival, int zdeparture, int zarrival)
 {
-	int spacex(data.xs), spacey(data.ys), spacez(data.zs);
-	//g_cyc = 0;
-	m_phasefield.m_thickstate.Set(spacex,spacey,spacez);
-	m_phasefield.m_Sumcurvature.Set0(spacex,spacey,spacez);
-	m_phasefield.meeting_plane_positions.Set0(spacex, spacey, spacez);
-	// expansion
-	m_phasefield.unx.Set0(spacex,spacey,spacez);
-	m_phasefield.uny.Set0(spacex,spacey,spacez);
-	m_phasefield.unz.Set0(spacex,spacey,spacez);
-	m_phasefield.m_smoothstate.Set(spacex,spacey,spacez);
-	// expansion
-
-
-	m_phasefield.m_field[0].Set(spacex,spacey,spacez);
-	m_phasefield.m_field[1].Set(spacex,spacey,spacez);
-	m_phasefield.m_distance[0].Set(spacex,spacey,spacez);
-	m_phasefield.m_distance[1].Set(spacex,spacey,spacez);
-	m_phasefield.m_combined_distance.Set(spacex, spacey, spacez);
-
-	m_phasefield.m_velo[0].Set0(spacex,spacey,spacez);
-	m_phasefield.m_velo[1].Set0(spacex, spacey, spacez);
-	m_phasefield.m_aux.Set0(spacex,spacey,spacez);
-	m_phasefield.m_smoothdist.Set(spacex,spacey,spacez);
-	m_phasefield.m_smoothaux.Set0(spacex,spacey,spacez);
-	m_phasefield.m_smoothaux2.Set0(spacex,spacey,spacez);
-
-	m_phasefield.m_data.Set0(spacex,spacey,spacez);
-	m_phasefield.m_data = data;
-
-
-	int hs = 11-0;//5 (int)(1.5f*g_w/2);
-	m_phasefield.m_currentdistance =  0;
-	for (int ii = 0; ii < 2; ++ii) {
-		int &initz = !ii ? zdeparture:zarrival; // z parameter
-		IPoi &rinit = !ii ? reginit:arrival; // x-y parameter
-
-		for (int zz = initz-hs; zz < initz+hs; ++zz) {
-			if (zz < 0) continue;
-			for (int yy = rinit.y-hs; yy < rinit.y+hs; ++yy) {
-				if (yy < 0) continue;
-				for (int xx = rinit.x-hs; xx < rinit.x+hs; ++xx) {
-					if (xx < 0) continue;
-					int dx = xx-rinit.x, dy = yy-rinit.y;
-					int dz = zz-initz;
-					realnum dd = (realnum)(dx*dx+dy*dy+dz*dz);
-					if ((int)dd < 10*10/1/*4 hs*hs/4*/) {
-						//TODO: initialize the two starting points on different distance maps (instead of [0]: [ii])
-						m_phasefield.m_field[ii][zz][yy][xx] = 1.0; // ii->0
-						dd = sqrt(dd);
-						m_phasefield.m_distance[ii][zz][yy][xx] = dd; // ii->0
-						if (m_phasefield.m_currentdistance < dd) m_phasefield.m_currentdistance = dd;
-						
-						// curvatures
-						//if (dd < 1e-11) dd = 1e-11; dd = 1.0/dd;
-						//m_phasefield.m_thickstate[ii][zz][yy][xx] = 2;
-						//m_phasefield.m_Sumcurvature[ii][zz][yy][xx] = dd+dd;
-					}
-
-				}
-			}
-		}
-
-	}
-
-	for (int ii = 0; ii < 10-10; ++ii) {
-		RegularizePhaseField(m_phasefield.m_field[0],m_phasefield.m_velo[0]);
-		RegularizePhaseField(m_phasefield.m_field[1],m_phasefield.m_velo[1]);
-	}
-	m_phasefield.m_aux[0] = 0;
-	m_phasefield.m_aux[1] = 0;
+	m_phasefield.Initialize(data, reginit, arrival, zdeparture, zarrival);
 
 
 	m_reference[0].x = (realnum)reginit.x;
@@ -108,17 +39,16 @@ void CCurvEikonal::PhaseInit(SVoxImg<SWorkImg<realnum>>& data, IPoi reginit, IPo
 
 	m_distanceto = IPoi3<int>(arrival.x,arrival.y,zarrival);
 
-	m_phasefield.m_bdone = false;
 }
 
-void CCurvEikonal::RegularizePhaseField(SVoxImg<SWorkImg<realnum>> &field, SVoxImg<SWorkImg<realnum>> &velo)
+void CPhaseContainer::RegularizePhaseField(SVoxImg<SWorkImg<realnum>> &field, SVoxImg<SWorkImg<realnum>> &velo)
 {
 	//++g_cyc;
 
 	int xs = field.xs, ys = field.ys, zs = field.zs;
 	realnum fac = 21.0/(g_w*g_w), dfac = -(g_w*g_w)/16.0;
 
-	SVoxImg<SWorkImg<realnum>> &aux = m_phasefield.m_aux;
+	SVoxImg<SWorkImg<realnum>> &aux = m_aux;
 
 	aux.GetLaplace(field);
 	velo.GetLaplace(aux);
@@ -161,6 +91,81 @@ void CCurvEikonal::RegularizePhaseField(SVoxImg<SWorkImg<realnum>> &field, SVoxI
 
 //-------------------------------------------------------------------------------------------------
 
+
+void CPhaseContainer::Initialize(SVoxImg<SWorkImg<realnum>>& data, IPoi reginit, IPoi arrival, int zdeparture, int zarrival) {
+	int spacex(data.xs), spacey(data.ys), spacez(data.zs);
+	//g_cyc = 0;
+	m_thickstate.Set(spacex, spacey, spacez);
+	m_Sumcurvature.Set0(spacex, spacey, spacez);
+	meeting_plane_positions.Set0(spacex, spacey, spacez);
+	// expansion
+	unx.Set0(spacex, spacey, spacez);
+	uny.Set0(spacex, spacey, spacez);
+	unz.Set0(spacex, spacey, spacez);
+	m_smoothstate.Set(spacex, spacey, spacez);
+	// expansion
+
+
+	m_field[0].Set(spacex, spacey, spacez);
+	m_field[1].Set(spacex, spacey, spacez);
+	m_distance[0].Set(spacex, spacey, spacez);
+	m_distance[1].Set(spacex, spacey, spacez);
+	m_combined_distance.Set(spacex, spacey, spacez);
+
+	m_velo[0].Set0(spacex, spacey, spacez);
+	m_velo[1].Set0(spacex, spacey, spacez);
+	m_aux.Set0(spacex, spacey, spacez);
+	m_smoothdist.Set(spacex, spacey, spacez);
+	m_smoothaux.Set0(spacex, spacey, spacez);
+	m_smoothaux2.Set0(spacex, spacey, spacez);
+
+	m_data.Set0(spacex, spacey, spacez);
+	m_data = data;
+
+
+	int hs = 11 - 0;//5 (int)(1.5f*g_w/2);
+	m_currentdistance = 0;
+	for (int ii = 0; ii < 2; ++ii) {
+		int& initz = !ii ? zdeparture : zarrival; // z parameter
+		IPoi& rinit = !ii ? reginit : arrival; // x-y parameter
+
+		for (int zz = initz - hs; zz < initz + hs; ++zz) {
+			if (zz < 0) continue;
+			for (int yy = rinit.y - hs; yy < rinit.y + hs; ++yy) {
+				if (yy < 0) continue;
+				for (int xx = rinit.x - hs; xx < rinit.x + hs; ++xx) {
+					if (xx < 0) continue;
+					int dx = xx - rinit.x, dy = yy - rinit.y;
+					int dz = zz - initz;
+					realnum dd = (realnum)(dx * dx + dy * dy + dz * dz);
+					if ((int)dd < 10 * 10 / 1/*4 hs*hs/4*/) {
+						//TODO: initialize the two starting points on different distance maps (instead of [0]: [ii])
+						m_field[ii][zz][yy][xx] = 1.0; // ii->0
+						dd = sqrt(dd);
+						m_distance[ii][zz][yy][xx] = dd; // ii->0
+						if (m_currentdistance < dd) m_currentdistance = dd;
+
+						// curvatures
+						//if (dd < 1e-11) dd = 1e-11; dd = 1.0/dd;
+						//m_phasefield.m_thickstate[ii][zz][yy][xx] = 2;
+						//m_phasefield.m_Sumcurvature[ii][zz][yy][xx] = dd+dd;
+					}
+
+				}
+			}
+		}
+
+	}
+
+	for (int ii = 0; ii < 10 - 10; ++ii) {
+		RegularizePhaseField(m_field[0], m_velo[0]);
+		RegularizePhaseField(m_field[1], m_velo[1]);
+	}
+	m_aux[0] = 0;
+	m_aux[1] = 0;
+
+	m_bdone = false;
+}
 
 void CPhaseContainer::SmoothMap(SVoxImg<SWorkImg<realnum>> &src1, SVoxImg<SWorkImg<realnum>>& src2, SVoxImg<SWorkImg<realnum>> &out)
 {

@@ -388,11 +388,11 @@ void CChildView::InitThread()
 	SVoxImg<SWorkImg<realnum>>& data = m_liftedEikonal.m_imageOp.GetTestInput();
 	if (m_bispoint == 1) {
 		int xto = m_xsee; //if (xto) ++xto;
-		m_liftedEikonal.PhaseInit(data, IPoi(m_fieldinit.x, m_fieldinit.y), IPoi(m_arrival.x, m_arrival.y), m_zdeparture, xto, xto);
+		m_liftedEikonal.PhaseInit(data, IPoi(m_fieldinit.x, m_fieldinit.y), IPoi(m_arrival.x, m_arrival.y), m_zdeparture, xto);
 	}
 	else
 		//m_liftedEikonal.PhaseInit(IPoi(m_fieldinit.x,m_fieldinit.y),IPoi(m_arrival.x,m_arrival.y),m_zdeparture, m_xsee);
-		m_liftedEikonal.PhaseInit(data, IPoi(m_fieldinit.x,m_fieldinit.y),IPoi(m_arrival.x,m_arrival.y),m_zdeparture,m_zarrival, m_xsee);
+		m_liftedEikonal.PhaseInit(data, IPoi(m_fieldinit.x,m_fieldinit.y),IPoi(m_arrival.x,m_arrival.y),m_zdeparture,m_zarrival);
 
 	CWinThread* thread = AfxBeginThread(BackgroundThread,this,THREAD_PRIORITY_NORMAL,0,CREATE_SUSPENDED,0);
 	if(thread == 0) return;
