@@ -496,31 +496,31 @@ void CControlDlg::DoDataExchange(CDataExchange* pDX)
 
 
 BEGIN_MESSAGE_MAP(CControlDlg, CDialog)
-	ON_BN_CLICKED(IDC_BUTTON1, &CControlDlg::OnBnClickedButton1)
-	ON_BN_CLICKED(IDC_BUTTON2, &CControlDlg::OnBnClickedButton2)
-	ON_BN_CLICKED(IDC_BUTTON3, &CControlDlg::OnBnClickedButton3)
-	ON_BN_CLICKED(IDC_BUTTON4, &CControlDlg::OnBnClickedButton4)
-	ON_BN_CLICKED(IDC_BUTTON5, &CControlDlg::OnBnClickedButton5)
+	ON_BN_CLICKED(IDC_BUTTON1, &CControlDlg::OnBnClickedOpen)
+	ON_BN_CLICKED(IDC_BUTTON2, &CControlDlg::OnBnClickedIntImage1)
+	ON_BN_CLICKED(IDC_BUTTON3, &CControlDlg::OnBnClickedGetBC)
+	ON_BN_CLICKED(IDC_BUTTON4, &CControlDlg::OnBnClickedStartStop)
+	ON_BN_CLICKED(IDC_BUTTON5, &CControlDlg::OnBnClickedSuspend)
 	ON_NOTIFY(NM_CUSTOMDRAW, IDC_SLIDER1, &CControlDlg::OnNMCustomdrawSlider1)
 	ON_NOTIFY(NM_CUSTOMDRAW, IDC_SLIDER2, &CControlDlg::OnNMCustomdrawSlider2)
 	ON_NOTIFY(NM_CUSTOMDRAW, IDC_SLIDER3, &CControlDlg::OnNMCustomdrawSlider3)
 	ON_EN_CHANGE(IDC_EDIT3, &CControlDlg::OnEnChangeEdit3)
 	ON_NOTIFY(NM_CUSTOMDRAW, IDC_SLIDER4, &CControlDlg::OnNMCustomdrawSlider4)
 	ON_EN_CHANGE(IDC_EDIT2, &CControlDlg::OnEnChangeEdit2)
-	ON_BN_CLICKED(IDC_CHECK1, &CControlDlg::OnBnClickedCheck1)
+	ON_BN_CLICKED(IDC_CHECK1, &CControlDlg::OnBnClickedCheckSee)
 	ON_EN_CHANGE(IDC_EDIT1, &CControlDlg::OnEnChangeEdit1)
 	ON_BN_CLICKED(IDC_BUTTON6, &CControlDlg::OnBnClickedButton6)
-	ON_BN_CLICKED(IDC_CHECK2, &CControlDlg::OnBnClickedCheck2)
-	ON_BN_CLICKED(IDC_BUTTON7, &CControlDlg::OnBnClickedButton7)
-	ON_BN_CLICKED(IDC_BUTTON8, &CControlDlg::OnBnClickedButton8)
-	ON_BN_CLICKED(IDC_CHECK3, &CControlDlg::OnBnClickedCheck3)
-	ON_BN_CLICKED(IDC_BUTTON10, &CControlDlg::OnBnClickedButton10)
+	ON_BN_CLICKED(IDC_CHECK2, &CControlDlg::OnBnClickedCSee)
+	ON_BN_CLICKED(IDC_BUTTON7, &CControlDlg::OnBnClickedIntImage2)
+	ON_BN_CLICKED(IDC_BUTTON8, &CControlDlg::OnBnClickedWWOCorr)
+	ON_BN_CLICKED(IDC_CHECK3, &CControlDlg::OnBnClickedSwitchView)
+	ON_BN_CLICKED(IDC_BUTTON10, &CControlDlg::OnBnClickedTestBuild)
 END_MESSAGE_MAP()
 
 
 // CControlDlg message handlers
 
-void CControlDlg::OnBnClickedButton1()
+void CControlDlg::OnBnClickedOpen()
 {
 	// TODO: Add your control notification handler code here
 
@@ -607,7 +607,7 @@ void CControlDlg::OnBnClickedButton1()
 
 }
 
-void CControlDlg::OnBnClickedButton2() // synth. image 1
+void CControlDlg::OnBnClickedIntImage1() // synth. image 1
 {
 	// TODO: Add your control notification handler code here
 	if (m_bini) return;
@@ -634,7 +634,7 @@ void CControlDlg::OnBnClickedButton2() // synth. image 1
 
 }
 
-void CControlDlg::OnBnClickedButton3() // contour on plane
+void CControlDlg::OnBnClickedGetBC() // contour on plane
 {
 	// TODO: Add your control notification handler code here
 	m_pView->m_imageOp.GetXTestBound(m_pView->m_xsee/* - 1*/, m_pView->m_liftedEikonal.m_boundcontour);
@@ -652,7 +652,7 @@ void CControlDlg::OnBnClickedButton3() // contour on plane
 	m_pView->Invalidate();
 }
 
-void CControlDlg::OnBnClickedButton4()
+void CControlDlg::OnBnClickedStartStop()
 {
 	// TODO: Add your control notification handler code here
 	if (!m_startstate) {
@@ -668,7 +668,7 @@ void CControlDlg::OnBnClickedButton4()
 }
 
 
-void CControlDlg::OnBnClickedButton5() // pause/continue
+void CControlDlg::OnBnClickedSuspend() // pause/continue
 {
 	// TODO: Add your control notification handler code here
 
@@ -796,7 +796,7 @@ void CControlDlg::OnEnChangeEdit3()
 		m_flowray = 1;
 		m_cflowray.SetWindowTextA("1");
 	}
-	//if (m_bini && !m_startstate) OnBnClickedButton2();
+	//if (m_bini && !m_startstate) OnBnClickedIntImage1();
 }
 
 void CControlDlg::OnNMCustomdrawSlider4(NMHDR *pNMHDR, LRESULT *pResult)
@@ -821,7 +821,7 @@ void CControlDlg::OnEnChangeEdit2()
 	// TODO:  Add your control notification handler code here
 }
 
-void CControlDlg::OnBnClickedCheck1()
+void CControlDlg::OnBnClickedCheckSee()
 {
 	// TODO: Add your control notification handler code here
 	m_pView->m_bsee = !m_pView->m_bsee;
@@ -844,14 +844,14 @@ void CControlDlg::OnBnClickedButton6() // get minimal paths
 	//m_pView->GetAllPathX();
 }
 
-void CControlDlg::OnBnClickedCheck2()
+void CControlDlg::OnBnClickedCSee()
 {
 	// TODO: Add your control notification handler code here
 	m_pView->m_curvsee = m_ccursee.GetCheck();
 	m_pView->Invalidate();
 }
 
-void CControlDlg::OnBnClickedButton7() // synth. image 2
+void CControlDlg::OnBnClickedIntImage2() // synth. image 2
 {
 	// TODO: Add your control notification handler code here
 	if (m_bini) return;
@@ -877,7 +877,7 @@ void CControlDlg::OnBnClickedButton7() // synth. image 2
 	m_pView->Invalidate();
 }
 
-void CControlDlg::OnBnClickedButton8() // correction using mean surf metric
+void CControlDlg::OnBnClickedWWOCorr() // correction using mean surf metric
 {
 	// TODO: Add your control notification handler code here
 	extern bool g_modeswitch;
@@ -889,7 +889,7 @@ void CControlDlg::OnBnClickedButton8() // correction using mean surf metric
 }
 
 
-void CControlDlg::OnBnClickedCheck3()
+void CControlDlg::OnBnClickedSwitchView()
 {
 	// TODO: Add your control notification handler code here
 	m_pView->m_btransportview = !m_pView->m_btransportview;
@@ -905,7 +905,7 @@ void CControlDlg::OnBnClickedCheck3()
 }
 
 
-void CControlDlg::OnBnClickedButton10()
+void CControlDlg::OnBnClickedTestBuild()
 {
 	// TODO: Add your control notification handler code here
 	m_pView->m_transport.TrControl(333);
