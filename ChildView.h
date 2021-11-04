@@ -42,10 +42,10 @@ public:
 	void StopThread();
 	int m_prevthreadactivated;
 	int m_threadactivated;
-	CPoint m_fieldinit;
-	int m_zdeparture;
-	CPoint m_arrival;
-	int m_zarrival;
+
+	CVec3 m_start_point;
+	CVec3 m_end_point;
+	
 	int m_bispoint;
 	/*int m_fieldliney;
 	CPoint m_setcenter;

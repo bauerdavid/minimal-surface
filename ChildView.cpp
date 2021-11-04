@@ -284,14 +284,14 @@ void CChildView::OnPaint()
 
 	if (m_disp.xs) {
 		if (m_bispoint > 0) {
-			if (abs(m_zsee-m_zdeparture) < 3) dc.FillSolidRect(m_fieldinit.x-1,m_fieldinit.y-1,3,3,0xff);
-			if (abs(m_ysee-m_fieldinit.y) < 3) dc.FillSolidRect(m_fieldinit.x+m_disp.xs,m_zdeparture-1,3,3,0xff);
-			if (abs(m_xsee-m_fieldinit.x) < 3) dc.FillSolidRect(m_fieldinit.y+2*m_disp.xs+1,m_zdeparture-1,3,3,0xff);
+			if (abs(m_zsee-m_start_point.z) < 3) dc.FillSolidRect(m_start_point.x-1, m_start_point.y-1,3,3,0xff);
+			if (abs(m_ysee- m_start_point.y) < 3) dc.FillSolidRect(m_start_point.x+m_disp.xs, m_start_point.z-1,3,3,0xff);
+			if (abs(m_xsee- m_start_point.x) < 3) dc.FillSolidRect(m_start_point.y+2*m_disp.xs+1, m_start_point.z -1,3,3,0xff);
 		}
 		if (m_bispoint > 1) {
-			if (abs(m_zsee-m_zarrival) < 3) dc.FillSolidRect(m_arrival.x-1,m_arrival.y-1,3,3,0xffff00);
-			if (abs(m_ysee-m_arrival.y) < 3) dc.FillSolidRect(m_arrival.x+m_disp.xs,m_zarrival-1,3,3,0xffff00);
-			if (abs(m_xsee-m_arrival.x) < 3) dc.FillSolidRect(m_arrival.y+2*m_disp.xs+1,m_zarrival-1,3,3,0xffff00);
+			if (abs(m_zsee- m_end_point.z) < 3) dc.FillSolidRect(m_end_point.x-1, m_end_point.y-1,3,3,0xffff00);
+			if (abs(m_ysee- m_end_point.y) < 3) dc.FillSolidRect(m_end_point.x+m_disp.xs, m_end_point.z-1,3,3,0xffff00);
+			if (abs(m_xsee- m_end_point.x) < 3) dc.FillSolidRect(m_end_point.y+2*m_disp.xs+1, m_end_point.z-1,3,3,0xffff00);
 		}
 	}
 
@@ -384,15 +384,18 @@ void CChildView::InitThread()
 	if (m_threadactivated) return;
 	if (!m_bispoint) return;
 	
-	if (m_bispoint <= 1) { m_arrival = CPoint(-100,-100); }
+	if (m_bispoint <= 1) {
+		m_end_point.x = -100;
+		m_end_point.y = -100;
+	}
 	SVoxImg<SWorkImg<realnum>>& data = m_liftedEikonal.m_imageOp.GetTestInput();
 	if (m_bispoint == 1) {
-		int xto = m_xsee; //if (xto) ++xto;
-		m_liftedEikonal.PhaseInit(data, IPoi(m_fieldinit.x, m_fieldinit.y), IPoi(m_arrival.x, m_arrival.y), m_zdeparture, xto);
+		m_end_point.z = m_xsee;
+		m_liftedEikonal.PhaseInit(data, m_start_point, m_end_point);
 	}
 	else
 		//m_liftedEikonal.PhaseInit(IPoi(m_fieldinit.x,m_fieldinit.y),IPoi(m_arrival.x,m_arrival.y),m_zdeparture, m_xsee);
-		m_liftedEikonal.PhaseInit(data, IPoi(m_fieldinit.x,m_fieldinit.y),IPoi(m_arrival.x,m_arrival.y),m_zdeparture,m_zarrival);
+		m_liftedEikonal.PhaseInit(data, m_start_point, m_end_point);
 
 	CWinThread* thread = AfxBeginThread(BackgroundThread,this,THREAD_PRIORITY_NORMAL,0,CREATE_SUSPENDED,0);
 	if(thread == 0) return;
@@ -431,10 +434,12 @@ void CChildView::OnLButtonUp(UINT nFlags, CPoint point)
 	if (!m_threadactivated) {
 		if (m_disp.xs) {
 			if (!m_bispoint) {
-				m_fieldinit = point; m_zdeparture = m_zsee; ++m_bispoint;
+				m_start_point = CVec3(point.x, point.y, m_zsee);
+				++m_bispoint;
 			}
 			else {
-				m_arrival = point; m_zarrival = m_zsee; ++m_bispoint;
+				m_end_point = CVec3(point.x, point.y, m_zsee);
+				++m_bispoint;
 			}
 		}
 		Invalidate();

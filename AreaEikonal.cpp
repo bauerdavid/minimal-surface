@@ -25,19 +25,15 @@ CCurvEikonal::~CCurvEikonal(void)
 
 realnum g_w = 2.75;
 
-void CCurvEikonal::PhaseInit(SVoxImg<SWorkImg<realnum>>& data, IPoi reginit, IPoi arrival, int zdeparture, int zarrival)
+void CCurvEikonal::PhaseInit(SVoxImg<SWorkImg<realnum>>& data, CVec3& start_point, CVec3& end_point)
 {
-	m_phasefield.Initialize(data, reginit, arrival, zdeparture, zarrival);
+	m_phasefield.Initialize(data, start_point, end_point);
 
 
-	m_reference[0].x = (realnum)reginit.x;
-	m_reference[0].y = (realnum)reginit.y;
-	m_reference[0].z = (realnum)zdeparture;
-	m_reference[1].x = (realnum)arrival.x;
-	m_reference[1].y = (realnum)arrival.y;
-	m_reference[1].z = (realnum)zarrival;
+	m_reference[0] = start_point;
+	m_reference[1] = end_point;
 
-	m_distanceto = IPoi3<int>(arrival.x,arrival.y,zarrival);
+	m_distanceto = IPoi3<int>(end_point.x, end_point.y, end_point.z);
 
 }
 
@@ -92,7 +88,7 @@ void CPhaseContainer::RegularizePhaseField(SVoxImg<SWorkImg<realnum>> &field, SV
 //-------------------------------------------------------------------------------------------------
 
 
-void CPhaseContainer::Initialize(SVoxImg<SWorkImg<realnum>>& data, IPoi reginit, IPoi arrival, int zdeparture, int zarrival) {
+void CPhaseContainer::Initialize(SVoxImg<SWorkImg<realnum>>& data, CVec3& start_point, CVec3& end_point) {
 	int spacex(data.xs), spacey(data.ys), spacez(data.zs);
 	//g_cyc = 0;
 	m_thickstate.Set(spacex, spacey, spacez);
@@ -126,17 +122,16 @@ void CPhaseContainer::Initialize(SVoxImg<SWorkImg<realnum>>& data, IPoi reginit,
 	int hs = 11 - 0;//5 (int)(1.5f*g_w/2);
 	m_currentdistance = 0;
 	for (int ii = 0; ii < 2; ++ii) {
-		int& initz = !ii ? zdeparture : zarrival; // z parameter
-		IPoi& rinit = !ii ? reginit : arrival; // x-y parameter
+		CVec3 point = !ii ? start_point : end_point;
 
-		for (int zz = initz - hs; zz < initz + hs; ++zz) {
+		for (int zz = point.z - hs; zz < point.z + hs; ++zz) {
 			if (zz < 0) continue;
-			for (int yy = rinit.y - hs; yy < rinit.y + hs; ++yy) {
+			for (int yy = point.y - hs; yy < point.y + hs; ++yy) {
 				if (yy < 0) continue;
-				for (int xx = rinit.x - hs; xx < rinit.x + hs; ++xx) {
+				for (int xx = point.x - hs; xx < point.x + hs; ++xx) {
 					if (xx < 0) continue;
-					int dx = xx - rinit.x, dy = yy - rinit.y;
-					int dz = zz - initz;
+					int dx = xx - point.x, dy = yy - point.y;
+					int dz = zz - point.z;
 					realnum dd = (realnum)(dx * dx + dy * dy + dz * dz);
 					if ((int)dd < 10 * 10 / 1/*4 hs*hs/4*/) {
 						//TODO: initialize the two starting points on different distance maps (instead of [0]: [ii])

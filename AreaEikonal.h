@@ -112,7 +112,7 @@ public:
 	bool m_bdone;
 	realnum m_currentdistance;
 
-	void Initialize(SVoxImg<SWorkImg<realnum>>& data, IPoi reginit, IPoi arrival, int zdeparture, int zarrival);
+	void Initialize(SVoxImg<SWorkImg<realnum>>& data, CVec3& start_point, CVec3& end_point);
 
 	realnum UpdateVelo(int i, bool use_correction);
 	void UpdateField(int i, realnum maxv);
@@ -139,7 +139,7 @@ public:
 	CPhaseContainer m_phasefield;
 
 	// Initialize phasefield, including the surrounding area around the initial points
-	void PhaseInit(SVoxImg<SWorkImg<realnum>>& data, IPoi reginit, IPoi arrival, int initz = 0, int arravz = 0);
+	void PhaseInit(SVoxImg<SWorkImg<realnum>>& data, CVec3& start_point, CVec3& end_point);
 	
 	CVec3 m_reference[2];
 
