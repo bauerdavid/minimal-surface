@@ -145,23 +145,6 @@ public:
 	IPoi3<int> m_distanceto;
 
 	std::vector<CVec3> m_boundcontour;
-	/**/
-
-	// image general
-	int m_expfac;
-	int m_valid;
-	bool m_grays;
-	bool m_color;
-
-	SDisImg m_img;
-	SWorkImg<realnum> m_work;
-	SWorkImg<realnum> m_workr;
-	SWorkImg<realnum> m_workg;
-	SWorkImg<realnum> m_workb;
-
-	SWorkImg<realnum> m_intex;
-	SWorkImg<realnum> m_intey;
-	SWorkImg<realnum> m_divcheck;
 
 	// not used
 	std::unordered_set<IPoi3<double>, IPoi3Hash<double>> meeting_plane;

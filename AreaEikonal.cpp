@@ -9,8 +9,7 @@
 int a = 0;
 CCurvEikonal::CCurvEikonal(void)
 {
-	m_valid = 0;
-	m_expfac = 9;//+10
+	
 
 }
 

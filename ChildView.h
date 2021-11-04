@@ -61,6 +61,21 @@ public:
 	bool m_btransportview;
 	std::pair<IPoi3<double>, IPoi3<double>> plane_normal;
 	double plane_offset = 1e11;
+
+	// image general
+	int m_expfac;
+	int m_valid;
+	bool m_grays;
+	bool m_color;
+
+	SDisImg m_img;
+	SWorkImg<realnum> m_work;
+	SWorkImg<realnum> m_workr;
+	SWorkImg<realnum> m_workg;
+	SWorkImg<realnum> m_workb;
+
+	SWorkImg<realnum> m_intex;
+	SWorkImg<realnum> m_intey;
 // Operations
 public:
 

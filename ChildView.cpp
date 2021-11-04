@@ -26,6 +26,9 @@ CChildView::CChildView()
 	m_bsee = false;
 	m_curvsee = 0;
 	m_btransportview = false;
+
+	m_valid = 0;
+	m_expfac = 9;//+10
 }
 
 CChildView::~CChildView()
@@ -548,37 +551,37 @@ void CControlDlg::OnBnClickedButton1()
 			if (!pos && b1st) {
 				bool bcolor = false;
 				if (ci.GetBPP() == 8) {
-					m_pView->m_liftedEikonal.m_img.Set(xs,ys,buf,mod,pitch);
+					m_pView->m_img.Set(xs,ys,buf,mod,pitch);
 				}
 				else if (ci.GetBPP() == 24) {
-					m_pView->m_liftedEikonal.m_img.SetColor(xs,ys,buf,mod,pitch);
-					bool bok = m_pView->m_liftedEikonal.m_workr.GetAligned(m_pView->m_liftedEikonal.m_img,8,0);
-					bok = m_pView->m_liftedEikonal.m_workg.GetAligned(m_pView->m_liftedEikonal.m_img,8,1);
-					bok = m_pView->m_liftedEikonal.m_workb.GetAligned(m_pView->m_liftedEikonal.m_img,8,2);
-					if (!bok) m_pView->m_liftedEikonal.m_valid = 0;
+					m_pView->m_img.SetColor(xs,ys,buf,mod,pitch);
+					bool bok = m_pView->m_workr.GetAligned(m_pView->m_img,8,0);
+					bok = m_pView->m_workg.GetAligned(m_pView->m_img,8,1);
+					bok = m_pView->m_workb.GetAligned(m_pView->m_img,8,2);
+					if (!bok) m_pView->m_valid = 0;
 					else {
-						m_pView->m_liftedEikonal.m_workb.GetDispChannel(m_pView->m_disp,0);
-						m_pView->m_liftedEikonal.m_workg.GetDispChannel(m_pView->m_disp,1);
-						m_pView->m_liftedEikonal.m_workr.GetDispChannel(m_pView->m_disp,2);
-						m_pView->m_liftedEikonal.m_valid = 1;
-						m_pView->m_liftedEikonal.m_color = true;
-						m_pView->m_liftedEikonal.m_grays = false;
+						m_pView->m_workb.GetDispChannel(m_pView->m_disp,0);
+						m_pView->m_workg.GetDispChannel(m_pView->m_disp,1);
+						m_pView->m_workr.GetDispChannel(m_pView->m_disp,2);
+						m_pView->m_valid = 1;
+						m_pView->m_color = true;
+						m_pView->m_grays = false;
 					}
 					bcolor = true;
 				}
 				else {
-					m_pView->m_liftedEikonal.m_valid = 0;	
+					m_pView->m_valid = 0;	
 					return;
 				}
 				if (!bcolor) {
-					bool bok = m_pView->m_liftedEikonal.m_work.GetAligned(m_pView->m_liftedEikonal.m_img,8); // normed 0-1
+					bool bok = m_pView->m_work.GetAligned(m_pView->m_img,8); // normed 0-1
 					if (bok) {
-						m_pView->m_liftedEikonal.m_work.GetDispImg(m_pView->m_disp);
-						m_pView->m_liftedEikonal.m_valid = 1;
-						m_pView->m_liftedEikonal.m_grays = true;
-						m_pView->m_liftedEikonal.m_color = false;
+						m_pView->m_work.GetDispImg(m_pView->m_disp);
+						m_pView->m_valid = 1;
+						m_pView->m_grays = true;
+						m_pView->m_color = false;
 					}
-					else m_pView->m_liftedEikonal.m_valid = 0;
+					else m_pView->m_valid = 0;
 				}
 			}
 		
@@ -591,7 +594,7 @@ void CControlDlg::OnBnClickedButton1()
 		m_cstopdir.SetRange(0,ZS_-1,1);
 		//m_cdatafac.SetRange(1+10,10+10,1);
 		m_cdatafac.SetRange(1,10,1);
-		m_cdatafac.SetPos(m_pView->m_liftedEikonal.m_expfac);
+		m_cdatafac.SetPos(m_pView->m_expfac);
 		char txt[22];
 		sprintf_s(txt,20,"%d",m_flowray);
 		m_cflowray.SetWindowTextA(txt);
@@ -611,10 +614,10 @@ void CControlDlg::OnBnClickedButton2() // synth. image 1
 	if (m_bini) return;
 	m_pView->m_liftedEikonal.m_imageOp.CreateTestImage(XS_,YS_,ZS_);
 	{
-		m_pView->m_liftedEikonal.m_work = m_pView->m_liftedEikonal.m_imageOp.m_testimage[m_pView->m_zsee];
-		m_pView->m_liftedEikonal.m_valid = 1;
-		m_pView->m_liftedEikonal.m_grays = true;
-		m_pView->m_liftedEikonal.m_color = false;
+		m_pView->m_work = m_pView->m_liftedEikonal.m_imageOp.m_testimage[m_pView->m_zsee];
+		m_pView->m_valid = 1;
+		m_pView->m_grays = true;
+		m_pView->m_color = false;
 	}
 	{
 		m_zlevel.SetRange(0,ZS_-1,1); // from z
@@ -622,10 +625,10 @@ void CControlDlg::OnBnClickedButton2() // synth. image 1
 		m_cstopdir.SetRange(0,XS_-1,1); // from x
 		m_bini = true;
 
-		m_cdatafac.SetRange(1,10,1); m_cdatafac.SetPos(m_pView->m_liftedEikonal.m_expfac);
+		m_cdatafac.SetRange(1,10,1); m_cdatafac.SetPos(m_pView->m_expfac);
 		char txt[22]; sprintf_s(txt,20,"%d",m_flowray);	m_cflowray.SetWindowTextA(txt);
 	}
-	m_pView->m_liftedEikonal.m_work.GetDispImg(m_pView->m_disp);
+	m_pView->m_work.GetDispImg(m_pView->m_disp);
 	OnNMCustomdrawSlider2(0,0);
 	OnNMCustomdrawSlider3(0,0);
 	m_pView->Invalidate();
@@ -696,14 +699,14 @@ void CControlDlg::OnNMCustomdrawSlider1(NMHDR *pNMHDR, LRESULT *pResult)
 		sprintf_s(txt,20,"%d",m_pView->m_zsee);
 		m_ezlevel.SetWindowTextA(txt);
 
-	m_pView->m_liftedEikonal.m_work = m_pView->m_liftedEikonal.m_imageOp.m_testimage[m_pView->m_zsee];
+	m_pView->m_work = m_pView->m_liftedEikonal.m_imageOp.m_testimage[m_pView->m_zsee];
 	/*if (!m_pView->m_bsee)
-		m_pView->m_liftedEikonal.m_work = m_pView->m_liftedEikonal.m_imageOp.m_testimage[m_pView->m_zsee];
+		m_pView->m_work = m_pView->m_liftedEikonal.m_imageOp.m_testimage[m_pView->m_zsee];
 	else
-		m_pView->m_liftedEikonal.m_work = m_pView->m_liftedEikonal.m_imageOp.m_testinput[m_pView->m_zsee];
+		m_pView->m_work = m_pView->m_liftedEikonal.m_imageOp.m_testinput[m_pView->m_zsee];
 	*/
 	if (!m_pView->m_btransportview) {
-		m_pView->m_liftedEikonal.m_work.GetDispImg(m_pView->m_disp);
+		m_pView->m_work.GetDispImg(m_pView->m_disp);
 	}
 	else {
 		m_pView->m_transport.GetDispSlice(Taloz, m_pView->m_zsee, m_pView->m_disp);
@@ -726,7 +729,7 @@ void CControlDlg::OnNMCustomdrawSlider2(NMHDR *pNMHDR, LRESULT *pResult)
 	*/
 	if (!m_pView->m_btransportview) {
 		int xs = testimg.xs, zs = testimg.zs;
-		SWorkImg<realnum>& yslice = m_pView->m_liftedEikonal.m_intey;
+		SWorkImg<realnum>& yslice = m_pView->m_intey;
 		yslice.Set(xs, zs);
 		int ylev = m_cstartdir.GetPos();
 
@@ -764,7 +767,7 @@ void CControlDlg::OnNMCustomdrawSlider3(NMHDR *pNMHDR, LRESULT *pResult)
 	*/
 	if (!m_pView->m_btransportview) {
 		int ys = testimg.ys, zs = testimg.zs;
-		SWorkImg<realnum>& xslice = m_pView->m_liftedEikonal.m_intex;
+		SWorkImg<realnum>& xslice = m_pView->m_intex;
 		xslice.Set(ys, zs);
 		int xlev = m_cstopdir.GetPos();
 
@@ -812,7 +815,7 @@ void CControlDlg::OnNMCustomdrawSlider4(NMHDR *pNMHDR, LRESULT *pResult)
 	LPNMCUSTOMDRAW pNMCD = reinterpret_cast<LPNMCUSTOMDRAW>(pNMHDR);
 	// TODO: Add your control notification handler code here
 	if (m_bini) {
-		m_pView->m_liftedEikonal.m_expfac = m_cdatafac.GetPos();
+		m_pView->m_expfac = m_cdatafac.GetPos();
 		m_bforced = true;
 	}
 
@@ -865,10 +868,10 @@ void CControlDlg::OnBnClickedButton7() // synth. image 2
 	if (m_bini) return;
 	m_pView->m_liftedEikonal.m_imageOp.CreateTestImage2(XS_,YS_,ZS_);
 	{
-		m_pView->m_liftedEikonal.m_work = m_pView->m_liftedEikonal.m_imageOp.m_testimage[m_pView->m_zsee];
-		m_pView->m_liftedEikonal.m_valid = 1;
-		m_pView->m_liftedEikonal.m_grays = true;
-		m_pView->m_liftedEikonal.m_color = false;
+		m_pView->m_work = m_pView->m_liftedEikonal.m_imageOp.m_testimage[m_pView->m_zsee];
+		m_pView->m_valid = 1;
+		m_pView->m_grays = true;
+		m_pView->m_color = false;
 	}
 	{
 		m_zlevel.SetRange(0,ZS_-1,1); // from z
@@ -876,10 +879,10 @@ void CControlDlg::OnBnClickedButton7() // synth. image 2
 		m_cstopdir.SetRange(0,XS_-1,1); // from x
 		m_bini = true;
 
-		m_cdatafac.SetRange(1,10,1); m_cdatafac.SetPos(m_pView->m_liftedEikonal.m_expfac);
+		m_cdatafac.SetRange(1,10,1); m_cdatafac.SetPos(m_pView->m_expfac);
 		char txt[22]; sprintf_s(txt,20,"%d",m_flowray);	m_cflowray.SetWindowTextA(txt);
 	}
-	m_pView->m_liftedEikonal.m_work.GetDispImg(m_pView->m_disp);
+	m_pView->m_work.GetDispImg(m_pView->m_disp);
 	OnNMCustomdrawSlider2(0,0);
 	OnNMCustomdrawSlider3(0,0);
 	m_pView->Invalidate();
