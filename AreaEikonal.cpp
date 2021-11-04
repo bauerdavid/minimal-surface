@@ -1,18 +1,17 @@
-#include "StdAfx.h"
+#include "stdafx.h"
 #include "AreaEikonal.h"
 #include "math.h"
 #include <omp.h>
 
 #define BIG_NUMBER 1e11
 #define MAX_THREADS 32
-const int max_threads = omp_get_max_threads();
+//const int max_threads = omp_get_max_threads();
 int a = 0;
 CCurvEikonal::CCurvEikonal(void)
 {
 	m_valid = 0;
 	m_expfac = 9;//+10
 
-	m_j[0] = m_j[1] = 0;
 }
 
 CCurvEikonal::~CCurvEikonal(void)
@@ -35,24 +34,14 @@ void CCurvEikonal::PhaseInit(IPoi reginit, IPoi arrival, int zdeparture, int zar
 	if (m_grays) { spacex = m_work.xs; spacey = m_work.ys; }
 	else { spacex = m_workr.xs; spacey = m_workr.ys; }
 	//g_cyc = 0;
-	m_phasefield.m_thickstate[0].Set(spacex,spacey,spacez);
-	m_phasefield.m_thickstate[1].Set(spacex,spacey,spacez);
-	m_phasefield.m_thicknes[0].Set(spacex,spacey,spacez);
-	m_phasefield.m_thicknes[1].Set(spacex,spacey,spacez);
-	m_phasefield.m_Sumcurvature[0].Set0(spacex,spacey,spacez);
-	m_phasefield.m_Sumcurvature[1].Set0(spacex,spacey,spacez);
-	meeting_plane_positions.Set0(spacex, spacey, spacez);
+	m_phasefield.m_thickstate.Set(spacex,spacey,spacez);
+	m_phasefield.m_Sumcurvature.Set0(spacex,spacey,spacez);
+	m_phasefield.meeting_plane_positions.Set0(spacex, spacey, spacez);
 	// expansion
-	m_phasefield.m_distgrad[0][0].Set0(spacex,spacey,spacez);
-	m_phasefield.m_distgrad[0][1].Set0(spacex,spacey,spacez);
-	m_phasefield.m_distgrad[0][2].Set0(spacex,spacey,spacez);
-	m_phasefield.m_distgrad[1][0].Set0(spacex,spacey,spacez);
-	m_phasefield.m_distgrad[1][1].Set0(spacex,spacey,spacez);
-	m_phasefield.m_distgrad[1][2].Set0(spacex,spacey,spacez);
-	m_phasefield.m_smoothstate[0].Set(spacex,spacey,spacez);
-	m_phasefield.m_smoothstate[1].Set(spacex,spacey,spacez);
-	m_phasefield.m_expdist[0].Set(spacex,spacey,spacez);
-	m_phasefield.m_expdist[1].Set(spacex,spacey,spacez);
+	m_phasefield.unx.Set0(spacex,spacey,spacez);
+	m_phasefield.uny.Set0(spacex,spacey,spacez);
+	m_phasefield.unz.Set0(spacex,spacey,spacez);
+	m_phasefield.m_smoothstate.Set(spacex,spacey,spacez);
 	// expansion
 
 
@@ -65,54 +54,17 @@ void CCurvEikonal::PhaseInit(IPoi reginit, IPoi arrival, int zdeparture, int zar
 	m_phasefield.m_velo[0].Set0(spacex,spacey,spacez);
 	m_phasefield.m_velo[1].Set0(spacex, spacey, spacez);
 	m_phasefield.m_aux.Set0(spacex,spacey,spacez);
-	m_phasefield.m_smoothdist[0].Set(spacex,spacey,spacez);
-	m_phasefield.m_smoothdist[1].Set(spacex,spacey,spacez);
-	m_phasefield.m_smoothaux[0].Set0(spacex,spacey,spacez);
-	m_phasefield.m_smoothaux[1].Set0(spacex,spacey,spacez);
-	m_phasefield.m_smoothaux2[0].Set0(spacex,spacey,spacez);
-	m_phasefield.m_smoothaux2[1].Set0(spacex,spacey,spacez);
+	m_phasefield.m_smoothdist.Set(spacex,spacey,spacez);
+	m_phasefield.m_smoothaux.Set0(spacex,spacey,spacez);
+	m_phasefield.m_smoothaux2.Set0(spacex,spacey,spacez);
 
 	m_phasefield.m_data.Set0(spacex,spacey,spacez);
 	SVoxImg<SWorkImg<realnum>> &data = m_phasefield.m_data;
 	data = m_imageOp.GetTestInput();
 
-	for (int ii = 0; ii < MAXMINPATH; ++ii) {
-		m_minpath[0][ii].clear();
-		m_minpath[1][ii].clear();
-	}
-
-	SVoxImg<SWorkImg<realnum>> &field0 = m_phasefield.m_field[0];
-	SVoxImg<SWorkImg<realnum>> &field1 = m_phasefield.m_field[1];
-	SVoxImg<SWorkImg<realnum>> &distance0 = m_phasefield.m_distance[0];
-	SVoxImg<SWorkImg<realnum>> &distance1 = m_phasefield.m_distance[1];
-	SVoxImg<SWorkImg<realnum>> &thick0 = m_phasefield.m_thicknes[0];
-	SVoxImg<SWorkImg<realnum>> &thick1 = m_phasefield.m_thicknes[1];
-	SVoxImg<SWorkImg<int>> &thstat0 = m_phasefield.m_thickstate[0];
-	SVoxImg<SWorkImg<int>> &thstat1 = m_phasefield.m_thickstate[1];
-	#pragma omp parallel for
-	for (int zz = 0; zz < field0.zs; ++zz) {
-		for (int yy = 0; yy < field0.ys; ++yy) {
-			for (int xx = 0; xx < field0.xs; ++xx) {
-				field0[zz][yy][xx] = -1.0;
-				field1[zz][yy][xx] = -1.0;
-				distance0[zz][yy][xx] = -1.0;
-				distance1[zz][yy][xx] = -1.0;
-				thick0[zz][yy][xx] = -1.0;
-				thick1[zz][yy][xx] = -1.0;
-				thstat0[zz][yy][xx] = -1;
-				thstat1[zz][yy][xx] = -1;
-				// expansion
-				m_phasefield.m_smoothstate[0][zz][yy][xx] = -4; // neither map nor gradient
-				m_phasefield.m_smoothstate[1][zz][yy][xx] = -4;
-				m_phasefield.m_expdist[0][zz][yy][xx] = -1.0;
-				m_phasefield.m_expdist[1][zz][yy][xx] = -1.0;
-				// expansion
-			}
-		}
-	}
 
 	int hs = 11-0;//5 (int)(1.5f*g_w/2);
-	m_currentdistance[0] = m_currentdistance[1] = 0;
+	m_phasefield.m_currentdistance =  0;
 	for (int ii = 0; ii < 2; ++ii) {
 		int &initz = !ii ? zdeparture:zarrival; // z parameter
 		IPoi &rinit = !ii ? reginit:arrival; // x-y parameter
@@ -131,8 +83,7 @@ void CCurvEikonal::PhaseInit(IPoi reginit, IPoi arrival, int zdeparture, int zar
 						m_phasefield.m_field[ii][zz][yy][xx] = 1.0; // ii->0
 						dd = sqrt(dd);
 						m_phasefield.m_distance[ii][zz][yy][xx] = dd; // ii->0
-						m_phasefield.m_thicknes[ii][zz][yy][xx] = 1.0; // ii->0
-						if (m_currentdistance[ii] < dd) m_currentdistance[ii] = dd;
+						if (m_phasefield.m_currentdistance < dd) m_phasefield.m_currentdistance = dd;
 						
 						// curvatures
 						//if (dd < 1e-11) dd = 1e-11; dd = 1.0/dd;
@@ -163,7 +114,7 @@ void CCurvEikonal::PhaseInit(IPoi reginit, IPoi arrival, int zdeparture, int zar
 
 	m_distanceto = IPoi3<int>(arrival.x,arrival.y,zarrival);
 
-	m_bdone = false;
+	m_phasefield.m_bdone = false;
 }
 
 void CCurvEikonal::RegularizePhaseField(SVoxImg<SWorkImg<realnum>> &field, SVoxImg<SWorkImg<realnum>> &velo)
@@ -217,19 +168,19 @@ void CCurvEikonal::RegularizePhaseField(SVoxImg<SWorkImg<realnum>> &field, SVoxI
 //-------------------------------------------------------------------------------------------------
 
 
-void CCurvEikonal::SmoothDistanceMap(int i)
+void CPhaseContainer::SmoothMap(SVoxImg<SWorkImg<realnum>> &src1, SVoxImg<SWorkImg<realnum>>& src2, SVoxImg<SWorkImg<realnum>> &out)
 {
 	int j = 0;
 	// int j = i;
-	SVoxImg<SWorkImg<realnum>> &sou1 = m_phasefield.m_distance[i]; // source
-	SVoxImg<SWorkImg<realnum>>& sou2 = m_phasefield.m_distance[(i+1)%2]; // source
-	SVoxImg<SWorkImg<realnum>> &aux2 = m_phasefield.m_smoothaux2[j];
-	SVoxImg<SWorkImg<realnum>> &aux = m_phasefield.m_smoothaux[j];
-	SVoxImg<SWorkImg<realnum>> &out = m_phasefield.m_smoothdist[j]; // output
+	//SVoxImg<SWorkImg<realnum>> &src1 = m_phasefield.m_distance[i]; // source
+	//SVoxImg<SWorkImg<realnum>>& src2 = m_phasefield.m_distance[(i+1)%2]; // source
+	SVoxImg<SWorkImg<realnum>> &aux2 = m_smoothaux2;
+	SVoxImg<SWorkImg<realnum>> &aux = m_smoothaux;
+	//SVoxImg<SWorkImg<realnum>> &out = m_phasefield.m_smoothdist[j]; // output
 	
-	SVoxImg<SWorkImg<int>> &smstat = m_phasefield.m_smoothstate[j];
+	SVoxImg<SWorkImg<int>> &smstat = m_smoothstate;
 
-	int xs = sou1.xs, ys = sou1.ys, zs = sou1.zs;
+	int xs = src1.xs, ys = src1.ys, zs = src1.zs;
 
 	#pragma omp parallel for collapse(3)
 	for (int zz = 0; zz < zs; ++zz) {
@@ -238,21 +189,21 @@ void CCurvEikonal::SmoothDistanceMap(int i)
 				int smst = smstat[zz][yy][xx];
 				if (smst > 0) continue;
 				smstat[zz][yy][xx] = -2;
-				if (sou1[zz][yy][xx] < 0 && sou2[zz][yy][xx] < 0) {
-					aux[zz][yy][xx] = sou1[zz][yy][xx];
+				if (src1[zz][yy][xx] < 0 && src2[zz][yy][xx] < 0) {
+					aux[zz][yy][xx] = src1[zz][yy][xx];
 					continue;
 				}
 				int xm(xx-1); if (xm == -1) xm = 1;
 				int xp(xx+1); if (xp == xs) xp = xs-2;
-				realnum s  = sou1[zz][yy][xx] >= 0 ? sou1[zz][yy][xx] : sou2[zz][yy][xx];
+				realnum s  = src1[zz][yy][xx] >= 0 ? src1[zz][yy][xx] : src2[zz][yy][xx];
 				int w = 0;
-				realnum comp = sou1[zz][yy][xp] >= 0 ? sou1[zz][yy][xp] : sou2[zz][yy][xp];
+				realnum comp = src1[zz][yy][xp] >= 0 ? src1[zz][yy][xp] : src2[zz][yy][xp];
 				if (comp >= 0) { s += comp; ++w; }
-				comp = sou1[zz][yy][xm] >= 0 ? sou1[zz][yy][xm] : sou2[zz][yy][xm];
+				comp = src1[zz][yy][xm] >= 0 ? src1[zz][yy][xm] : src2[zz][yy][xm];
 				if (comp >= 0) { s += comp; ++w; }
 				if (!w) aux[zz][yy][xx] = s;
 				else {
-					s += sou1[zz][yy][xx] >= 0 ? sou1[zz][yy][xx] : sou2[zz][yy][xx];
+					s += src1[zz][yy][xx] >= 0 ? src1[zz][yy][xx] : src2[zz][yy][xx];
 					if (w == 1) aux[zz][yy][xx] = (1.0/3.0)*s;
 					else {
 						aux[zz][yy][xx] = 0.25*s;
@@ -324,18 +275,15 @@ void CCurvEikonal::SmoothDistanceMap(int i)
 
 //-------------------------------------------------------------------------------------------------
 
-void CCurvEikonal::CalculateFundQuant(int i, int test)
+void CPhaseContainer::CalculateFundQuant(int i, int test)
 {
 	int j = 0;
 	// int j = i;
-	SVoxImg<SWorkImg<int>> &thstat = m_phasefield.m_thickstate[j];
-	SVoxImg<SWorkImg<realnum>> &Sum = m_phasefield.m_Sumcurvature[j];
-	SVoxImg<SWorkImg<realnum>> &unx = m_phasefield.m_distgrad[j][0];
-	SVoxImg<SWorkImg<realnum>> &uny = m_phasefield.m_distgrad[j][1];
-	SVoxImg<SWorkImg<realnum>> &unz = m_phasefield.m_distgrad[j][2];
-
-	SmoothDistanceMap(i);	SVoxImg<SWorkImg<realnum>>& distance = m_phasefield.m_smoothdist[j]; // m_phasefield.m_distance[i];
-	SVoxImg<SWorkImg<int>>& smstat = m_phasefield.m_smoothstate[j];
+	SVoxImg<SWorkImg<int>> &thstat = m_thickstate;
+	SVoxImg<SWorkImg<realnum>> &Sum = m_Sumcurvature;
+	SVoxImg<SWorkImg<realnum>>& distance = m_smoothdist; // STAYS
+	SmoothMap(m_distance[i], m_distance[(i + 1) % 2], distance); // m_distance[i];
+	SVoxImg<SWorkImg<int>>& smstat = m_smoothstate;
 
 	int xs = distance.xs, ys = distance.ys, zs = distance.zs;
 
@@ -439,42 +387,24 @@ void CCurvEikonal::CalculateFundQuant(int i, int test)
 
 bool g_modeswitch = false;
 
-realnum CCurvEikonal::UpdateVelo(int i) {
-	SVoxImg<SWorkImg<realnum>>& field = m_phasefield.m_field[i];
+realnum CPhaseContainer::UpdateVelo(int i, bool use_correction) {
+	SVoxImg<SWorkImg<realnum>>& field = m_field[i];
 
-	SVoxImg<SWorkImg<realnum>>& counterfield = m_phasefield.m_field[(i + 1) % 2];
+	SVoxImg<SWorkImg<realnum>>& counterfield = m_field[(i + 1) % 2];
 
-	// m_phasefield.m_velo
-	SVoxImg<SWorkImg<realnum>>& velo = m_phasefield.m_velo[i];
-	//I guess here we should use the same data for both processes
-	int j = 0;
-	//int j = i;
-	// m_phasefield.m_distance[i]
-	SVoxImg<SWorkImg<realnum>>& distance = m_phasefield.m_distance[i];
+	// m_velo
+	SVoxImg<SWorkImg<realnum>>& velo = m_velo[i];
 
-	// m_phasefield.m_distance[(i+1)&1]
-	SVoxImg<SWorkImg<realnum>>& counterd = m_phasefield.m_distance[(i + 1) & 1];
+	// m_distance[i]
+	SVoxImg<SWorkImg<realnum>>& distance = m_distance[i];
 
-	// m_phasefield.m_data
-	SVoxImg<SWorkImg<realnum>>& data = m_phasefield.m_data;
+	// m_distance[(i+1)&1]
+	SVoxImg<SWorkImg<realnum>>& counterd = m_distance[(i + 1) & 1];
 
-	// m_phasefield.m_Sumcurvature[i]
-	SVoxImg<SWorkImg<realnum>>& Sum = m_phasefield.m_Sumcurvature[j];
 
-	// m_phasefield.m_thicknes[i]
-	SVoxImg<SWorkImg<realnum>>& thick = m_phasefield.m_thicknes[j];
+	// m_Sumcurvature[i]
+	SVoxImg<SWorkImg<realnum>>& Sum = m_Sumcurvature;
 
-	// m_phasefield.m_distgrad[i][0]
-	SVoxImg<SWorkImg<realnum>>& unx = m_phasefield.m_distgrad[j][0];
-
-	// m_phasefield.m_distgrad[i][1]
-	SVoxImg<SWorkImg<realnum>>& uny = m_phasefield.m_distgrad[j][1];
-
-	// m_phasefield.m_distgrad[i][2]
-	SVoxImg<SWorkImg<realnum>>& unz = m_phasefield.m_distgrad[j][2];
-
-	// m_phasefield.m_thickstate[i]
-	SVoxImg<SWorkImg<int>>& thstat = m_phasefield.m_thickstate[j];
 
 	int xs = field.xs, ys = field.ys, zs = field.zs;
 
@@ -566,7 +496,7 @@ realnum CCurvEikonal::UpdateVelo(int i) {
 										int pz = zz + iz; if (pz < 1) pz = 1; if (pz > zs - 2) pz = zs - 2;
 										int py = yy + iy; if (py < 1) py = 1; if (py > ys - 2) py = ys - 2;
 										int px = xx + ix; if (px < 1) px = 1; if (px > xs - 2) px = xs - 2;
-										if (thstat[pz][py][px] < 0) continue;
+										if (m_thickstate[pz][py][px] < 0) continue;
 										realnum dot = unx[pz][py][px] * ix + uny[pz][py][px] * iy + unz[pz][py][px] * iz;
 										dot *= -1;
 										if (dot < 0.82) continue;
@@ -589,9 +519,9 @@ realnum CCurvEikonal::UpdateVelo(int i) {
 
 					} // for rr
 
-					realnum eikon = data[zz][yy][xx];
+					realnum eikon = m_data[zz][yy][xx];
 
-					realnum d0 = data[zz][yy][xx];
+					realnum d0 = m_data[zz][yy][xx];
 					if (d0 < 1e-33) d0 = 1e-33;
 
 					realnum squar = -1.0;
@@ -605,18 +535,18 @@ realnum CCurvEikonal::UpdateVelo(int i) {
 						squar = d0;
 					}
 
-					if (g_modeswitch) {
+					if (use_correction) {
 						//realnum den = 1.0 + sumcur/1.2; if (den < 1e-6) den = 1e-6;	eikon = data[zz][yy][xx]/den;
 						if (squar > 0) {
 							eikon = squar;
 							//eikon *= exp(-sumcur); // best
 						}
 						else {
-							eikon = data[zz][yy][xx];
+							eikon = m_data[zz][yy][xx];
 						}
 					}
 					else
-						eikon = data[zz][yy][xx];
+						eikon = m_data[zz][yy][xx];
 
 					eikon *= gradlen; // normalize
 					if (eikon < 1e-11) eikon = 1e-11;
@@ -655,9 +585,9 @@ realnum CCurvEikonal::UpdateVelo(int i) {
 	////////////////////////////////////////////////////////////////////
 	return maxv;
 }
-void CCurvEikonal::UpdateField(int i, realnum maxv) {
-	SVoxImg<SWorkImg<realnum>>& field = m_phasefield.m_field[i];
-	SVoxImg<SWorkImg<realnum>>& velo = m_phasefield.m_velo[i];
+void CPhaseContainer::UpdateField(int i, realnum maxv) {
+	SVoxImg<SWorkImg<realnum>>& field = m_field[i];
+	SVoxImg<SWorkImg<realnum>>& velo = m_velo[i];
 
 	int xs = field.xs, ys = field.ys, zs = field.zs;
 #pragma omp parallel for
@@ -670,20 +600,20 @@ void CCurvEikonal::UpdateField(int i, realnum maxv) {
 		}
 	}
 }
-void CCurvEikonal::UpdateDistance(int i) {
-	SVoxImg<SWorkImg<realnum>>& field = m_phasefield.m_field[i];
+void CPhaseContainer::UpdateDistance(int i, realnum current_distance) {
+	SVoxImg<SWorkImg<realnum>>& field = m_field[i];
 	// m_phasefield.m_distance[i]
-	SVoxImg<SWorkImg<realnum>>& distance = m_phasefield.m_distance[i];
+	SVoxImg<SWorkImg<realnum>>& distance = m_distance[i];
 
 	// m_phasefield.m_distance[(i+1)&1]
-	SVoxImg<SWorkImg<realnum>>& counterd = m_phasefield.m_distance[(i + 1) & 1];
+	SVoxImg<SWorkImg<realnum>>& counterd = m_distance[(i + 1) & 1];
 	int xs = field.xs, ys = field.ys, zs = field.zs;
 #pragma omp parallel for
 	for (int zz = 1; zz < zs - 1; ++zz) {
 		for (int yy = 0 + 1; yy < ys - 1; ++yy) {
 			for (int xx = 0 + 1; xx < xs - 1; ++xx) {
 				if (field[zz][yy][xx] > 0 && distance[zz][yy][xx] < -0.5f) {
-					distance[zz][yy][xx] = m_currentdistance[0];
+					distance[zz][yy][xx] = current_distance;
 				}
 				if (distance[zz][yy][xx] < -0.5f && counterd[zz][yy][xx] < -0.5f) {
 					m_bdone = false;
@@ -692,28 +622,27 @@ void CCurvEikonal::UpdateDistance(int i) {
 		}
 	}
 }
-void CCurvEikonal::Iterate()
+void CPhaseContainer::Iterate(bool use_correction)
 {
-	SVoxImg<SWorkImg<realnum>>& field = m_phasefield.m_field[0];
+	SVoxImg<SWorkImg<realnum>>& field = m_field[0];
 	int xs = field.xs, ys = field.ys, zs = field.zs;
 	// m_phasefield.m_field[i]
-	realnum maxv0 = UpdateVelo(0);
-	realnum maxv1 = UpdateVelo(1);
+	realnum maxv0 = UpdateVelo(0, use_correction);
+	realnum maxv1 = UpdateVelo(1, use_correction);
 	realnum maxv = max(maxv0, maxv1);
 	if (maxv < 1e-11) maxv = 1e-11;
 
 	realnum mdatspedmax = 0.5 * 4; //*2 set max speed
 	maxv = mdatspedmax / maxv;
-	m_currentdistance[0] += maxv;
-	m_currentdistance[1] += maxv;
-	//m_currentdistance[i] += 1;
+	m_currentdistance += maxv;
+	//m_currentdistance += 1;
 
 	// update phase field values
 	UpdateField(0, maxv);
 	UpdateField(1, maxv);
 	m_bdone = true;
-	UpdateDistance(0);
-	UpdateDistance(1);
+	UpdateDistance(0, m_currentdistance);
+	UpdateDistance(1, m_currentdistance);
 	// TODO: check for collision
 	// updating the distance map to the current value, and checking if it is complete
 	
@@ -846,80 +775,3 @@ CVec3 operator +(CVec3 &v, CVec3 &w)
 {
 	return CVec3(v.x+w.x,v.y+w.y,v.z+w.z);
 }
-
-void CCurvEikonal::ResolvePath(realnum x, realnum y, realnum z, bool bClear, int i, int j)
-{
-	SVoxImg<SWorkImg<realnum>> &distance = m_phasefield.m_distance[i]; // m_smoothdist 
-	int xs = distance.xs, ys = distance.ys, zs = distance.zs;
-
-	if (bClear) m_minpath[i][j].clear();
-
-	int ix((int)x), iy((int)y), iz((int)z);
-	if (iz < 2 || iz >= ZS_-2) return;
-	if (ix < 2 || ix >= xs-2) return;
-	if (iy < 2 || iy >= ys-2) return;
-
-	if (distance[iz][iy][ix] < 0) return;
-
-	CVec3 path(ix,iy,iz);
-	m_minpath[i][j].push_back(path);
-	
-	for (int ii = 0; ii < 11111; ++ii) {
-		ix = (int)path.x; iy = (int)path.y; iz = (int)path.z;
-
-		if (iz < 2) iz = 2; if (iz >= ZS_-2) iz = ZS_-3;
-		if (ix < 2) ix = 2; if(ix >= xs-2) ix = xs-3;
-		if (iy < 2) iy = 2; if(iy >= ys-2) iy = ys-3;
-
-		{	
-			realnum mmin(0);
-			int pz(0), py(0), px(0);
-			for (int zo = -1; zo <= 1; ++zo) {
-				int zz = iz+zo;
-				for (int yo = -1; yo <= 1; ++yo) {
-					int yy = iy+yo;
-					for (int xo = -1; xo <= 1; ++xo) {
-						int xx = ix+xo;
-						if (!zo && !yo && !xo) continue;
-
-
-						CVec3 dir(xo,yo,zo);
-
-						realnum d1 = distance[zz][yy][xx], d0 = distance[iz][iy][ix];
-						if (d1-d0 < mmin) {
-							mmin = d1-d0;
-							pz = zo; py = yo; px = xo;
-						}
-
-
-					}
-				}
-			}
-
-			path.x = ix+px; path.y = iy+py; path.z = iz+pz;
-
-		}
-
-		m_minpath[i][j].push_back(path);
-		
-
-
-		CVec3 dir = path; dir -= m_reference[i];
-		if (dir.x*dir.x+dir.y*dir.y+dir.z*dir.z < 1.75f) {
-			m_minpath[i][j].push_back(m_reference[i]);
-			break;
-		}
-
-	}
-
-}
-
-void CCurvEikonal::ResolvePath(int i)
-{
-	ResolvePath(m_distanceto.x,m_distanceto.y,m_distanceto.z,true,i,m_j[i]);
-	if (m_minpath[i][m_j[i]].size()) ++m_j[i];
-}
-
-
-
-

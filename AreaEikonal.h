@@ -80,10 +80,9 @@ public:
 	-4: neither map nor gradient
 	0<: was smoothed along every dimension
 	*/
-	SVoxImg<SWorkImg<int>> m_smoothstate[2];
-	SVoxImg<SWorkImg<int>> m_thickstate[2];
-	SVoxImg<SWorkImg<realnum>> m_thicknes[2];
-	SVoxImg<SWorkImg<realnum>> m_Sumcurvature[2];
+	SVoxImg<SWorkImg<int>> m_smoothstate;
+	SVoxImg<SWorkImg<int>> m_thickstate;
+	SVoxImg<SWorkImg<realnum>> m_Sumcurvature;
 	//SVoxImg<SWorkImg<realnum>> m_Hessian[6];
 
 	SVoxImg<SWorkImg<realnum>> m_distance[2];
@@ -92,21 +91,36 @@ public:
 	// expansion
 
 	// gradients of the distance maps
-	SVoxImg<SWorkImg<realnum>> m_distgrad[2][3];
-	SVoxImg<SWorkImg<realnum>> m_expdist[2];
+	SVoxImg<SWorkImg<realnum>> unx;
+	SVoxImg<SWorkImg<realnum>> uny;
+	SVoxImg<SWorkImg<realnum>> unz;
 
 	// Working field
 	SVoxImg<SWorkImg<realnum>> m_field[2];
 	//SVoxImg<SWorkImg<realnum>> m_gradlen;
 	//SVoxImg<SWorkImg<realnum>> m_n[3];
 	SVoxImg<SWorkImg<realnum>> m_aux; // temp
-	SVoxImg<SWorkImg<realnum>> m_smoothaux[2]; // temp
-	SVoxImg<SWorkImg<realnum>> m_smoothaux2[2]; // temp
-	SVoxImg<SWorkImg<realnum>> m_smoothdist[2]; // temp
+	SVoxImg<SWorkImg<realnum>> m_smoothaux; // temp
+	SVoxImg<SWorkImg<realnum>> m_smoothaux2; // temp
+	SVoxImg<SWorkImg<realnum>> m_smoothdist; // temp
 
 	SVoxImg<SWorkImg<realnum>> m_velo[2];
 	// Image data
 	SVoxImg<SWorkImg<realnum>> m_data;
+
+	SVoxImg<SWorkImg<int>> meeting_plane_positions;
+	bool m_bdone;
+	realnum m_currentdistance;
+
+	realnum UpdateVelo(int i, bool use_correction);
+	void UpdateField(int i, realnum maxv);
+	void UpdateDistance(int i, realnum current_distance);
+	// Calculate fundamental quantities, like distance gradient, sum curvature and thick state(?)
+	void CalculateFundQuant(int i = 0, int test = 0);
+	// Creates a smoother version of the distance map in smoothdist
+	void SmoothMap(SVoxImg<SWorkImg<realnum>>& src1, SVoxImg<SWorkImg<realnum>>& src2, SVoxImg<SWorkImg<realnum>>& out);
+	// Update velocity, then phase field based on velocity, and distance map, where phase field passes threshold value
+	void Iterate(bool use_correction);
 };
 
 class CCurvEikonal
@@ -123,26 +137,12 @@ public:
 	// Initialize phasefield, including the surrounding area around the initial points
 	void PhaseInit(IPoi reginit, IPoi arrival, int initz = 0, int arravz = 0, int xSection = -1);
 	void RegularizePhaseField(SVoxImg<SWorkImg<realnum>> &field, SVoxImg<SWorkImg<realnum>> &velo);
-	// Creates a smoother version of the distance map in smoothdist
-	void SmoothDistanceMap(int i = 0);
-	// Calculate fundamental quantities, like distance gradient, sum curvature and thick state(?)
-	void CalculateFundQuant(int i = 0, int test = 0);
-	realnum CCurvEikonal::UpdateVelo(int i);
-	void CCurvEikonal::UpdateField(int i, realnum maxv);
-	void CCurvEikonal::UpdateDistance(int i);
-	// Update velocity, then phase field based on velocity, and distance map, where phase field passes threshold value
-	void Iterate();
-	realnum m_currentdistance[2];
+	
 	CVec3 m_reference[2];
-	void ResolvePath(realnum x, realnum y, realnum z, bool bClear = true, int i = 0, int j = 0);
-	void ResolvePath(int i = 0);
-	std::vector<CVec3> m_minpath[2][MAXMINPATH];
 
 	/**/
-	bool m_bdone;
 	IPoi3<int> m_distanceto;
 
-	int m_j[2];
 	std::vector<CVec3> m_boundcontour;
 	/**/
 
@@ -162,9 +162,6 @@ public:
 	SWorkImg<realnum> m_intey;
 	SWorkImg<realnum> m_divcheck;
 
-	// test
-	std::vector<SCurvatureTest> m_ctest;
 	// not used
 	std::unordered_set<IPoi3<double>, IPoi3Hash<double>> meeting_plane;
-	SVoxImg<SWorkImg<int>> meeting_plane_positions;
 };

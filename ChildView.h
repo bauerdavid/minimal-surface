@@ -40,7 +40,6 @@ public:
 	void InitThread();
 	void PauseThread(int threadstat);
 	void StopThread();
-	void GetAllPathX();
 	int m_prevthreadactivated;
 	int m_threadactivated;
 	CPoint m_fieldinit;

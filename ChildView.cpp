@@ -11,7 +11,6 @@
 #define new DEBUG_NEW
 #endif
 #include <iostream>
-
 using namespace std;
 // CChildView
 
@@ -179,12 +178,12 @@ void CChildView::OnPaint()
 		//dc.TextOutA(300, 10, txt);
 		for (int ii = 0; ii < 2; ++ii) {
 			SVoxImg<SWorkImg<realnum>> &field = m_liftedEikonal.m_phasefield.m_field[ii];
-			SVoxImg<SWorkImg<int>>& meeting_plane = m_liftedEikonal.meeting_plane_positions;
+			SVoxImg<SWorkImg<int>>& meeting_plane = m_liftedEikonal.m_phasefield.meeting_plane_positions;
 
 			SVoxImg<SWorkImg<realnum>> &dismap = (!m_bsee && !m_curvsee) ? m_liftedEikonal.m_phasefield.m_distance[ii]:
-				(!m_bsee && m_curvsee == 1) ? m_liftedEikonal.m_phasefield.m_Sumcurvature[ii]:
-				(!m_bsee && m_curvsee == 2) ?m_liftedEikonal.m_phasefield.m_Sumcurvature[ii]:
-				m_liftedEikonal.m_phasefield.m_smoothdist[ii]
+				(!m_bsee && m_curvsee == 1) ? m_liftedEikonal.m_phasefield.m_Sumcurvature:
+				(!m_bsee && m_curvsee == 2) ?m_liftedEikonal.m_phasefield.m_Sumcurvature:
+				m_liftedEikonal.m_phasefield.m_smoothdist
 			;
 			/*m_Sumcurvature[ii],m_expdist[ii],m_smoothdist[ii],m_distance[ii],m_thicknes[ii]*/
 
@@ -194,7 +193,6 @@ void CChildView::OnPaint()
 				zsee = m_zsee;
 			}
 
-			int pasi = m_liftedEikonal.m_minpath[ii][00].size();
 
 			if (m_threadactivated != 3) {
 				if (m_disp.xs && !m_btransportview) {
@@ -209,20 +207,6 @@ void CChildView::OnPaint()
 								}
 								else if (field[zsee][yy][xx] > -0.6f && field[zsee][yy][xx] < 0.6f)
 									dc.SetPixelV(xx, yy, !ii ? 0xff : 0xff00);
-							}
-							else if (!pasi) {
-								realnum tocc(dismap[zsee][yy][xx]);
-								/*if (m_curvsee == 0) tocc *= 0.5;*/
-								if (!m_bsee) {
-									if (m_curvsee == 1) tocc *= 8;
-									if (m_curvsee == 2) tocc *= -8;
-								}
-								else {
-									if (m_curvsee == 1) tocc *= 80;
-									if (m_curvsee == 2) tocc *= -80;
-								}
-								if (tocc > 0)
-									dc.SetPixelV(xx, yy, GetDepthColor(tocc * 100.0));
 							}
 						}
 					}
@@ -276,42 +260,6 @@ void CChildView::OnPaint()
 					}
 				}
 			}
-
-
-
-		if (pasi) {
-			CPen *oldpen = dc.SelectObject(&g_yellowpen);
-			for (int jj = 0; jj < MAXMINPATH; ++jj) {
-				//CPen *oldpen = dc.SelectObject(&g_yellowpen);
-				std::vector<CVec3> &minpath = m_liftedEikonal.m_minpath[ii][jj];
-				pasi = minpath.size();
-				if (!pasi) break;
-
-				dc.MoveTo((int)minpath[0].x,(int)minpath[0].y);
-				for (int ii = 1; ii < pasi; ++ii) {
-					if (minpath[ii].z < m_zsee) dc.SelectObject(&g_yellowpen);
-					else dc.SelectObject(&g_orangepen);
-					dc.LineTo((int)minpath[ii].x,(int)minpath[ii].y);
-				}
-
-				dc.MoveTo((int)minpath[0].x+m_disp.xs+1,(int)minpath[0].z);
-				for (int ii = 1; ii < pasi; ++ii) {
-					if (minpath[ii].y < m_ysee) dc.SelectObject(&g_orangepen);
-					else dc.SelectObject(&g_yellowpen);
-					dc.LineTo((int)minpath[ii].x+m_disp.xs+1,(int)minpath[ii].z);
-				}
-				dc.MoveTo((int)minpath[0].y+2*(m_disp.xs+1),(int)minpath[0].z);
-				for (int ii = 1; ii < pasi; ++ii) {
-					if (minpath[ii].x < m_xsee) dc.SelectObject(&g_yellowpen);
-					else dc.SelectObject(&g_orangepen);
-					dc.LineTo((int)minpath[ii].y+2*(m_disp.xs+1),(int)minpath[ii].z);
-				}
-			}
-
-			dc.SelectObject(oldpen);
-		}
-
-
 		}
 
 
@@ -355,7 +303,7 @@ void CChildView::InitTransport()
 	if (m_liftedEikonal.m_phasefield.m_distance[0].xs > 0) {
 		SVoxImg<SWorkImg<realnum>>& passi = m_liftedEikonal.m_imageOp.GetIniMap(plane_normal.first.x);
 		//realnum maxdist = min(m_liftedEikonal.m_currentdistance[0], m_liftedEikonal.m_currentdistance[1]);
-		realnum maxdist = m_liftedEikonal.m_currentdistance[0];
+		realnum maxdist = m_liftedEikonal.m_phasefield.m_currentdistance;
 		m_transport.TrInit(m_liftedEikonal.m_phasefield.m_combined_distance, passi, maxdist);
 
 		m_transport.GetDispSlice(Talox, m_xsee, m_dispd2); // TaloX - enum
@@ -373,19 +321,20 @@ UINT BackgroundThread(LPVOID params)
 {
 	CChildView* view = (CChildView*)params;
 	int cyc = 0;
+	extern bool g_modeswitch;
 
 	while (view->m_threadactivated) {
 
 		if (view->m_threadactivated == 1) { // 3D
 
-			view->m_liftedEikonal.Iterate();
+			view->m_liftedEikonal.m_phasefield.Iterate(g_modeswitch);
 			if (++cyc > 7) { view->Invalidate(FALSE); cyc = 0; }
 
-			if (view->m_liftedEikonal.m_bdone) { 
-				for (int zz = 1; zz < view->m_liftedEikonal.meeting_plane_positions.zs - 1; ++zz) {
-					for (int yy = 1; yy < view->m_liftedEikonal.meeting_plane_positions.ys - 1; ++yy) {
-						for (int xx = 1; xx < view->m_liftedEikonal.meeting_plane_positions.xs - 1; ++xx) {
-							if (view->m_liftedEikonal.meeting_plane_positions[zz][yy][xx])
+			if (view->m_liftedEikonal.m_phasefield.m_bdone) {
+				for (int zz = 1; zz < view->m_liftedEikonal.m_phasefield.meeting_plane_positions.zs - 1; ++zz) {
+					for (int yy = 1; yy < view->m_liftedEikonal.m_phasefield.meeting_plane_positions.ys - 1; ++yy) {
+						for (int xx = 1; xx < view->m_liftedEikonal.m_phasefield.meeting_plane_positions.xs - 1; ++xx) {
+							if (view->m_liftedEikonal.m_phasefield.meeting_plane_positions[zz][yy][xx])
 								view->m_liftedEikonal.meeting_plane.insert(IPoi3<double>(xx, yy, zz));
 							view->m_liftedEikonal.m_phasefield.m_combined_distance[zz][yy][xx] =
 								view->m_liftedEikonal.m_phasefield.m_distance[0][zz][yy][xx] >= 0 ? view->m_liftedEikonal.m_phasefield.m_distance[0][zz][yy][xx] : view->m_liftedEikonal.m_phasefield.m_distance[1][zz][yy][xx];
@@ -470,53 +419,11 @@ void CChildView::StopThread()
 	Invalidate();
 }
 
-void CChildView::GetAllPathX()
-{
-	std::vector<CVec3> &bound = m_liftedEikonal.m_boundcontour;
-	int si = bound.size();
-	if (si > MAXMINPATH) si = MAXMINPATH;
-	for (int jj = 0; jj < MAXMINPATH; ++jj) {
-		m_liftedEikonal.m_minpath[0][jj].clear();
-		//m_liftedEikonal.m_minpath[1][jj].clear();
-	}
-	int &mj = m_liftedEikonal.m_j[0];
-	mj = 0;
-	for (int jj = 0; jj < si; ++jj) {
-		m_liftedEikonal.ResolvePath(bound[jj].x + 1,bound[jj].y,bound[jj].z,true,0,mj);
-		m_liftedEikonal.ResolvePath(bound[jj].x - 1, bound[jj].y, bound[jj].z, true, 0, mj);
-		if (m_liftedEikonal.m_minpath[0][mj].size()) ++mj;
-
-		Invalidate();
-	}
-
-	
-}
 
 void CChildView::OnLButtonUp(UINT nFlags, CPoint point)
 {
 	// TODO: Add your message handler code here and/or call default
 
-	if (m_threadactivated == 2) {
-		if (point.x < m_disp.xs) {
-			m_liftedEikonal.ResolvePath(point.x,point.y,m_zsee,true,0,m_liftedEikonal.m_j[0]);
-			if (m_liftedEikonal.m_minpath[0][m_liftedEikonal.m_j[0]].size()) ++m_liftedEikonal.m_j[0];
-			m_liftedEikonal.ResolvePath(point.x,point.y,m_zsee,true,1,m_liftedEikonal.m_j[1]);
-			if (m_liftedEikonal.m_minpath[1][m_liftedEikonal.m_j[1]].size()) ++m_liftedEikonal.m_j[1];
-		}
-		else if (point.x < 2*m_disp.xs+1) {
-			m_liftedEikonal.ResolvePath(point.x-m_disp.xs-1,m_ysee,point.y,true,0,m_liftedEikonal.m_j[0]);
-			if (m_liftedEikonal.m_minpath[0][m_liftedEikonal.m_j[0]].size()) ++m_liftedEikonal.m_j[0];
-			m_liftedEikonal.ResolvePath(point.x-m_disp.xs-1,m_ysee,point.y,true,1,m_liftedEikonal.m_j[1]);
-			if (m_liftedEikonal.m_minpath[1][m_liftedEikonal.m_j[1]].size()) ++m_liftedEikonal.m_j[1];
-		}
-		else {
-			m_liftedEikonal.ResolvePath(m_xsee,point.x-2*(m_disp.xs+1),point.y,true,0,m_liftedEikonal.m_j[0]);
-			if (m_liftedEikonal.m_minpath[0][m_liftedEikonal.m_j[0]].size()) ++m_liftedEikonal.m_j[0];
-			m_liftedEikonal.ResolvePath(m_xsee,point.x-2*(m_disp.xs+1),point.y,true,1,m_liftedEikonal.m_j[1]);
-			if (m_liftedEikonal.m_minpath[1][m_liftedEikonal.m_j[1]].size()) ++m_liftedEikonal.m_j[1];
-		}
-		Invalidate();
-	}
 	if (!m_threadactivated) {
 		if (m_disp.xs) {
 			if (!m_bispoint) {
@@ -535,11 +442,6 @@ void CChildView::OnLButtonUp(UINT nFlags, CPoint point)
 void CChildView::OnRButtonUp(UINT nFlags, CPoint point)
 {
 	// TODO: Add your message handler code here and/or call default
-	for (int jj = 0; jj < MAXMINPATH; ++jj) {
-		m_liftedEikonal.m_minpath[0][jj].clear();
-		m_liftedEikonal.m_minpath[1][jj].clear();
-	}
-	m_liftedEikonal.m_j[0] = m_liftedEikonal.m_j[1] = 0;
 	//m_bispoint = 0;
 	Invalidate();
 
@@ -736,7 +638,7 @@ void CControlDlg::OnBnClickedButton3() // contour on plane
 	if (m_pView->m_liftedEikonal.m_phasefield.m_distance[0].xs > 0) {
 		SVoxImg<SWorkImg<realnum>> & passi = m_pView->m_liftedEikonal.m_imageOp.GetIniMap(m_pView->m_xsee/* - 1*/);
 		//m_pView->m_transport.TrInit(m_pView->m_liftedEikonal.m_phasefield.m_smoothdist[0],passi, m_pView->m_liftedEikonal.m_currentdistance[0]);
-		m_pView->m_transport.TrInit(m_pView->m_liftedEikonal.m_phasefield.m_distance[0], passi, m_pView->m_liftedEikonal.m_currentdistance[0]);
+		m_pView->m_transport.TrInit(m_pView->m_liftedEikonal.m_phasefield.m_distance[0], passi, m_pView->m_liftedEikonal.m_phasefield.m_currentdistance);
 
 		//--m_pView->m_xsee;
 		m_pView->m_transport.GetDispSlice(Talox, m_pView->m_xsee, m_pView->m_dispd2); // TaloX - enum
@@ -946,7 +848,7 @@ void CControlDlg::OnEnChangeEdit1()
 void CControlDlg::OnBnClickedButton6() // get minimal paths
 {
 	// TODO: Add your control notification handler code here
-	m_pView->GetAllPathX();
+	//m_pView->GetAllPathX();
 }
 
 void CControlDlg::OnBnClickedCheck2()
