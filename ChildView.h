@@ -33,6 +33,7 @@ public:
 	SDisImg m_dislic;
 
 	CTransport m_transport;
+	CImageOp m_imageOp;
 
 	void DispImage(CPaintDC &dc, SDisImg &disp, int offx, int offy);
 

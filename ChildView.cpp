@@ -155,8 +155,6 @@ void CChildView::OnPaint()
 				for (int ii = 0; ii < si; ++ii) {
 					dc.SetPixelV(offx+(int)bound[ii].y,(int)bound[ii].z,0xffff);
 				}
-				//SWorkImg<realnum>& ar = m_liftedEikonal.m_imageOp.GetXTestSigDis(); // just returns m_loc
-				//ar.GetDispImg(m_dispd3);
 			}
 		}
 		offx += m_dispd2.xs+1;
@@ -301,11 +299,9 @@ void CChildView::OnPaint()
 
 void CChildView::InitTransport()
 {
-	//m_liftedEikonal.m_imageOp.GetXTestBound(m_xsee, m_liftedEikonal.m_boundcontour);
-	m_liftedEikonal.m_imageOp.GetPlaneDistMap(m_liftedEikonal.m_inicountourCalculator.RetrieveBound());//
+	m_imageOp.GetPlaneDistMap(m_liftedEikonal.m_inicountourCalculator.RetrieveBound());
 	if (m_liftedEikonal.m_phasefield.m_distance[0].xs > 0) {
-		SVoxImg<SWorkImg<realnum>>& passi = m_liftedEikonal.m_imageOp.GetIniMap(plane_normal.first.x);
-		//realnum maxdist = min(m_liftedEikonal.m_currentdistance[0], m_liftedEikonal.m_currentdistance[1]);
+		SVoxImg<SWorkImg<realnum>>& passi = m_imageOp.GetIniMap(plane_normal.first.x);
 		realnum maxdist = m_liftedEikonal.m_phasefield.m_currentdistance;
 		m_transport.TrInit(m_liftedEikonal.m_phasefield.m_combined_distance, passi, maxdist);
 
@@ -388,7 +384,7 @@ void CChildView::InitThread()
 		m_end_point.x = -100;
 		m_end_point.y = -100;
 	}
-	SVoxImg<SWorkImg<realnum>>& data = m_liftedEikonal.m_imageOp.GetTestInput();
+	SVoxImg<SWorkImg<realnum>>& data = m_imageOp.GetTestInput();
 	if (m_bispoint == 1) {
 		m_end_point.z = m_xsee;
 	}
@@ -615,9 +611,9 @@ void CControlDlg::OnBnClickedButton2() // synth. image 1
 {
 	// TODO: Add your control notification handler code here
 	if (m_bini) return;
-	m_pView->m_liftedEikonal.m_imageOp.CreateTestImage(XS_,YS_,ZS_);
+	m_pView->m_imageOp.CreateTestImage(XS_,YS_,ZS_);
 	{
-		m_pView->m_work = m_pView->m_liftedEikonal.m_imageOp.m_testimage[m_pView->m_zsee];
+		m_pView->m_work = m_pView->m_imageOp.m_testimage[m_pView->m_zsee];
 		m_pView->m_valid = 1;
 		m_pView->m_grays = true;
 		m_pView->m_color = false;
@@ -641,9 +637,9 @@ void CControlDlg::OnBnClickedButton2() // synth. image 1
 void CControlDlg::OnBnClickedButton3() // contour on plane
 {
 	// TODO: Add your control notification handler code here
-	m_pView->m_liftedEikonal.m_imageOp.GetXTestBound(m_pView->m_xsee/* - 1*/, m_pView->m_liftedEikonal.m_boundcontour);
+	m_pView->m_imageOp.GetXTestBound(m_pView->m_xsee/* - 1*/, m_pView->m_liftedEikonal.m_boundcontour);
 	if (m_pView->m_liftedEikonal.m_phasefield.m_distance[0].xs > 0) {
-		SVoxImg<SWorkImg<realnum>> & passi = m_pView->m_liftedEikonal.m_imageOp.GetIniMap(m_pView->m_xsee/* - 1*/);
+		SVoxImg<SWorkImg<realnum>> & passi = m_pView->m_imageOp.GetIniMap(m_pView->m_xsee/* - 1*/);
 		//m_pView->m_transport.TrInit(m_pView->m_liftedEikonal.m_phasefield.m_smoothdist[0],passi, m_pView->m_liftedEikonal.m_currentdistance[0]);
 		m_pView->m_transport.TrInit(m_pView->m_liftedEikonal.m_phasefield.m_distance[0], passi, m_pView->m_liftedEikonal.m_phasefield.m_currentdistance);
 
@@ -702,12 +698,8 @@ void CControlDlg::OnNMCustomdrawSlider1(NMHDR *pNMHDR, LRESULT *pResult)
 		sprintf_s(txt,20,"%d",m_pView->m_zsee);
 		m_ezlevel.SetWindowTextA(txt);
 
-	m_pView->m_work = m_pView->m_liftedEikonal.m_imageOp.m_testimage[m_pView->m_zsee];
-	/*if (!m_pView->m_bsee)
-		m_pView->m_work = m_pView->m_liftedEikonal.m_imageOp.m_testimage[m_pView->m_zsee];
-	else
-		m_pView->m_work = m_pView->m_liftedEikonal.m_imageOp.m_testinput[m_pView->m_zsee];
-	*/
+	m_pView->m_work = m_pView->m_imageOp.m_testimage[m_pView->m_zsee];
+
 	if (!m_pView->m_btransportview) {
 		m_pView->m_work.GetDispImg(m_pView->m_disp);
 	}
@@ -726,10 +718,8 @@ void CControlDlg::OnNMCustomdrawSlider2(NMHDR *pNMHDR, LRESULT *pResult)
 	LPNMCUSTOMDRAW pNMCD = reinterpret_cast<LPNMCUSTOMDRAW>(pNMHDR);
 	// TODO: Add your control notification handler code here
 	if (!m_bini) goto ret;
-	SVoxImg<SWorkImg<realnum>> &testimg = m_pView->m_liftedEikonal.m_imageOp.m_testimage;
-	/*
-	SVoxImg<SWorkImg<realnum>> &testimg = m_pView->m_bsee?m_pView->m_liftedEikonal.m_imageOp.m_testinput:m_pView->m_liftedEikonal.m_imageOp.m_testimage;
-	*/
+	SVoxImg<SWorkImg<realnum>> &testimg = m_pView->m_imageOp.m_testimage;
+
 	if (!m_pView->m_btransportview) {
 		int xs = testimg.xs, zs = testimg.zs;
 		SWorkImg<realnum>& yslice = m_pView->m_intey;
@@ -761,13 +751,9 @@ void CControlDlg::OnNMCustomdrawSlider3(NMHDR *pNMHDR, LRESULT *pResult)
 	// TODO: Add your control notification handler code here
 	if (!m_bini) goto ret;
 
-	//m_pView->m_transport.GetDispSlice(Talox, m_pView->m_xsee - 1, m_pView->m_dispd3); // new (Transport)
 
+	SVoxImg<SWorkImg<realnum>> &testimg = m_pView->m_imageOp.m_testimage;
 
-	SVoxImg<SWorkImg<realnum>> &testimg = m_pView->m_liftedEikonal.m_imageOp.m_testimage;
-	/*
-	SVoxImg<SWorkImg<realnum>> &testimg = m_pView->m_bsee?m_pView->m_liftedEikonal.m_imageOp.m_testinput:m_pView->m_liftedEikonal.m_imageOp.m_testimage;
-	*/
 	if (!m_pView->m_btransportview) {
 		int ys = testimg.ys, zs = testimg.zs;
 		SWorkImg<realnum>& xslice = m_pView->m_intex;
@@ -869,9 +855,9 @@ void CControlDlg::OnBnClickedButton7() // synth. image 2
 {
 	// TODO: Add your control notification handler code here
 	if (m_bini) return;
-	m_pView->m_liftedEikonal.m_imageOp.CreateTestImage2(XS_,YS_,ZS_);
+	m_pView->m_imageOp.CreateTestImage2(XS_,YS_,ZS_);
 	{
-		m_pView->m_work = m_pView->m_liftedEikonal.m_imageOp.m_testimage[m_pView->m_zsee];
+		m_pView->m_work = m_pView->m_imageOp.m_testimage[m_pView->m_zsee];
 		m_pView->m_valid = 1;
 		m_pView->m_grays = true;
 		m_pView->m_color = false;

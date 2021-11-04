@@ -132,7 +132,6 @@ public:
 	CCurvEikonal(void);
 	~CCurvEikonal(void);
 
-	CImageOp m_imageOp;
 	CPlanePhaseField m_inicountourCalculator;
 
 	// phase field stuff
