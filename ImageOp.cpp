@@ -1,7 +1,7 @@
 #include "stdafx.h"
 #include "ImageOp.h"
 #include "math.h"
-
+#include <queue>
 CImageOp::CImageOp(void)
 {
 }
@@ -152,17 +152,38 @@ void CImageOp::GetXTestDisTrans()
 
 void CImageOp::XTestfill(short x, short y)
 {
+	std::queue<unsigned long> x_queue;
+	std::queue<unsigned long> y_queue;
+	x_queue.push(x);
+	y_queue.push(y);
 	std::unordered_set<unsigned long>::const_iterator pe = m_bound.end();
-	std::unordered_set<unsigned long>::const_iterator pp = m_bound.find((y<<16)+x);
 	short xs = m_loc.xs, ys = m_loc.ys;
-	if (pp == pe && m_loc[y][x] > 0.5) {
-		m_loc[y][x] = 0;
-		if (x < xs-1) XTestfill(x + 1, y);
-		if (y < ys-1) XTestfill(x, y + 1);
-		if (x > 0) XTestfill(x - 1, y);
-		if (y > 0) XTestfill(x, y - 1);
+	while (!x_queue.empty()) {
+		short x = x_queue.front();
+		short y = y_queue.front();
+		x_queue.pop();
+		y_queue.pop();
+		std::unordered_set<unsigned long>::const_iterator pp = m_bound.find((y << 16) + x);
+		if (pp == pe && m_loc[y][x] > 0.5) {
+			m_loc[y][x] = 0;
+			if (x < xs - 1) {
+				x_queue.push(x + 1);
+				y_queue.push(y);
+			}
+			if (y < ys - 1) {
+				x_queue.push(x);
+				y_queue.push(y + 1);
+			}
+			if (x > 0) {
+				x_queue.push(x - 1);
+				y_queue.push(y);
+			}
+			if (y > 0) {
+				x_queue.push(x );
+				y_queue.push(y - 1);
+			}
+		}
 	}
-
 }
 
 void CImageOp::GetXTestBound(int ix, std::vector<CVec3>& out) // contour on plane MAIN 1

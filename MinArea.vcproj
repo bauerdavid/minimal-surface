@@ -61,8 +61,7 @@
 				Name="VCResourceCompilerTool"
 				PreprocessorDefinitions="_DEBUG"
 				Culture="1033"
-				AdditionalIncludeDirectories="C:\Users\Tejfel\Downloads\example project\HelloInsight_build\ITKFactoryRegistration;
-      C:\SimpleITK-build\ITK\Modules\Remote\SimpleITKFilters\include;
+				AdditionalIncludeDirectories="C:\SimpleITK-build\ITK\Modules\Remote\SimpleITKFilters\include;
       C:\SimpleITK-build\ITK\Modules\Video\IO\include;
       C:\SimpleITK-build\ITK\Modules\Video\Filtering\include;
       C:\SimpleITK-build\ITK\Modules\Video\Core\include;
@@ -331,8 +330,7 @@
 				Name="VCResourceCompilerTool"
 				PreprocessorDefinitions="NDEBUG"
 				Culture="1033"
-				AdditionalIncludeDirectories="C:\Users\Tejfel\Downloads\example project\HelloInsight_build\ITKFactoryRegistration;
-      C:\SimpleITK-build\ITK\Modules\Remote\SimpleITKFilters\include;
+				AdditionalIncludeDirectories="C:\SimpleITK-build\ITK\Modules\Remote\SimpleITKFilters\include;
       C:\SimpleITK-build\ITK\Modules\Video\IO\include;
       C:\SimpleITK-build\ITK\Modules\Video\Filtering\include;
       C:\SimpleITK-build\ITK\Modules\Video\Core\include;

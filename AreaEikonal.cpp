@@ -1,7 +1,9 @@
 #include "stdafx.h"
 #include "AreaEikonal.h"
+#include "Utils.h"
 #include "math.h"
 #include <omp.h>
+#include "SimpleITK.h"
 
 #define BIG_NUMBER 1e11
 #define MAX_THREADS 32
@@ -15,6 +17,24 @@ CCurvEikonal::CCurvEikonal(void)
 
 CCurvEikonal::~CCurvEikonal(void)
 {
+}
+
+void CCurvEikonal::ExtractMeetingPlane() {
+	for (int zz = 0; zz < m_phasefield.meeting_plane_positions.zs; ++zz) {
+		for (int yy = 0; yy < m_phasefield.meeting_plane_positions.ys; ++yy) {
+			for (int xx = 0; xx < m_phasefield.meeting_plane_positions.xs; ++xx) {
+				if (m_phasefield.meeting_plane_positions[zz][yy][xx])
+					meeting_plane.insert(IPoi3<double>(xx, yy, zz));
+				m_phasefield.m_combined_distance[zz][yy][xx] =
+					m_phasefield.m_distance[0][zz][yy][xx] >= 0 ? m_phasefield.m_distance[0][zz][yy][xx] : m_phasefield.m_distance[1][zz][yy][xx];
+			}
+		}
+	}
+	std::pair<IPoi3<double>, IPoi3<double>> plane_info = best_plane_from_points(meeting_plane);
+	plane_center = plane_info.first;
+	plane_normal = plane_info.second;
+	plane_offset = -(plane_center.x * plane_normal.x + plane_center.y * plane_normal.y + plane_center.z * plane_normal.z);
+
 }
 
 // Image prep&check
@@ -164,10 +184,16 @@ void CPhaseContainer::SmoothMap(SVoxImg<SWorkImg<realnum>> &src1, SVoxImg<SWorkI
 
 	int xs = src1.xs, ys = src1.ys, zs = src1.zs;
 
-	#pragma omp parallel for collapse(3)
-	for (int zz = 0; zz < zs; ++zz) {
+	#pragma omp parallel for schedule(static)
+	/*for (int zz = 0; zz < zs; ++zz) {
 		for (int yy = 0; yy < ys; ++yy) {
-			for (int xx = 0; xx < xs; ++xx) {
+			for (int xx = 0; xx < xs; ++xx) {*/
+	for (int zyx = 0; zyx < zs * ys * xs; zyx++) {
+		int zz = zyx / (ys * xs);
+		{
+			int yy = (zyx / xs) % ys;
+			{
+				int xx = zyx % xs;
 				int smst = smstat[zz][yy][xx];
 				if (smst > 0) continue;
 				smstat[zz][yy][xx] = -2;
@@ -195,10 +221,16 @@ void CPhaseContainer::SmoothMap(SVoxImg<SWorkImg<realnum>> &src1, SVoxImg<SWorkI
 			}
 		}
 	}
-	#pragma omp parallel for collapse(3)
-	for (int zz = 0; zz < zs; ++zz) {
+	#pragma omp parallel for schedule(static)
+	/*for (int zz = 0; zz < zs; ++zz) {
 		for (int yy = 0; yy < ys; ++yy) {
-			for (int xx = 0; xx < xs; ++xx) {
+			for (int xx = 0; xx < xs; ++xx) {*/
+	for (int zyx = 0; zyx < zs * ys * xs; zyx++) {
+		int zz = zyx / (ys * xs);
+		{
+			int yy = (zyx / xs) % ys;
+			{
+				int xx = zyx % xs;
 				int ym(yy - 1); if (ym == -1) ym = 1;
 				int yp(yy + 1); if (yp == ys) yp = ys - 2;
 				int smst = smstat[zz][yy][xx];
@@ -224,10 +256,16 @@ void CPhaseContainer::SmoothMap(SVoxImg<SWorkImg<realnum>> &src1, SVoxImg<SWorkI
 			}
 		}
 	}
-	#pragma omp parallel for collapse(3)
-	for (int zz = 0; zz < zs; ++zz) {
+	#pragma omp parallel for schedule(static)
+	/*for (int zz = 0; zz < zs; ++zz) {
 		for (int yy = 0; yy < ys; ++yy) {
-			for (int xx = 0; xx < xs; ++xx) {
+			for (int xx = 0; xx < xs; ++xx) {*/
+	for (int zyx = 0; zyx < zs * ys * xs; zyx++) {
+		int zz = zyx / (ys * xs);
+		{
+			int yy = (zyx / xs) % ys;
+			{
+				int xx = zyx % xs;
 				int zm(zz - 1); if (zm == -1) zm = 1;
 				int zp(zz + 1); if (zp == zs) zp = zs - 2;
 				int smst = smstat[zz][yy][xx];
@@ -275,10 +313,16 @@ void CPhaseContainer::CalculateFundQuant(int i, int test)
 	static int nsh; nsh = 0;
 	//int ign(0), ian(0);
 
-	#pragma omp parallel for collapse(3)
-	for (int zz = 0; zz < zs; ++zz) {
+	#pragma omp parallel for schedule(static)
+	/*for (int zz = 0; zz < zs; ++zz) {
 		for (int yy = 0; yy < ys; ++yy) {
-			for (int xx = 0; xx < xs; ++xx) {
+			for (int xx = 0; xx < xs; ++xx) {*/
+	for (int zyx = 0; zyx < zs * ys * xs; zyx++) {
+		int zz = zyx / (ys * xs);
+		{
+			int yy = (zyx / xs) % ys;
+			{
+				int xx = zyx % xs;
 				int zm(zz - 1); if (zm == -1) zm = 1;
 				int zp(zz + 1); if (zp == zs) zp = zs - 2;
 				int yp(yy + 1); if (yp == ys) yp = ys - 2;
@@ -415,7 +459,16 @@ realnum CPhaseContainer::UpdateVelo(int i, bool use_correction) {
 	// Calculate the velocity at every point (velo[zz][yy][xx]), and the maximum velocity (maxv)
 	velo.Set0(xs, ys, zs);
 	{
-#pragma omp parallel for collapse(3) shared(maxinfo)
+#pragma omp parallel for shared(maxinfo) schedule(static)
+		/*for (int zyx = 0; zyx < zs * ys * xs; zyx++) {
+			int zz = zyx / (ys * xs);
+			if (zz == 0 || zz >= zs - 1) continue;
+			{
+				int yy = (zyx / xs) % ys;
+				if (yy == 0 || yy >= ys - 1) continue;
+				{
+					int xx = zyx % xs;
+					if (xx == 0 || xx >= xs - 1) continue;*/
 		for (int zz = 1; zz < zs - 1; ++zz) {
 			for (int yy = 1; yy < ys - 1; ++yy) {
 				for (int xx = 1; xx < xs - 1; ++xx) {
@@ -572,10 +625,19 @@ void CPhaseContainer::UpdateField(int i, realnum maxv) {
 	SVoxImg<SWorkImg<realnum>>& velo = m_velo[i];
 
 	int xs = field.xs, ys = field.ys, zs = field.zs;
-#pragma omp parallel for
-	for (int zz = 1; zz < zs - 1; ++zz) {
+#pragma omp parallel for schedule(static)
+	for (int zyx = 0; zyx < zs * ys * xs; zyx++) {
+		int zz = zyx / (ys * xs);
+		if (zz == 0 || zz >= zs - 1) continue;
+		{
+			int yy = (zyx / xs) % ys;
+			if (yy == 0 || yy >= ys - 1) continue;
+			{
+				int xx = zyx % xs;
+				if (xx == 0 || xx >= xs - 1) continue;
+	/*for (int zz = 1; zz < zs - 1; ++zz) {
 		for (int yy = 0 + 1; yy < ys - 1; ++yy) {
-			for (int xx = 0 + 1; xx < xs - 1; ++xx) {
+			for (int xx = 0 + 1; xx < xs - 1; ++xx) {*/
 				field[zz][yy][xx] += velo[zz][yy][xx] * maxv;// ;
 				if (field[zz][yy][xx] > 1.25) field[zz][yy][xx] = 1.25;
 			}
@@ -590,10 +652,19 @@ void CPhaseContainer::UpdateDistance(int i, realnum current_distance) {
 	// m_phasefield.m_distance[(i+1)&1]
 	SVoxImg<SWorkImg<realnum>>& counterd = m_distance[(i + 1) & 1];
 	int xs = field.xs, ys = field.ys, zs = field.zs;
-#pragma omp parallel for
-	for (int zz = 1; zz < zs - 1; ++zz) {
+#pragma omp parallel for schedule(static)
+	for (int zyx = 0; zyx < zs * ys * xs; zyx++) {
+			int zz = zyx / (ys * xs);
+			if (zz == 0 || zz >= zs - 1) continue;
+			{
+				int yy = (zyx / xs) % ys;
+				if (yy == 0 || yy >= ys - 1) continue;
+				{
+					int xx = zyx % xs;
+					if (xx == 0 || xx >= xs - 1) continue;
+	/*for (int zz = 1; zz < zs - 1; ++zz) {
 		for (int yy = 0 + 1; yy < ys - 1; ++yy) {
-			for (int xx = 0 + 1; xx < xs - 1; ++xx) {
+			for (int xx = 0 + 1; xx < xs - 1; ++xx) {*/
 				if (field[zz][yy][xx] > 0 && distance[zz][yy][xx] < -0.5f) {
 					distance[zz][yy][xx] = current_distance;
 				}
@@ -611,7 +682,7 @@ void CPhaseContainer::Iterate(bool use_correction)
 	// m_phasefield.m_field[i]
 	realnum maxv0 = UpdateVelo(0, use_correction);
 	realnum maxv1 = UpdateVelo(1, use_correction);
-	realnum maxv = max(maxv0, maxv1);
+	realnum maxv = maxv0 > maxv1? maxv0 : maxv1;
 	if (maxv < 1e-11) maxv = 1e-11;
 
 	realnum mdatspedmax = 0.5 * 4; //*2 set max speed

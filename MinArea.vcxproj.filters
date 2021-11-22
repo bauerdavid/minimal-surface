@@ -39,7 +39,7 @@
     <ClCompile Include="Transport.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="FitPlane.cpp">
+    <ClCompile Include="Utils.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
@@ -77,7 +77,7 @@
     <ClInclude Include="Transport.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="FitPlane.h">
+    <ClInclude Include="Utils.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

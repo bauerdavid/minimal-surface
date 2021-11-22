@@ -627,8 +627,13 @@ template <class T> struct SWorkImg {
 			}
 		}
 		maxval = minval = avgval = 0;
-		for (int q = 0; q < ys; ++q) {
-			for (int p = 0; p < xs; ++p) {
+#pragma omp parallel for schedule(static)
+		for (int qp = 0; qp < xs * ys; qp++) {
+			int q = (qp / xs);
+			{
+				int p = qp % xs;
+		//for (int q = 0; q < ys; ++q) {
+		//	for (int p = 0; p < xs; ++p) {
 				dat[q*xs+p] = (T)0;
 			}
 		}
@@ -646,8 +651,13 @@ template <class T> struct SWorkImg {
 			}
 		}
 		maxval = minval = avgval = 0;
-		for (int q = 0; q < ys; ++q) {
-			for (int p = 0; p < xs; ++p) {
+#pragma omp parallel for schedule(static)
+		for (int qp = 0; qp < xs * ys; qp++) {
+			int q = (qp / xs); 
+			{
+				int p = qp % xs; 
+		//for (int q = 0; q < ys; ++q) {
+		//	for (int p = 0; p < xs; ++p) {
 				dat[q*xs+p] = fill;
 			}
 		}
@@ -667,8 +677,13 @@ template <class T> struct SWorkImg {
 		maxval = 0;
 		minval = (T)10000;
 		avgval = 0;
-		for (int q = 0; q < ys; ++q) {
-			for (int p = 0; p < xs; ++p) {
+#pragma omp parallel for schedule(static)
+		for (int qp = 0; qp < xs * ys; qp++) {
+			int q = (qp / xs);
+			{
+				int p = qp % xs;
+		/*for (int q = 0; q < ys; ++q) {
+			for (int p = 0; p < xs; ++p) {*/
 				T t = (T)*buf++;
 				dat[q*xs+p] = t;
 				if (maxval < t) maxval = t;
@@ -732,11 +747,17 @@ template <class T> struct SWorkImg {
 		maxval = tc.maxval;
 		minval = tc.minval;
 		avgval = tc.avgval;
-		for (int q = 0; q < ys; ++q) {
+#pragma omp parallel for schedule(static)
+		for (int qp = 0; qp < xs * ys; qp++) {
+			int q = (qp / xs);
+			int p = qp % xs;
+			dat[qp] = tc[q][p];
+		}
+		/*for (int q = 0; q < ys; ++q) {
 			for (int p = 0; p < xs; ++p) {
 				dat[q*xs+p] = tc[q][p];
 			}
-		}
+		}*/
 		return *this;
 	}
 	void operator=(SDisImg &tc) {
@@ -1613,6 +1634,7 @@ template <class T> struct SVoxImg {
 				return;
 			}
 		}
+#pragma omp for schedule(static)
 		for (int q = 0; q < zs; ++q) {
 			dat[q].Set(xs,ys,-1);
 		}
@@ -1631,6 +1653,7 @@ template <class T> struct SVoxImg {
 				return;
 			}
 		}
+#pragma omp for schedule(static)
 		for (int q = 0; q < zs; ++q) {
 			dat[q].Set(xs,ys,0.0);
 		}
@@ -1648,7 +1671,7 @@ template <class T> struct SVoxImg {
 				return *this;
 			}
 		}
-
+#pragma omp for schedule(static)
 		for (int q = 0; q < zs; ++q) {
 			dat[q] = tc.dat[q];
 		}
@@ -1880,6 +1903,7 @@ template <class T> struct SVoxImg {
 
 
 	SVoxImg& operator*= (realnum r) {
+#pragma omp for schedule(static)
 		for (int q = 0; q < zs; ++q) {
 			dat[q] *= r;	
 		}

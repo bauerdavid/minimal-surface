@@ -1,0 +1,39 @@
+﻿lld-link : error : undefined symbol: __kmpc_fork_call
+  >>> referenced by Y:\BIOMAG\shortest path\MinArea\MinArea\AreaEikonal.cpp:60
+  >>>               x64\Debug\AreaEikonal.obj:(public: void __cdecl CPhaseContainer::RegularizePhaseField(struct SVoxImg<struct SWorkImg<double>> &, struct SVoxImg<struct SWorkImg<double>> &))
+  >>> referenced by Y:\BIOMAG\shortest path\MinArea\MinArea\AreaEikonal.cpp:69
+  >>>               x64\Debug\AreaEikonal.obj:(public: void __cdecl CPhaseContainer::RegularizePhaseField(struct SVoxImg<struct SWorkImg<double>> &, struct SVoxImg<struct SWorkImg<double>> &))
+  >>> referenced by Y:\BIOMAG\shortest path\MinArea\MinArea\AreaEikonal.cpp:81
+  >>>               x64\Debug\AreaEikonal.obj:(public: void __cdecl CPhaseContainer::RegularizePhaseField(struct SVoxImg<struct SWorkImg<double>> &, struct SVoxImg<struct SWorkImg<double>> &))
+  >>> referenced 18 more times
+  
+lld-link : error : undefined symbol: __kmpc_for_static_init_4
+  >>> referenced by Y:\BIOMAG\shortest path\MinArea\MinArea\AreaEikonal.cpp:61
+  >>>               x64\Debug\AreaEikonal.obj:(.omp_outlined._debug__)
+  >>> referenced by Y:\BIOMAG\shortest path\MinArea\MinArea\AreaEikonal.cpp:70
+  >>>               x64\Debug\AreaEikonal.obj:(.omp_outlined._debug__.1)
+  >>> referenced by Y:\BIOMAG\shortest path\MinArea\MinArea\AreaEikonal.cpp:82
+  >>>               x64\Debug\AreaEikonal.obj:(.omp_outlined._debug__.3)
+  >>> referenced 13 more times
+  
+lld-link : error : undefined symbol: __kmpc_for_static_fini
+  >>> referenced by Y:\BIOMAG\shortest path\MinArea\MinArea\AreaEikonal.cpp:60
+  >>>               x64\Debug\AreaEikonal.obj:(.omp_outlined._debug__)
+  >>> referenced by Y:\BIOMAG\shortest path\MinArea\MinArea\AreaEikonal.cpp:69
+  >>>               x64\Debug\AreaEikonal.obj:(.omp_outlined._debug__.1)
+  >>> referenced by Y:\BIOMAG\shortest path\MinArea\MinArea\AreaEikonal.cpp:81
+  >>>               x64\Debug\AreaEikonal.obj:(.omp_outlined._debug__.3)
+  >>> referenced 18 more times
+  
+lld-link : error : undefined symbol: __kmpc_for_static_init_8
+  >>> referenced by Y:\BIOMAG\shortest path\MinArea\MinArea\AreaEikonal.cpp:187
+  >>>               x64\Debug\AreaEikonal.obj:(.omp_outlined._debug__.7)
+  >>> referenced by Y:\BIOMAG\shortest path\MinArea\MinArea\AreaEikonal.cpp:218
+  >>>               x64\Debug\AreaEikonal.obj:(.omp_outlined._debug__.9)
+  >>> referenced by Y:\BIOMAG\shortest path\MinArea\MinArea\AreaEikonal.cpp:247
+  >>>               x64\Debug\AreaEikonal.obj:(.omp_outlined._debug__.11)
+  >>> referenced 2 more times
+  
+lld-link : error : undefined symbol: omp_get_thread_num
+  >>> referenced by Y:\BIOMAG\shortest path\MinArea\MinArea\AreaEikonal.cpp:441
+  >>>               x64\Debug\AreaEikonal.obj:(.omp_outlined._debug__.15)

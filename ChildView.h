@@ -60,8 +60,7 @@ public:
 	bool m_bsee;
 	int m_curvsee;
 	bool m_btransportview;
-	std::pair<IPoi3<double>, IPoi3<double>> plane_normal;
-	double plane_offset = 1e11;
+	
 
 	// image general
 	int m_expfac;

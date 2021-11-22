@@ -5,13 +5,16 @@
 #include "stdafx.h"
 #include "MinArea.h"
 #include "ChildView.h"
-#include "FitPlane.h"
+#include "Utils.h"
 
 #ifdef _DEBUG
 #define new DEBUG_NEW
 #endif
 #include <iostream>
+#include <sitkImage.h>
+#include <sitkAdditionalProcedures.h>
 using namespace std;
+namespace sitk = itk::simple;
 // CChildView
 
 CChildView::CChildView()
@@ -200,7 +203,7 @@ void CChildView::OnPaint()
 					for (int yy = 0; yy < field.ys; ++yy) {
 						for (int xx = 0; xx < field.xs; ++xx) {
 							if (m_threadactivated == 1 || m_threadactivated == 5) {
-								if (abs(plane_normal.second.x*xx+plane_normal.second.y*yy+plane_normal.second.z*zsee+plane_offset) < 1.0) {
+								if (abs(m_liftedEikonal.plane_normal.x*xx+ m_liftedEikonal.plane_normal.y*yy+ m_liftedEikonal.plane_normal.z*zsee+ m_liftedEikonal.plane_offset) < 0.5) {
 									dc.SetPixelV(xx, yy, 0xff00ff);
 								}
 								else if (meeting_plane[zsee][yy][xx]) {
@@ -217,7 +220,7 @@ void CChildView::OnPaint()
 			if (m_dispd1.xs) for (int zz = 0; zz < field.zs; ++zz) {
 				for (int xx = 0; xx < field.xs; ++xx) {
 					if (m_threadactivated  == 1 || m_threadactivated == 5) {
-						if (abs(plane_normal.second.x * xx + plane_normal.second.y * m_ysee + plane_normal.second.z * zz + plane_offset) < 1.0) {
+						if (abs(m_liftedEikonal.plane_normal.x * xx + m_liftedEikonal.plane_normal.y * m_ysee + m_liftedEikonal.plane_normal.z * zz + m_liftedEikonal.plane_offset) < 0.5) {
 							dc.SetPixelV(m_disp.xs + 1 + xx, zz, 0xff00ff);
 						}
 						else if (meeting_plane[zz][m_ysee][xx]) {
@@ -237,7 +240,7 @@ void CChildView::OnPaint()
 				for (int zz = 0; zz < field.zs; ++zz) {
 					for (int yy = 0; yy < field.ys; ++yy) {
 						if (m_threadactivated == 1 || m_threadactivated == 5) {
-							if (abs(plane_normal.second.x * m_xsee + plane_normal.second.y * yy + plane_normal.second.z * zz + plane_offset) < 1.0) {
+							if (abs(m_liftedEikonal.plane_normal.x * m_xsee + m_liftedEikonal.plane_normal.y * yy + m_liftedEikonal.plane_normal.z * zz + m_liftedEikonal.plane_offset) < 0.5) {
 								dc.SetPixelV(2 * (m_disp.xs + 1) + yy, zz, 0xff00ff);
 							}
 							else if (meeting_plane[zz][yy][m_xsee]) {
@@ -301,7 +304,7 @@ void CChildView::InitTransport()
 {
 	m_imageOp.GetPlaneDistMap(m_liftedEikonal.m_inicountourCalculator.RetrieveBound());
 	if (m_liftedEikonal.m_phasefield.m_distance[0].xs > 0) {
-		SVoxImg<SWorkImg<realnum>>& passi = m_imageOp.GetIniMap(plane_normal.first.x);
+		SVoxImg<SWorkImg<realnum>>& passi = m_imageOp.GetIniMap(m_liftedEikonal.plane_center.x);
 		realnum maxdist = m_liftedEikonal.m_phasefield.m_currentdistance;
 		m_transport.TrInit(m_liftedEikonal.m_phasefield.m_combined_distance, passi, maxdist);
 
@@ -330,18 +333,73 @@ UINT BackgroundThread(LPVOID params)
 			if (++cyc > 7) { view->Invalidate(FALSE); cyc = 0; }
 
 			if (view->m_liftedEikonal.m_phasefield.m_bdone) {
-				for (int zz = 1; zz < view->m_liftedEikonal.m_phasefield.meeting_plane_positions.zs - 1; ++zz) {
-					for (int yy = 1; yy < view->m_liftedEikonal.m_phasefield.meeting_plane_positions.ys - 1; ++yy) {
-						for (int xx = 1; xx < view->m_liftedEikonal.m_phasefield.meeting_plane_positions.xs - 1; ++xx) {
-							if (view->m_liftedEikonal.m_phasefield.meeting_plane_positions[zz][yy][xx])
-								view->m_liftedEikonal.meeting_plane.insert(IPoi3<double>(xx, yy, zz));
-							view->m_liftedEikonal.m_phasefield.m_combined_distance[zz][yy][xx] =
-								view->m_liftedEikonal.m_phasefield.m_distance[0][zz][yy][xx] >= 0 ? view->m_liftedEikonal.m_phasefield.m_distance[0][zz][yy][xx] : view->m_liftedEikonal.m_phasefield.m_distance[1][zz][yy][xx];
+				view->m_liftedEikonal.ExtractMeetingPlane();
+				double xs(view->m_liftedEikonal.m_phasefield.m_distance->xs);
+				double ys(view->m_liftedEikonal.m_phasefield.m_distance->ys);
+				double zs(view->m_liftedEikonal.m_phasefield.m_distance->zs);
+				// find nearest vector, aligned with the data grid
+				double max_normal = abs(view->m_liftedEikonal.plane_normal.x);
+				int max_normal_sign = sgn(view->m_liftedEikonal.plane_normal.x);
+				int normal_index = 0;
+				if (abs(view->m_liftedEikonal.plane_normal.y) > max_normal) {
+					max_normal = view->m_liftedEikonal.plane_normal.y;
+					max_normal_sign = sgn(view->m_liftedEikonal.plane_normal.y);
+					int normal_index = 1;
+				}
+				if (abs(view->m_liftedEikonal.plane_normal.z) > max_normal) {
+					max_normal = view->m_liftedEikonal.plane_normal.z;
+					max_normal_sign = sgn(view->m_liftedEikonal.plane_normal.z);
+					int normal_index = 2;
+				}
+				vector<double> sample_plane_normal = vector<double>(3);
+				for (int i = 0; i < 3; i++) {
+					sample_plane_normal[i] = i == normal_index ? max_normal_sign : 0;
+				}
+				// calculate rotation between the two normals
+				vector<double> plane_normal = vector<double>({ view->m_liftedEikonal.plane_normal.x, view->m_liftedEikonal.plane_normal.y, view->m_liftedEikonal.plane_normal.z });
+				vector<double> rotation_matrix = rotation_matrix_from_vectors<double>(sample_plane_normal, plane_normal);
+				// calculate data center
+				vector<unsigned int> data_size = { (unsigned int) xs, (unsigned int) ys, (unsigned int) zs };
+				vector<double> data_center;
+				std::transform(data_size.begin(), data_size.end(), std::back_inserter(data_center), [](double v) { return (double)v / 2; });
+
+				// calculate the size of the sample data grid
+				vector<unsigned int> sample_size;
+				vector<double> upper_bound = { -DBL_MAX, -DBL_MAX, -DBL_MAX};
+				vector<double> lower_bound = { DBL_MAX, DBL_MAX, DBL_MAX };
+				for (double z = 0; z < zs+1; z+=zs) {
+					for (double y = 0; y < ys+1; y+=ys) {
+						for (double x = 0; x < xs+1; x+=xs) {
+							vector<double> point = { x, y, z };
+							vector<double> rotated;
+							rotate(rotation_matrix, point, rotated);
+							std::transform(rotated.begin(), rotated.end(), upper_bound.begin(), upper_bound.begin(), [](double a, double b) { return (a > b) ? a : b; });
+							std::transform(rotated.begin(), rotated.end(), lower_bound.begin(), lower_bound.begin(), [](double a, double b) { return (a < b) ? a : b; });
 						}
 					}
 				}
-				view->plane_normal = best_plane_from_points(view->m_liftedEikonal.meeting_plane);
-				view->plane_offset = -(view->plane_normal.first.x * view->plane_normal.second.x + view->plane_normal.first.y * view->plane_normal.second.y + view->plane_normal.first.z * view->plane_normal.second.z);
+				std::transform(upper_bound.begin(), upper_bound.end(), lower_bound.begin(), std::back_inserter(sample_size), std::minus<double>{});
+				sitk::Image sample_img(sample_size, sitk::sitkFloat64);
+				sitk::Image distance_img(data_size, sitk::sitkFloat64);
+				double* distance_buffer = distance_img.GetBufferAsDouble();
+				for (int z = 0; z < zs; z++) {
+					for (int y = 0; y < ys; y++) {
+						for (int x = 0; x < xs; x++) {
+							distance_buffer[x + (int)xs * (y + (int)ys * (z))] = view->m_liftedEikonal.m_phasefield.m_combined_distance[z][y][x];
+						}
+					}
+				}
+				sample_img.SetDirection(rotation_matrix);
+
+
+				vector<double> sample_center;
+				std::transform(sample_size.begin(), sample_size.end(), std::back_inserter(sample_center), [](double v) { return v / 2; });
+				sample_center = sample_img.TransformContinuousIndexToPhysicalPoint(sample_center);
+				
+				vector<double> sample_origin;
+				std::transform(data_center.begin(), data_center.end(), sample_center.begin(), std::back_inserter(sample_origin), std::minus<double>());
+				sample_img.SetOrigin(sample_origin);
+				sitk::Resample(distance_img, sample_img);
 				view->m_threadactivated = 2;
 				view->Invalidate(FALSE);
 				
@@ -349,7 +407,7 @@ UINT BackgroundThread(LPVOID params)
 
 		}
 		else if (view->m_threadactivated == 2) {
-			view->m_liftedEikonal.m_inicountourCalculator.GetDistancemean(view->m_liftedEikonal.m_phasefield.m_combined_distance, view->plane_normal.first.x);
+			view->m_liftedEikonal.m_inicountourCalculator.GetDistancemean(view->m_liftedEikonal.m_phasefield.m_combined_distance, view->m_liftedEikonal.plane_center.x);
 			Sleep(300);
 			if (view->m_liftedEikonal.m_inicountourCalculator.m_bInited)
 				view->m_threadactivated = 3;

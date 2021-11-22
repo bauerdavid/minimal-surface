@@ -131,8 +131,11 @@ class CCurvEikonal
 public:
 	CCurvEikonal(void);
 	~CCurvEikonal(void);
-
+	void ExtractMeetingPlane();
 	CPlanePhaseField m_inicountourCalculator;
+	IPoi3<double> plane_center;
+	IPoi3<double> plane_normal;
+	double plane_offset = 1e11;
 
 	// phase field stuff
 	CPhaseContainer m_phasefield;
