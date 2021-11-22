@@ -1,4 +1,0 @@
-﻿ChildView.obj : error LNK2001: unresolved external symbol "public: __cdecl itk::simple::Image::Image(class std::vector<unsigned int,class std::allocator<unsigned int> > const &,enum itk::simple::PixelIDValueEnum,unsigned int)" (??0Image@simple@itk@@QEAA@AEBV?$vector@IV?$allocator@I@std@@@std@@W4PixelIDValueEnum@12@I@Z)
-ChildView.obj : error LNK2001: unresolved external symbol "public: virtual __cdecl itk::simple::Image::~Image(void)" (??1Image@simple@itk@@UEAA@XZ)
-ChildView.obj : error LNK2001: unresolved external symbol "public: void __cdecl itk::simple::Image::SetDirection(class std::vector<double,class std::allocator<double> > const &)" (?SetDirection@Image@simple@itk@@QEAAXAEBV?$vector@NV?$allocator@N@std@@@std@@@Z)
-Y:\BIOMAG\shortest path\MinArea\x64\Release\MinArea.exe : fatal error LNK1120: 3 unresolved externals
