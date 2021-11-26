@@ -4,6 +4,9 @@
 #include "ImageOp.h"
 
 #include <vector>
+#include <sitkImage.h>
+
+namespace sitk = itk::simple;
 
 #define MAXMINPATH 222 
 
@@ -64,7 +67,8 @@ public:
 	SWorkImg<realnum> m_field2D;
 	SWorkImg<realnum> m_velo2D;
 	// get the distance gradients along the selected x slice from the two neighboring slices
-	void GetDistancemean(SVoxImg<SWorkImg<realnum>> &distance, int xslice);
+	void GetDistancemean(SVoxImg<SWorkImg<realnum>> &distance1, SVoxImg<SWorkImg<realnum>>& distance2, int xslice);
+	void GetDistancemean(SVoxImg<SWorkImg<realnum>>& distance, int xslice);
 	void Iterate();
 	std::unordered_set<unsigned long> m_bound;
 	// collects bounding points into a set
@@ -88,6 +92,11 @@ public:
 	SVoxImg<SWorkImg<realnum>> m_distance[2];
 	SVoxImg<SWorkImg<realnum>> m_combined_distance;
 
+	SVoxImg<SWorkImg<realnum>> m_resampled_combined_distance;
+	SVoxImg<SWorkImg<realnum>> m_resampled_distance[2];
+	int m_resample_plane_slice;
+	sitk::Image m_distance_image;
+	sitk::Image m_transformed_distance_image;
 	// expansion
 
 	// gradients of the distance maps
@@ -113,7 +122,7 @@ public:
 	realnum m_currentdistance;
 
 	void Initialize(SVoxImg<SWorkImg<realnum>>& data, CVec3& start_point, CVec3& end_point);
-
+	void FindMeetPoints();
 	realnum UpdateVelo(int i, bool use_correction);
 	void UpdateField(int i, realnum maxv);
 	void UpdateDistance(int i, realnum current_distance);
@@ -136,7 +145,7 @@ public:
 	IPoi3<double> plane_center;
 	IPoi3<double> plane_normal;
 	double plane_offset = 1e11;
-
+	std::vector<double> rotation_matrix;
 	// phase field stuff
 	CPhaseContainer m_phasefield;
 

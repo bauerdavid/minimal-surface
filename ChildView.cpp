@@ -11,6 +11,7 @@
 #define new DEBUG_NEW
 #endif
 #include <iostream>
+#include <fstream>
 #include <sitkImage.h>
 #include <sitkAdditionalProcedures.h>
 using namespace std;
@@ -206,7 +207,7 @@ void CChildView::OnPaint()
 								if (abs(m_liftedEikonal.plane_normal.x*xx+ m_liftedEikonal.plane_normal.y*yy+ m_liftedEikonal.plane_normal.z*zsee+ m_liftedEikonal.plane_offset) < 0.5) {
 									dc.SetPixelV(xx, yy, 0xff00ff);
 								}
-								else if (meeting_plane[zsee][yy][xx]) {
+								else if (meeting_plane[zsee][yy][xx] > 0) {
 									dc.SetPixelV(xx, yy, 0xff0000);
 								}
 								else if (field[zsee][yy][xx] > -0.6f && field[zsee][yy][xx] < 0.6f)
@@ -223,7 +224,7 @@ void CChildView::OnPaint()
 						if (abs(m_liftedEikonal.plane_normal.x * xx + m_liftedEikonal.plane_normal.y * m_ysee + m_liftedEikonal.plane_normal.z * zz + m_liftedEikonal.plane_offset) < 0.5) {
 							dc.SetPixelV(m_disp.xs + 1 + xx, zz, 0xff00ff);
 						}
-						else if (meeting_plane[zz][m_ysee][xx]) {
+						else if (meeting_plane[zz][m_ysee][xx] > 0) {
 							dc.SetPixelV(m_disp.xs + 1 + xx, zz, 0xff0000);
 						}
 						else if (field[zz][m_ysee][xx] > -0.6f && field[zz][m_ysee][xx] < 0.6f)
@@ -243,7 +244,7 @@ void CChildView::OnPaint()
 							if (abs(m_liftedEikonal.plane_normal.x * m_xsee + m_liftedEikonal.plane_normal.y * yy + m_liftedEikonal.plane_normal.z * zz + m_liftedEikonal.plane_offset) < 0.5) {
 								dc.SetPixelV(2 * (m_disp.xs + 1) + yy, zz, 0xff00ff);
 							}
-							else if (meeting_plane[zz][yy][m_xsee]) {
+							else if (meeting_plane[zz][yy][m_xsee] > 0) {
 								dc.SetPixelV(2 * (m_disp.xs + 1) + yy, zz, 0xff0000);
 							}
 							else if (field[zz][yy][m_xsee] > -0.6f && field[zz][yy][m_xsee] < 0.6f)
@@ -302,20 +303,22 @@ void CChildView::OnPaint()
 
 void CChildView::InitTransport()
 {
-	m_imageOp.GetPlaneDistMap(m_liftedEikonal.m_inicountourCalculator.RetrieveBound());
+	m_imageOp.GetPlaneDistMap(m_liftedEikonal.m_phasefield.m_resampled_combined_distance.ys, m_liftedEikonal.m_phasefield.m_resampled_combined_distance.zs, m_liftedEikonal.m_inicountourCalculator.RetrieveBound());
 	if (m_liftedEikonal.m_phasefield.m_distance[0].xs > 0) {
-		SVoxImg<SWorkImg<realnum>>& passi = m_imageOp.GetIniMap(m_liftedEikonal.plane_center.x);
+		int xs(m_liftedEikonal.m_phasefield.m_resampled_distance[0].xs), ys(m_liftedEikonal.m_phasefield.m_resampled_distance[0].ys), zs(m_liftedEikonal.m_phasefield.m_resampled_distance[0].zs);
+		SVoxImg<SWorkImg<realnum>>& passi = m_imageOp.GetIniMap(xs, ys, zs, m_liftedEikonal.m_phasefield.m_resample_plane_slice);
 		realnum maxdist = m_liftedEikonal.m_phasefield.m_currentdistance;
-		m_transport.TrInit(m_liftedEikonal.m_phasefield.m_combined_distance, passi, maxdist);
-
+		m_transport.TrInit(m_liftedEikonal.m_phasefield.m_resampled_combined_distance, passi, maxdist);
+		/*
 		m_transport.GetDispSlice(Talox, m_xsee, m_dispd2); // TaloX - enum
 		m_transport.GetDispSlice(Taloy, m_ysee, m_dispd1);
-		m_transport.GetDispSlice(Taloz, m_zsee,m_disp);
+		m_transport.GetDispSlice(Taloz, m_zsee,m_disp);*/
 	}
 
-	Invalidate();
+	//Invalidate();
 	m_transport.TrControl(333);
-	Invalidate();
+
+	//Invalidate();
 
 }
 
@@ -324,7 +327,7 @@ UINT BackgroundThread(LPVOID params)
 	CChildView* view = (CChildView*)params;
 	int cyc = 0;
 	extern bool g_modeswitch;
-
+	save_vox_img("Y:/BIOMAG/shortest path/data.tif", view->m_liftedEikonal.m_phasefield.m_data);
 	while (view->m_threadactivated) {
 
 		if (view->m_threadactivated == 1) { // 3D
@@ -334,72 +337,36 @@ UINT BackgroundThread(LPVOID params)
 
 			if (view->m_liftedEikonal.m_phasefield.m_bdone) {
 				view->m_liftedEikonal.ExtractMeetingPlane();
+				view->m_liftedEikonal.rotation_matrix = { 1, 0, 0, 0, 1, 0, 0, 0, 1 };
 				double xs(view->m_liftedEikonal.m_phasefield.m_distance->xs);
 				double ys(view->m_liftedEikonal.m_phasefield.m_distance->ys);
 				double zs(view->m_liftedEikonal.m_phasefield.m_distance->zs);
-				// find nearest vector, aligned with the data grid
-				double max_normal = abs(view->m_liftedEikonal.plane_normal.x);
-				int max_normal_sign = sgn(view->m_liftedEikonal.plane_normal.x);
-				int normal_index = 0;
-				if (abs(view->m_liftedEikonal.plane_normal.y) > max_normal) {
-					max_normal = view->m_liftedEikonal.plane_normal.y;
-					max_normal_sign = sgn(view->m_liftedEikonal.plane_normal.y);
-					int normal_index = 1;
-				}
-				if (abs(view->m_liftedEikonal.plane_normal.z) > max_normal) {
-					max_normal = view->m_liftedEikonal.plane_normal.z;
-					max_normal_sign = sgn(view->m_liftedEikonal.plane_normal.z);
-					int normal_index = 2;
-				}
-				vector<double> sample_plane_normal = vector<double>(3);
-				for (int i = 0; i < 3; i++) {
-					sample_plane_normal[i] = i == normal_index ? max_normal_sign : 0;
-				}
-				// calculate rotation between the two normals
-				vector<double> plane_normal = vector<double>({ view->m_liftedEikonal.plane_normal.x, view->m_liftedEikonal.plane_normal.y, view->m_liftedEikonal.plane_normal.z });
-				vector<double> rotation_matrix = rotation_matrix_from_vectors<double>(sample_plane_normal, plane_normal);
-				// calculate data center
-				vector<unsigned int> data_size = { (unsigned int) xs, (unsigned int) ys, (unsigned int) zs };
-				vector<double> data_center;
-				std::transform(data_size.begin(), data_size.end(), std::back_inserter(data_center), [](double v) { return (double)v / 2; });
-
-				// calculate the size of the sample data grid
-				vector<unsigned int> sample_size;
-				vector<double> upper_bound = { -DBL_MAX, -DBL_MAX, -DBL_MAX};
-				vector<double> lower_bound = { DBL_MAX, DBL_MAX, DBL_MAX };
-				for (double z = 0; z < zs+1; z+=zs) {
-					for (double y = 0; y < ys+1; y+=ys) {
-						for (double x = 0; x < xs+1; x+=xs) {
-							vector<double> point = { x, y, z };
-							vector<double> rotated;
-							rotate(rotation_matrix, point, rotated);
-							std::transform(rotated.begin(), rotated.end(), upper_bound.begin(), upper_bound.begin(), [](double a, double b) { return (a > b) ? a : b; });
-							std::transform(rotated.begin(), rotated.end(), lower_bound.begin(), lower_bound.begin(), [](double a, double b) { return (a < b) ? a : b; });
-						}
-					}
-				}
-				std::transform(upper_bound.begin(), upper_bound.end(), lower_bound.begin(), std::back_inserter(sample_size), std::minus<double>{});
-				sitk::Image sample_img(sample_size, sitk::sitkFloat64);
-				sitk::Image distance_img(data_size, sitk::sitkFloat64);
-				double* distance_buffer = distance_img.GetBufferAsDouble();
-				for (int z = 0; z < zs; z++) {
-					for (int y = 0; y < ys; y++) {
-						for (int x = 0; x < xs; x++) {
-							distance_buffer[x + (int)xs * (y + (int)ys * (z))] = view->m_liftedEikonal.m_phasefield.m_combined_distance[z][y][x];
-						}
-					}
-				}
-				sample_img.SetDirection(rotation_matrix);
-
-
-				vector<double> sample_center;
-				std::transform(sample_size.begin(), sample_size.end(), std::back_inserter(sample_center), [](double v) { return v / 2; });
-				sample_center = sample_img.TransformContinuousIndexToPhysicalPoint(sample_center);
 				
-				vector<double> sample_origin;
-				std::transform(data_center.begin(), data_center.end(), sample_center.begin(), std::back_inserter(sample_origin), std::minus<double>());
-				sample_img.SetOrigin(sample_origin);
-				sitk::Resample(distance_img, sample_img);
+				// calculate data center
+				vector<unsigned int> sample_size;
+				resample_vox_img(view->m_liftedEikonal.m_phasefield.m_combined_distance, view->m_liftedEikonal.m_phasefield.m_resampled_combined_distance, view->m_liftedEikonal.rotation_matrix, sample_size);
+				resample_vox_img(view->m_liftedEikonal.m_phasefield.m_distance[0], view->m_liftedEikonal.m_phasefield.m_resampled_distance[0], view->m_liftedEikonal.rotation_matrix, sample_size);
+				resample_vox_img(view->m_liftedEikonal.m_phasefield.m_distance[1], view->m_liftedEikonal.m_phasefield.m_resampled_distance[1], view->m_liftedEikonal.rotation_matrix, sample_size);
+				neg_to_minus1(view->m_liftedEikonal.m_phasefield.m_resampled_combined_distance);
+				neg_to_minus1(view->m_liftedEikonal.m_phasefield.m_resampled_distance[0]);
+				neg_to_minus1(view->m_liftedEikonal.m_phasefield.m_resampled_distance[1]);
+
+				vector<double> plane_center_physical = { (view->m_liftedEikonal.plane_center.x), (view->m_liftedEikonal.plane_center.y), (view->m_liftedEikonal.plane_center.z) };
+				vector<double> plane_center_transformed; // = view->m_liftedEikonal.m_phasefield.m_transformed_distance_image.TransformPhysicalPointToIndex(plane_center_physical);
+				rotate(view->m_liftedEikonal.rotation_matrix, plane_center_physical, plane_center_transformed);
+				view->m_liftedEikonal.m_phasefield.m_resample_plane_slice = plane_center_transformed[0];
+				save_vox_img("Y:/BIOMAG/shortest path/combined_distance.tif", view->m_liftedEikonal.m_phasefield.m_resampled_combined_distance);
+				save_vox_img("Y:/BIOMAG/shortest path/distance_0.tif", view->m_liftedEikonal.m_phasefield.m_resampled_distance[0]);
+				save_vox_img("Y:/BIOMAG/shortest path/distance_1.tif", view->m_liftedEikonal.m_phasefield.m_resampled_distance[1]);
+				ofstream f_stream;
+				f_stream.open("Y:/BIOMAG/shortest path/info.txt");
+				f_stream << "size (x, y, z):";
+				f_stream << " " << view->m_liftedEikonal.m_phasefield.m_resampled_combined_distance.xs;
+				f_stream << " " << view->m_liftedEikonal.m_phasefield.m_resampled_combined_distance.ys;
+				f_stream << " " << view->m_liftedEikonal.m_phasefield.m_resampled_combined_distance.zs;
+				f_stream << endl;
+				f_stream << "plane center: " << plane_center_transformed[0] << endl;
+				f_stream.close();
 				view->m_threadactivated = 2;
 				view->Invalidate(FALSE);
 				
@@ -407,19 +374,39 @@ UINT BackgroundThread(LPVOID params)
 
 		}
 		else if (view->m_threadactivated == 2) {
-			view->m_liftedEikonal.m_inicountourCalculator.GetDistancemean(view->m_liftedEikonal.m_phasefield.m_combined_distance, view->m_liftedEikonal.plane_center.x);
+			//view->m_liftedEikonal.m_inicountourCalculator.GetDistancemean(view->m_liftedEikonal.m_phasefield.m_resampled_distance[0], view->m_liftedEikonal.m_phasefield.m_resampled_distance[1], view->m_liftedEikonal.m_phasefield.m_resample_plane_slice);
+			view->m_liftedEikonal.m_inicountourCalculator.GetDistancemean(view->m_liftedEikonal.m_phasefield.m_resampled_combined_distance, view->m_liftedEikonal.m_phasefield.m_resample_plane_slice);
+
 			Sleep(300);
+			save_work_img("Y:/BIOMAG/shortest path/slice_gx.tif",view->m_liftedEikonal.m_inicountourCalculator.m_gx2D);
+			save_work_img("Y:/BIOMAG/shortest path/slice_gy.tif", view->m_liftedEikonal.m_inicountourCalculator.m_gy2D);
+			save_work_img("Y:/BIOMAG/shortest path/slice_field.tif", view->m_liftedEikonal.m_inicountourCalculator.m_field2D);
+
 			if (view->m_liftedEikonal.m_inicountourCalculator.m_bInited)
 				view->m_threadactivated = 3;
 		}
 		else if (view->m_threadactivated == 3) { // plane
-			view->m_liftedEikonal.m_inicountourCalculator.Iterate();
-			if (!view->m_liftedEikonal.m_inicountourCalculator.m_nect)
+			if (view->m_liftedEikonal.m_inicountourCalculator.m_nect) {
+				view->m_liftedEikonal.m_inicountourCalculator.Iterate();
+				
+			}
+			else {
 				view->m_threadactivated = 4;
+			}
 			if (++cyc > 7) { view->Invalidate(FALSE); cyc = 0; }
 		}
 		else if (view->m_threadactivated == 4) {
 			view->InitTransport();
+			unsigned int rxs(view->m_transport.m_transportfunction[0].xs), rys(view->m_transport.m_transportfunction[0].ys), rzs(view->m_transport.m_transportfunction[0].zs);
+			unsigned int xs(view->m_liftedEikonal.m_phasefield.m_data.xs), ys(view->m_liftedEikonal.m_phasefield.m_data.ys), zs(view->m_liftedEikonal.m_phasefield.m_data.zs);
+			vector<unsigned int> sample_size = { xs, ys, zs };
+			resample_vox_img(view->m_transport.m_transportfunction[0], view->m_transport.m_transportfunction[0], view->m_liftedEikonal.rotation_matrix, sample_size, true);
+			neg_to_minus1(view->m_transport.m_transportfunction[0]);
+			resample_vox_img(view->m_transport.m_isboundary, view->m_transport.m_isboundary, view->m_liftedEikonal.rotation_matrix, sample_size, true);
+			view->m_transport.GetDispSlice(Talox, view->m_xsee, view->m_dispd2); // TaloX - enum
+			view->m_transport.GetDispSlice(Taloy, view->m_ysee, view->m_dispd1);
+			view->m_transport.GetDispSlice(Taloz, view->m_zsee, view->m_disp); 
+			view->Invalidate();
 			//view->m_prevthreadactivated = 2;
 			Sleep(300);
 			view->m_threadactivated = 5;
@@ -697,14 +684,16 @@ void CControlDlg::OnBnClickedGetBC() // contour on plane
 	// TODO: Add your control notification handler code here
 	m_pView->m_imageOp.GetXTestBound(m_pView->m_xsee/* - 1*/, m_pView->m_liftedEikonal.m_boundcontour);
 	if (m_pView->m_liftedEikonal.m_phasefield.m_distance[0].xs > 0) {
-		SVoxImg<SWorkImg<realnum>> & passi = m_pView->m_imageOp.GetIniMap(m_pView->m_xsee/* - 1*/);
+		int xs(m_pView->m_liftedEikonal.m_phasefield.m_distance[0].xs), ys(m_pView->m_liftedEikonal.m_phasefield.m_distance[0].ys), zs(m_pView->m_liftedEikonal.m_phasefield.m_distance[0].zs);
+		SVoxImg<SWorkImg<realnum>> & passi = m_pView->m_imageOp.GetIniMap(xs, ys, zs, m_pView->m_xsee/* - 1*/);
 		//m_pView->m_transport.TrInit(m_pView->m_liftedEikonal.m_phasefield.m_smoothdist[0],passi, m_pView->m_liftedEikonal.m_currentdistance[0]);
 		m_pView->m_transport.TrInit(m_pView->m_liftedEikonal.m_phasefield.m_distance[0], passi, m_pView->m_liftedEikonal.m_phasefield.m_currentdistance);
 
 		//--m_pView->m_xsee;
+		/*
 		m_pView->m_transport.GetDispSlice(Talox, m_pView->m_xsee, m_pView->m_dispd2); // TaloX - enum
 		m_pView->m_transport.GetDispSlice(Taloy, m_pView->m_ysee, m_pView->m_dispd1);
-		m_pView->m_transport.GetDispSlice(Taloz, m_pView->m_zsee, m_pView->m_disp);
+		m_pView->m_transport.GetDispSlice(Taloz, m_pView->m_zsee, m_pView->m_disp);*/
 	}
 
 	m_pView->Invalidate();

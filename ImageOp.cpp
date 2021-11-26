@@ -210,24 +210,23 @@ void CImageOp::GetXTestBound(int ix, std::vector<CVec3>& out) // contour on plan
 	GetXTestDisTrans();
 }
 
-void CImageOp::GetPlaneDistMap(std::unordered_set<unsigned long>& boundset)
+void CImageOp::GetPlaneDistMap(int distmap_ys, int distmap_zs, std::unordered_set<unsigned long>& boundset)
 {
-	int xs(m_testimage.xs), ys(m_testimage.ys), zs(m_testimage.zs);
 	m_bound = boundset;
-	m_loc.Set(ys, zs, 1);
+	m_loc.Set(distmap_ys, distmap_zs, 1);
 	XTestfill(0, 0);
 	GetXTestDisTrans();
 }
 
 
-SVoxImg<SWorkImg<realnum>>& CImageOp::CImageOp::GetIniMap(int ix) // initial map MAIN 2
+SVoxImg<SWorkImg<realnum>>& CImageOp::CImageOp::GetIniMap(int xs, int ys, int zs, int ix) // initial map MAIN 2
 {
-	m_inimap.Set(m_testimage.xs, m_testimage.ys, m_testimage.zs);
-	for (int zz = 0; zz < m_inimap.zs; ++zz) {
+	m_inimap.Set(xs, ys, zs);
+	for (int zz = 0; zz < zs; ++zz) {
 		m_inimap[zz] = _NO_BOU_;
 	}
-	for (int zz = 0; zz < m_inimap.zs; ++zz) {
-		for (int yy = 0; yy < m_inimap.ys; ++yy) {
+	for (int zz = 0; zz < zs; ++zz) {
+		for (int yy = 0; yy < ys; ++yy) {
 			m_inimap[zz][yy][ix] = m_loc[zz][yy];
 		}
 	}

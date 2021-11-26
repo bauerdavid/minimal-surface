@@ -15,7 +15,7 @@ public:
 	void TrInit(SVoxImg<SWorkImg<realnum>>& distmap, SVoxImg<SWorkImg<realnum>>& inimap, realnum maxdistance);
 	void TrControl(int nIter);
 	void GetDispSlice(int along, int at, SDisImg& r);
-	SVoxImg<SWorkImg<realnum>> m_transportfunction[2];
+	SVoxImg<SWorkImg<double>> m_transportfunction[2];
 	/*
 	Boundary state
 	 1: read-only

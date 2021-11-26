@@ -27,10 +27,10 @@ public:
 	Create data, where every values is _NO_BOU_, except for the selected x slice, where it will be the same as m_loc
 	Should be initialized based on the meeting of the two flow
 	*/
-	SVoxImg<SWorkImg<realnum>>& CImageOp::GetIniMap(int ix);
+	SVoxImg<SWorkImg<realnum>>& CImageOp::GetIniMap(int xs, int ys, int zs, int ix);
 	void GetXTestBound(int ix, std::vector<CVec3>& out);
 	// Calculate the distance from the bounds. Distances will be positive inside the object, and negative outside of it.
-	void GetPlaneDistMap(std::unordered_set<unsigned long> &boundset);
+	void GetPlaneDistMap(int distmap_ys, int distmap_zs, std::unordered_set<unsigned long> &boundset);
 	SWorkImg<realnum> &GetXTestSigDis()
 	{
 		return m_loc;

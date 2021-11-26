@@ -7,6 +7,8 @@
 
 #define BIG_NUMBER 1e11
 #define MAX_THREADS 32
+namespace sitk = itk::simple;
+
 //const int max_threads = omp_get_max_threads();
 int a = 0;
 CCurvEikonal::CCurvEikonal(void)
@@ -20,21 +22,48 @@ CCurvEikonal::~CCurvEikonal(void)
 }
 
 void CCurvEikonal::ExtractMeetingPlane() {
+	m_phasefield.FindMeetPoints();
+	double maxval = -1;
 	for (int zz = 0; zz < m_phasefield.meeting_plane_positions.zs; ++zz) {
 		for (int yy = 0; yy < m_phasefield.meeting_plane_positions.ys; ++yy) {
 			for (int xx = 0; xx < m_phasefield.meeting_plane_positions.xs; ++xx) {
-				if (m_phasefield.meeting_plane_positions[zz][yy][xx])
+				if (m_phasefield.meeting_plane_positions[zz][yy][xx] > 0)
 					meeting_plane.insert(IPoi3<double>(xx, yy, zz));
-				m_phasefield.m_combined_distance[zz][yy][xx] =
-					m_phasefield.m_distance[0][zz][yy][xx] >= 0 ? m_phasefield.m_distance[0][zz][yy][xx] : m_phasefield.m_distance[1][zz][yy][xx];
+				double newval;
+				double d0 = m_phasefield.m_distance[0][zz][yy][xx];
+				double d1 = m_phasefield.m_distance[1][zz][yy][xx];
+				if (d1 < 0 || d0 < d1 && d0 >= -1e-5)
+					newval = d0;
+				else
+					newval = d1;
+				m_phasefield.m_combined_distance[zz][yy][xx] = newval;
+				maxval = newval > maxval ? newval : maxval;
 			}
 		}
 	}
+
 	std::pair<IPoi3<double>, IPoi3<double>> plane_info = best_plane_from_points(meeting_plane);
 	plane_center = plane_info.first;
 	plane_normal = plane_info.second;
+	int max_norm_val = abs(plane_normal.x);
+	int max_norm_sign = sgn(plane_normal.x);
+	if (abs(plane_normal.y) > max_norm_val) {
+		max_norm_val = abs(plane_normal.y);
+		max_norm_sign = sgn(plane_normal.y);
+	}
+	if (abs(plane_normal.z) > max_norm_val) {
+		max_norm_val = abs(plane_normal.z);
+		max_norm_sign = sgn(plane_normal.z);
+	}
+	plane_normal.x *= max_norm_sign;
+	plane_normal.y *= max_norm_sign;
+	plane_normal.z *= max_norm_sign;
 	plane_offset = -(plane_center.x * plane_normal.x + plane_center.y * plane_normal.y + plane_center.z * plane_normal.z);
 
+	vector<double> sample_plane_normal = { 1, 0, 0 };
+	// calculate rotation between the two normals
+	vector<double> plane_normal = vector<double>({ this->plane_normal.x, this->plane_normal.y, this->plane_normal.z });
+	rotation_matrix = rotation_matrix_from_vectors<double>(sample_plane_normal, plane_normal);
 }
 
 // Image prep&check
@@ -91,6 +120,62 @@ void CPhaseContainer::RegularizePhaseField(SVoxImg<SWorkImg<realnum>> &field, SV
 	}
 
 
+}
+
+void CPhaseContainer::FindMeetPoints() {
+	int xs = m_field[0].xs, ys = m_field[0].ys, zs = m_field[0].zs;
+
+	for (int ii = 0; ii < 2; ii++) {
+#pragma omp parallel for schedule(static)
+		/*for (int zyx = 0; zyx < zs * ys * xs; zyx++) {
+			int zz = zyx / (ys * xs);
+			if (zz == 0 || zz >= zs - 1) continue;
+			{
+				int yy = (zyx / xs) % ys;
+				if (yy == 0 || yy >= ys - 1) continue;
+				{
+					int xx = zyx % xs;
+					if (xx == 0 || xx >= xs - 1) continue;*/
+		for (int zz = 1; zz < zs - 1; ++zz) {
+			for (int yy = 1; yy < ys - 1; ++yy) {
+				for (int xx = 1; xx < xs - 1; ++xx) {
+					int zp = zz + 1, zm = zz - 1;
+					int yp = yy + 1, ym = yy - 1;
+					int xp = xx + 1, xm = xx - 1;
+
+					SVoxImg<SWorkImg<realnum>> &distance = m_distance[ii];
+					SVoxImg<SWorkImg<realnum>> &counterd = m_distance[(ii + 1) % 2];
+					if (counterd[zz][yy][xx] >= 0) {
+						// meeting_plane.insert(IPoi3<int>(xx, yy, zz));
+						/*if (!meeting_plane_positions[zz][yy][xx] &&
+							((distance[zz][yp][xx] >= 0 && !meeting_plane_positions[zz][yp][xx])
+							|| (distance[zz][ym][xx] >= 0 && !meeting_plane_positions[zz][ym][xx])
+							|| (distance[zz][yy][xp] >= 0 && !meeting_plane_positions[zz][yy][xp])
+							|| (distance[zz][yy][xm] >= 0 && !meeting_plane_positions[zz][yy][xm])
+							|| (distance[zp][yy][xx] >= 0 && !meeting_plane_positions[zp][yy][xx])
+							|| (distance[zm][yy][xx] >= 0 && !meeting_plane_positions[zm][yy][xx]))
+							&& xm > 2 && xp < xs - 2 && ym > 2 && yp < ys - 2 && zm > 2 && zp < zs - 2) {
+							meeting_plane_positions[zz][yy][xx] = 1;
+						}*/
+						/*if (distance[zz][yy][xx] == counterd[zz][yy][xx]) {
+							meeting_plane_positions[zz][yy][xx] = 1;
+						}*/
+						if (distance[zz][yy][xx] - counterd[zz][yy][xx] >= 0 &&
+							((distance[zz][yp][xx] > 0 && distance[zz][yp][xx] - counterd[zz][yp][xx] < 0) ||
+								(distance[zz][ym][xx] > 0 && distance[zz][ym][xx] - counterd[zz][ym][xx] < 0) ||
+								(distance[zz][yy][xp] > 0 && distance[zz][yy][xp] - counterd[zz][yy][xp] < 0) ||
+								(distance[zz][yy][xm] > 0 && distance[zz][yy][xm] - counterd[zz][yy][xm] < 0) ||
+								(distance[zp][yy][xx] > 0 && distance[zp][yy][xx] - counterd[zp][yy][xx] < 0) ||
+								(distance[zm][yy][xx] > 0 && distance[zm][yy][xx] - counterd[zm][yy][xx] < 0))) {
+							meeting_plane_positions[zz][yy][xx] = 1;
+						}
+
+						//continue;
+					}
+				}
+			}
+		}
+	}
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -484,9 +569,10 @@ realnum CPhaseContainer::UpdateVelo(int i, bool use_correction) {
 					}
 					if (!should_run) continue;
 					delete pos;*/
+					/*
 					if (meeting_plane_positions[zz][yy][xx]) {
 						continue;
-					}
+					}*/
 					int zp = zz + 1, zm = zz - 1;
 					int yp = yy + 1, ym = yy - 1;
 					int xp = xx + 1, xm = xx - 1;
@@ -496,19 +582,10 @@ realnum CPhaseContainer::UpdateVelo(int i, bool use_correction) {
 						&& distance[zp][yy][xx] < 0 && distance[zm][yy][xx] < 0) continue;
 
 
+
+					
 					if (field[zz][yy][xx] >= 0.95) continue;
 
-					if (counterd[zz][yy][xx] >= 0) {
-						// meeting_plane.insert(IPoi3<int>(xx, yy, zz));
-						if ((distance[zz][yp][xx] >= 0 && !meeting_plane_positions[zz][yp][xx])
-							|| (distance[zz][ym][xx] >= 0 && !meeting_plane_positions[zz][ym][xx])
-							|| (distance[zz][yy][xp] >= 0 && !meeting_plane_positions[zz][yy][xp])
-							|| (distance[zz][yy][xm] >= 0 && !meeting_plane_positions[zz][yy][xm])
-							|| (distance[zp][yy][xx] >= 0 && !meeting_plane_positions[zp][yy][xx])
-							|| (distance[zm][yy][xx] >= 0 && !meeting_plane_positions[zm][yy][xx]))
-							meeting_plane_positions[zz][yy][xx] = 1;
-						continue;
-					}
 					realnum xn = field[zz][yy][xp] - field[zz][yy][xm];
 					realnum yn = field[zz][yp][xx] - field[zz][ym][xx];
 					realnum zn = field[zp][yy][xx] - field[zm][yy][xx];
@@ -596,10 +673,10 @@ realnum CPhaseContainer::UpdateVelo(int i, bool use_correction) {
 						}
 					}*/
 					if (eikon > maxinfo[id].val) maxinfo[id].val = eikon;
-					if (counterd[zz][yy][xx] >= 0) {
+					/*if (counterd[zz][yy][xx] >= 0) {
 						// meeting_plane.insert(IPoi3<int>(xx, yy, zz));
 						meeting_plane_positions[zz][yy][xx] = 1;
-					}
+					}*/
 
 					//loop body
 				} //for xx
@@ -707,6 +784,44 @@ void CPhaseContainer::Iterate(bool use_correction)
 }
 
 // only for xslice
+void CPlanePhaseField::GetDistancemean(SVoxImg<SWorkImg<realnum>>& distance1, SVoxImg<SWorkImg<realnum>>& distance2,  int xslice)
+{
+	//TODO: instead of searching for the selected x slice, locate the meeting surface of the two processes, and use that
+	int xs = distance1.xs, ys = distance1.ys, zs = distance1.zs;
+	m_nall = m_npos = 0;
+	m_bInited = false;
+	if (!xslice) return;
+
+	m_gx2D.Set(ys, zs, 0.0f);
+	m_gy2D.Set(ys, zs, 0.0f);
+	m_field2D.Set(ys, zs, 1.0f);
+	m_velo2D.Set(ys, zs, 0.0f);
+
+	for (int zz = 1; zz < zs-1; ++zz) {
+		for (int yy = 1; yy < ys-1; ++yy) {
+			{
+				int xx = xslice;
+				int yp = yy + 1; if (yp > ys - 2) yp = ys - 2;
+				int ym = yy - 1; if (ym < 1) ym = 1;
+				int zp = zz + 1; if (zp > zs - 2) zp = zs - 2;
+				int zm = zz - 1; if (zm < 1) zm = 1;
+				m_gx2D[zz][yy] = (distance1[zz][yp][xx] - distance1[zz][ym][xx] + distance2[zz][yp][xx] - distance2[zz][ym][xx]);
+				m_gy2D[zz][yy] = (distance1[zp][yy][xx] - distance1[zm][yy][xx] + distance2[zp][yy][xx] - distance2[zm][yy][xx]);
+			}
+			//if current point is not on the edge of the data
+			if (!(zz < 5 || zz >= zs - 5 || yy < 5 || yy >= ys - 5))
+				m_field2D[zz][yy] = -1.0f;
+			else ++m_npos;
+			++m_nall;
+		}
+	}
+
+	m_nect = 100;
+	m_nfct = 2000;
+	m_bInited = true;
+
+}
+
 void CPlanePhaseField::GetDistancemean(SVoxImg<SWorkImg<realnum>>& distance, int xslice)
 {
 	//TODO: instead of searching for the selected x slice, locate the meeting surface of the two processes, and use that
@@ -720,8 +835,8 @@ void CPlanePhaseField::GetDistancemean(SVoxImg<SWorkImg<realnum>>& distance, int
 	m_field2D.Set(ys, zs, 1.0f);
 	m_velo2D.Set(ys, zs, 0.0f);
 
-	for (int zz = 1; zz < zs-1; ++zz) {
-		for (int yy = 1; yy < ys-1; ++yy) {
+	for (int zz = 1; zz < zs - 1; ++zz) {
+		for (int yy = 1; yy < ys - 1; ++yy) {
 			{
 				int xx = xslice;
 				int yp = yy + 1; if (yp > ys - 2) yp = ys - 2;
