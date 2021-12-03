@@ -7,6 +7,7 @@
 #include <sitkImage.h>
 
 namespace sitk = itk::simple;
+using namespace std;
 
 #define MAXMINPATH 222 
 
@@ -66,6 +67,7 @@ public:
 	SWorkImg<realnum> m_gy2D;
 	SWorkImg<realnum> m_field2D;
 	SWorkImg<realnum> m_velo2D;
+	SWorkImg<realnum> m_distance2D[2];
 	// get the distance gradients along the selected x slice from the two neighboring slices
 	void GetDistancemean(SVoxImg<SWorkImg<realnum>> &distance1, SVoxImg<SWorkImg<realnum>>& distance2, int xslice);
 	void GetDistancemean(SVoxImg<SWorkImg<realnum>>& distance, int xslice);
@@ -91,12 +93,11 @@ public:
 
 	SVoxImg<SWorkImg<realnum>> m_distance[2];
 	SVoxImg<SWorkImg<realnum>> m_combined_distance;
+	// for every pixel stores which flow reached it first
+	SVoxImg<SWorkImg<int>> m_flow_idx;
 
-	SVoxImg<SWorkImg<realnum>> m_resampled_combined_distance;
-	SVoxImg<SWorkImg<realnum>> m_resampled_distance[2];
-	int m_resample_plane_slice;
+	double m_plane_slice;
 	sitk::Image m_distance_image;
-	sitk::Image m_transformed_distance_image;
 	// expansion
 
 	// gradients of the distance maps
@@ -122,6 +123,8 @@ public:
 	realnum m_currentdistance;
 
 	void Initialize(SVoxImg<SWorkImg<realnum>>& data, CVec3& start_point, CVec3& end_point);
+	void Initialize(CPhaseContainer& phasefield, vector<double>& rotation_matrix, bool inverse=false);
+	void CalculateAlignedCombinedDistance(double p1_x, double p2_x);
 	void FindMeetPoints();
 	realnum UpdateVelo(int i, bool use_correction);
 	void UpdateField(int i, realnum maxv);
@@ -148,6 +151,7 @@ public:
 	std::vector<double> rotation_matrix;
 	// phase field stuff
 	CPhaseContainer m_phasefield;
+	CPhaseContainer m_rotated_phasefield;
 
 
 	std::vector<CVec3> m_boundcontour;

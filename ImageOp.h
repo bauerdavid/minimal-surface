@@ -9,11 +9,6 @@ class CImageOp
 public:
 	CImageOp(void);
 	~CImageOp(void);
-	
-	SWorkImg<realnum> m_gxx;
-	SWorkImg<realnum> m_gxy;
-	SWorkImg<realnum> m_gyy;
-	SWorkImg<realnum> m_aux;
 	SWorkImg<realnum> m_loc;
 
 	std::unordered_set<unsigned long> m_bound;

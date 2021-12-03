@@ -1,3 +1,0 @@
-﻿LINK : warning LNK4044: unrecognized option '/F2000000'; ignored
-AreaEikonal.obj : warning LNK4075: ignoring '/EDITANDCONTINUE' due to '/OPT:ICF' specification
-  MinArea.vcxproj -> Y:\BIOMAG\shortest path\MinArea\MinArea_SITK\MinSizeRel\MinArea.exe

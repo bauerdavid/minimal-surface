@@ -4,10 +4,12 @@
 #include "math.h"
 #include <omp.h>
 #include "SimpleITK.h"
+#include <vector>
 
 #define BIG_NUMBER 1e11
 #define MAX_THREADS 32
 namespace sitk = itk::simple;
+using namespace std;
 
 //const int max_threads = omp_get_max_threads();
 int a = 0;
@@ -23,10 +25,28 @@ CCurvEikonal::~CCurvEikonal(void)
 
 void CCurvEikonal::ExtractMeetingPlane() {
 	m_phasefield.FindMeetPoints();
-	double maxval = -1;
-	for (int zz = 0; zz < m_phasefield.meeting_plane_positions.zs; ++zz) {
-		for (int yy = 0; yy < m_phasefield.meeting_plane_positions.ys; ++yy) {
-			for (int xx = 0; xx < m_phasefield.meeting_plane_positions.xs; ++xx) {
+	int xs(m_phasefield.meeting_plane_positions.xs), ys(m_phasefield.meeting_plane_positions.ys), zs(m_phasefield.meeting_plane_positions.zs);
+	for (int zz = 0; zz < zs; ++zz) {
+		for (int yy = 0; yy < ys; ++yy) {
+			for (int xx = 0; xx < xs; ++xx) {
+				if (xx == 0 || xx == xs - 1 || yy == 0 || yy == ys - 1 || zz == 0 || zz == zs - 1) {
+					int sample_x(xx), sample_y(yy), sample_z(zz);
+					if (xx == 0)
+						sample_x = 1;
+					else if (xx == xs - 1)
+						sample_x = xs - 2;
+					if (yy == 0)
+						sample_y = 1;
+					else if (yy == ys - 1)
+						sample_y = ys - 2;
+					if (zz == 0)
+						sample_z = 1;
+					else if (zz == zs - 1)
+						sample_z = zs - 2;
+					m_phasefield.m_distance[0][zz][yy][xx] = m_phasefield.m_distance[0][sample_z][sample_y][sample_x];
+					m_phasefield.m_distance[1][zz][yy][xx] = m_phasefield.m_distance[1][sample_z][sample_y][sample_x];
+					
+				}
 				if (m_phasefield.meeting_plane_positions[zz][yy][xx] > 0)
 					meeting_plane.insert(IPoi3<double>(xx, yy, zz));
 				double newval;
@@ -37,7 +57,6 @@ void CCurvEikonal::ExtractMeetingPlane() {
 				else
 					newval = d1;
 				m_phasefield.m_combined_distance[zz][yy][xx] = newval;
-				maxval = newval > maxval ? newval : maxval;
 			}
 		}
 	}
@@ -45,7 +64,7 @@ void CCurvEikonal::ExtractMeetingPlane() {
 	std::pair<IPoi3<double>, IPoi3<double>> plane_info = best_plane_from_points(meeting_plane);
 	plane_center = plane_info.first;
 	plane_normal = plane_info.second;
-	int max_norm_val = abs(plane_normal.x);
+	double max_norm_val = abs(plane_normal.x);
 	int max_norm_sign = sgn(plane_normal.x);
 	if (abs(plane_normal.y) > max_norm_val) {
 		max_norm_val = abs(plane_normal.y);
@@ -200,6 +219,8 @@ void CPhaseContainer::Initialize(SVoxImg<SWorkImg<realnum>>& data, CVec3& start_
 	m_distance[0].Set(spacex, spacey, spacez);
 	m_distance[1].Set(spacex, spacey, spacez);
 	m_combined_distance.Set(spacex, spacey, spacez);
+	m_flow_idx.Set(spacex, spacey, spacez);
+
 
 	m_velo[0].Set0(spacex, spacey, spacez);
 	m_velo[1].Set0(spacex, spacey, spacez);
@@ -211,6 +232,7 @@ void CPhaseContainer::Initialize(SVoxImg<SWorkImg<realnum>>& data, CVec3& start_
 	m_data.Set0(spacex, spacey, spacez);
 	m_data = data;
 
+	m_distance_image = sitk::Image({ (unsigned int) spacex, (unsigned int) spacey, (unsigned int) spacez }, sitk::sitkFloat32);
 
 	int hs = 11 - 0;//5 (int)(1.5f*g_w/2);
 	m_currentdistance = 0;
@@ -226,7 +248,7 @@ void CPhaseContainer::Initialize(SVoxImg<SWorkImg<realnum>>& data, CVec3& start_
 					int dx = xx - point.x, dy = yy - point.y;
 					int dz = zz - point.z;
 					realnum dd = (realnum)(dx * dx + dy * dy + dz * dz);
-					if ((int)dd < 10 * 10 / 1/*4 hs*hs/4*/) {
+					if ((int)dd < 10 * 10 / 1) {
 						//TODO: initialize the two starting points on different distance maps (instead of [0]: [ii])
 						m_field[ii][zz][yy][xx] = 1.0; // ii->0
 						dd = sqrt(dd);
@@ -253,6 +275,72 @@ void CPhaseContainer::Initialize(SVoxImg<SWorkImg<realnum>>& data, CVec3& start_
 	m_aux[1] = 0;
 
 	m_bdone = false;
+}
+
+void CPhaseContainer::Initialize(CPhaseContainer& phasefield, vector<double>& rotation_matrix, bool inverse) {
+	vector<unsigned int> sample_size;
+	phasefield.m_thickstate;
+	this->m_thickstate;
+	m_thickstate;
+	resample_vox_img(phasefield.m_thickstate, m_thickstate, rotation_matrix, sample_size, inverse);
+	resample_vox_img(phasefield.m_Sumcurvature, m_Sumcurvature, rotation_matrix, sample_size, inverse);
+	neg_to_minus1(m_Sumcurvature);
+
+	resample_vox_img(phasefield.meeting_plane_positions, meeting_plane_positions, rotation_matrix, sample_size, inverse);
+	// expansion
+
+	resample_vox_img(phasefield.unx, unx, rotation_matrix, sample_size, inverse);
+	neg_to_minus1(unx);
+	resample_vox_img(phasefield.uny, uny, rotation_matrix, sample_size, inverse);
+	neg_to_minus1(uny);
+	resample_vox_img(phasefield.unz, unz, rotation_matrix, sample_size, inverse);
+	neg_to_minus1(unz);
+	resample_vox_img(phasefield.m_smoothstate, m_smoothstate, rotation_matrix, sample_size, inverse);
+	// expansion
+
+
+	resample_vox_img(phasefield.m_field[0], m_field[0], rotation_matrix, sample_size, inverse);
+	neg_to_minus1(m_field[0]);
+	resample_vox_img(phasefield.m_field[1], m_field[1], rotation_matrix, sample_size, inverse);
+	neg_to_minus1(m_field[1]);
+	resample_vox_img(phasefield.m_distance[0], m_distance[0], rotation_matrix, sample_size, inverse, true);
+	neg_to_minus1(m_distance[0]);
+	resample_vox_img(phasefield.m_distance[1], m_distance[1], rotation_matrix, sample_size, inverse, true);
+	neg_to_minus1(m_distance[1]);
+	resample_vox_img(phasefield.m_combined_distance, m_combined_distance, rotation_matrix, sample_size, inverse, true);
+	neg_to_minus1(m_combined_distance);
+	resample_vox_img(phasefield.m_flow_idx, m_flow_idx, rotation_matrix, sample_size, inverse, true);
+
+
+	resample_vox_img(phasefield.m_velo[0], m_velo[0], rotation_matrix, sample_size, inverse);
+	resample_vox_img(phasefield.m_velo[1], m_velo[1], rotation_matrix, sample_size, inverse);
+	resample_vox_img(phasefield.m_aux, m_aux, rotation_matrix, sample_size, inverse);
+	resample_vox_img(phasefield.m_smoothdist, m_smoothdist, rotation_matrix, sample_size, inverse);
+	neg_to_minus1(m_smoothdist);
+	resample_vox_img(phasefield.m_smoothaux, m_smoothaux, rotation_matrix, sample_size, inverse);
+	resample_vox_img(phasefield.m_smoothaux2, m_smoothaux2, rotation_matrix, sample_size, inverse);
+
+	resample_vox_img(phasefield.m_data, m_data, rotation_matrix, sample_size, inverse, true);
+
+	m_currentdistance = phasefield.m_currentdistance;
+	sample_size = { (unsigned int) m_data.xs, (unsigned int) m_data.ys, (unsigned int) m_data.zs };
+	vector<unsigned int> data_size = { (unsigned int)phasefield.m_data.xs, (unsigned int)phasefield.m_data.ys, (unsigned int)phasefield.m_data.zs };
+	m_distance_image = sitk::Image(sample_size, sitk::sitkFloat32);
+	m_distance_image.SetDirection(rotation_matrix);
+
+	vector<double> sample_center;
+	std::transform(sample_size.begin(), sample_size.end(), std::back_inserter(sample_center), [](double v) { return v / 2; });
+	sample_center = m_distance_image.TransformContinuousIndexToPhysicalPoint(sample_center);
+
+	vector<double> data_center;
+	std::transform(data_size.begin(), data_size.end(), std::back_inserter(data_center), [](double v) { return (double)v / 2; });
+	data_center = phasefield.m_distance_image.TransformContinuousIndexToPhysicalPoint(data_center);
+
+	vector<double> sample_origin;
+	std::transform(data_center.begin(), data_center.end(), sample_center.begin(), std::back_inserter(sample_origin), std::minus<double>());
+	m_distance_image.SetOrigin(sample_origin);
+	
+	m_bdone = phasefield.m_bdone;
 }
 
 void CPhaseContainer::SmoothMap(SVoxImg<SWorkImg<realnum>> &src1, SVoxImg<SWorkImg<realnum>>& src2, SVoxImg<SWorkImg<realnum>> &out)
@@ -716,7 +804,13 @@ void CPhaseContainer::UpdateField(int i, realnum maxv) {
 		for (int yy = 0 + 1; yy < ys - 1; ++yy) {
 			for (int xx = 0 + 1; xx < xs - 1; ++xx) {*/
 				field[zz][yy][xx] += velo[zz][yy][xx] * maxv;// ;
-				if (field[zz][yy][xx] > 1.25) field[zz][yy][xx] = 1.25;
+				if (field[zz][yy][xx] > 0) {
+					if (field[zz][yy][xx] > 1.25) field[zz][yy][xx] = 1.25;
+					if (m_flow_idx[zz][yy][xx] < 0) {
+						m_flow_idx[zz][yy][xx] = i;
+					}
+				}
+
 			}
 		}
 	}
@@ -782,6 +876,31 @@ void CPhaseContainer::Iterate(bool use_correction)
 
 
 }
+void CPhaseContainer::CalculateAlignedCombinedDistance(double p0_x, double p1_x) {
+	int xs(m_data.xs), ys(m_data.ys), zs(m_data.zs);
+	m_combined_distance.Set(xs, ys, zs);
+	m_flow_idx.Set(xs, ys, zs);
+	for (int zz = 0; zz < zs; zz++) {
+		for (int yy = 0; yy < ys; yy++) {
+			for (int xx = 0; xx < xs; xx++) {
+				int xx_sgn = sgn(m_plane_slice - xx);
+				int p0_sgn = sgn(m_plane_slice - p0_x);
+				int p1_sgn = sgn(m_plane_slice - p1_x);
+				if (abs(m_plane_slice - xx) < 0.5) {
+					m_combined_distance[zz][yy][xx] = (m_distance[0][zz][yy][xx + p0_sgn] + m_distance[1][zz][yy][xx + p1_sgn]);
+				}
+				else if (p0_sgn == xx_sgn) {
+					m_combined_distance[zz][yy][xx] = m_distance[0][zz][yy][xx];
+					m_flow_idx[zz][yy][xx] = 0;
+				}
+				else if (p1_sgn == xx_sgn) {
+					m_combined_distance[zz][yy][xx] = m_distance[1][zz][yy][xx];
+					m_flow_idx[zz][yy][xx] = 1;
+				}
+			}
+		}
+	}
+}
 
 // only for xslice
 void CPlanePhaseField::GetDistancemean(SVoxImg<SWorkImg<realnum>>& distance1, SVoxImg<SWorkImg<realnum>>& distance2,  int xslice)
@@ -834,19 +953,23 @@ void CPlanePhaseField::GetDistancemean(SVoxImg<SWorkImg<realnum>>& distance, int
 	m_gy2D.Set(ys, zs, 0.0f);
 	m_field2D.Set(ys, zs, 1.0f);
 	m_velo2D.Set(ys, zs, 0.0f);
+	m_distance2D[0].Set(ys, zs, -1);
+	m_distance2D[1].Set(ys, zs, -1);
 
-	for (int zz = 1; zz < zs - 1; ++zz) {
-		for (int yy = 1; yy < ys - 1; ++yy) {
+
+	for (int zz = 0; zz < zs; ++zz) {
+		for (int yy = 0; yy < ys; ++yy) {
 			{
 				int xx = xslice;
+				m_distance2D[0][zz][yy] = distance[zz][yy][xx - 1];
+				m_distance2D[1][zz][yy] = distance[zz][yy][xx + 1];
+				if (zz == 0 || yy == 0 || zz == zs - 1 || yy == ys - 1) continue;
 				int yp = yy + 1; if (yp > ys - 2) yp = ys - 2;
 				int ym = yy - 1; if (ym < 1) ym = 1;
 				int zp = zz + 1; if (zp > zs - 2) zp = zs - 2;
 				int zm = zz - 1; if (zm < 1) zm = 1;
-				m_gx2D[zz][yy] = distance[zz][yp][xx - 1] - distance[zz][ym][xx - 1];
-				m_gx2D[zz][yy] += distance[zz][yp][xx + 1] - distance[zz][ym][xx + 1];
-				m_gy2D[zz][yy] = distance[zp][yy][xx - 1] - distance[zm][yy][xx - 1];
-				m_gy2D[zz][yy] += distance[zp][yy][xx + 1] - distance[zm][yy][xx + 1];
+				m_gx2D[zz][yy] = distance[zz][yp][xx] - distance[zz][ym][xx];
+				m_gy2D[zz][yy] = distance[zp][yy][xx] - distance[zm][yy][xx];
 			}
 			//if current point is not on the edge of the data
 			if (!(zz < 5 || zz >= zs - 5 || yy < 5 || yy >= ys - 5))

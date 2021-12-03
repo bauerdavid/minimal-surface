@@ -62,8 +62,6 @@ void CTransport::TrInit(SVoxImg<SWorkImg<realnum>> &distmap, SVoxImg<SWorkImg<re
 							}
 						*/
 					}
-					if (distmap[zz][yy][xx] < -0.5) // no transport from uninitialized distance map
-						m_isboundary[zz][yy][xx] = -1; // -1 boundary to omit
 				}
 			}
 		}
@@ -75,8 +73,8 @@ void CTransport::TrIterate(int bev)
 {
 
 	int targi = bev ? 0 : 1;
-	SVoxImg<SWorkImg<realnum>>& trf = m_transportfunction[0];// m_transportfunction[bev];
-	SVoxImg<SWorkImg<realnum>>& trft = m_transportfunction[0];// m_transportfunction[targi];
+	SVoxImg<SWorkImg<realnum>>& trf = m_transportfunction[bev];// m_transportfunction[bev];
+	SVoxImg<SWorkImg<realnum>>& trft = m_transportfunction[targi];// m_transportfunction[targi];
 
 	SVoxImg<SWorkImg<int>>& bound = m_isboundary;
 
