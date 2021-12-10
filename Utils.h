@@ -204,18 +204,17 @@ sitk::Image work_img_2_sitk(SWorkImg<T>& data) {
 	}
 	return img;
 }
-
-template<typename T, sitk::PixelIDValueEnum pixelIdValueEnum = TypeEnumTrait<T>::value, sitk::InterpolatorEnum interpolatorEnum = TypeEnumTrait<T>::interpolator, class PixelManager = PixelManagerTrait<pixelIdValueEnum>>
-void resample_vox_img(SVoxImg<SWorkImg<T>>& data, SVoxImg<SWorkImg<T>>& out, vector<double>& rotation_matrix, vector<unsigned int> sample_size, bool inverse=false, bool useNearestNeighborExtrapolator=false) {
-	unsigned int xs(data.xs), ys(data.ys), zs(data.zs);
-	vector<unsigned int> data_size = { (unsigned int)xs, (unsigned int)ys, (unsigned int)zs };
-
+template
+<sitk::InterpolatorEnum interpolator = sitk::sitkLinear>
+sitk::Image resample_img(sitk::Image& src, sitk::Image& dst, vector<double>& rotation_matrix, vector<unsigned int> sample_size, bool inverse = false, bool useNearestNeighborExtrapolator = false) {
+	vector<unsigned> data_size = src.GetSize();
 	if (sample_size.size() == 0)
 		find_rotated_size(data_size, rotation_matrix, sample_size);
-	sitk::Image sample_img(sample_size, pixelIdValueEnum);
-	sitk::Image data_img = vox_img_2_sitk<T, pixelIdValueEnum, PixelManager>(data);
+	sitk::Image sample_img(sample_size, src.GetPixelID());
+	vector<double> original_direction = src.GetDirection();
+	vector<double> original_origin = src.GetOrigin();
 	if (inverse)
-		data_img.SetDirection(rotation_matrix);
+		src.SetDirection(rotation_matrix);
 	else
 		sample_img.SetDirection(rotation_matrix);
 	vector<double> sample_center;
@@ -224,15 +223,27 @@ void resample_vox_img(SVoxImg<SWorkImg<T>>& data, SVoxImg<SWorkImg<T>>& out, vec
 
 	vector<double> data_center;
 	std::transform(data_size.begin(), data_size.end(), std::back_inserter(data_center), [](double v) { return (double)v / 2; });
-	data_center = data_img.TransformContinuousIndexToPhysicalPoint(data_center);
+	data_center = src.TransformContinuousIndexToPhysicalPoint(data_center);
 
 	vector<double> sample_origin;
 	std::transform(data_center.begin(), data_center.end(), sample_center.begin(), std::back_inserter(sample_origin), std::minus<double>());
 	sample_img.SetOrigin(sample_origin);
+	
+	dst = sitk::Resample(src, sample_img, sitk::Transform(), interpolator, -1.0, sitk::sitkUnknown, useNearestNeighborExtrapolator);
+	return sample_img;
+}
 
-	sitk::Image resampled = sitk::Resample(data_img, sample_img, sitk::Transform(), interpolatorEnum, -1.0, sitk::sitkUnknown, useNearestNeighborExtrapolator);
+template<typename T, sitk::PixelIDValueEnum pixelIdValueEnum = TypeEnumTrait<T>::value, sitk::InterpolatorEnum interpolatorEnum = TypeEnumTrait<T>::interpolator, class PixelManager = PixelManagerTrait<pixelIdValueEnum>>
+sitk::Image resample_vox_img(SVoxImg<SWorkImg<T>>& data, SVoxImg<SWorkImg<T>>& out, vector<double>& rotation_matrix, vector<unsigned int> sample_size, bool inverse=false, bool useNearestNeighborExtrapolator=false) {
+	unsigned int xs(data.xs), ys(data.ys), zs(data.zs);
+	vector<unsigned int> data_size = { (unsigned int)xs, (unsigned int)ys, (unsigned int)zs };
+	sitk::Image data_img = vox_img_2_sitk<T, pixelIdValueEnum, PixelManager>(data);
+	sitk::Image resampled;
+
+	sitk::Image sample_image = resample_img<interpolatorEnum>(data_img, resampled, rotation_matrix, sample_size, inverse, useNearestNeighborExtrapolator);
 	//double pixVal = resampled.GetPixelAsDouble({ 40, 40, 40 });
 	sitk_2_vox_img<T, PixelManager>(resampled, out);
+	return sample_image;
 }
 
 template<typename T, class PixelManager = PixelManagerTrait<TypeEnumTrait<T>::value>>
@@ -339,3 +350,5 @@ void neg_to_minus1(SVoxImg<SWorkImg<T>>& data) {
 		}
 	}
 }
+
+void neg_to_minus1(sitk::Image& img);

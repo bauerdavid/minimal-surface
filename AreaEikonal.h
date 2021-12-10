@@ -70,7 +70,7 @@ public:
 	SWorkImg<realnum> m_distance2D[2];
 	// get the distance gradients along the selected x slice from the two neighboring slices
 	void GetDistancemean(SVoxImg<SWorkImg<realnum>> &distance1, SVoxImg<SWorkImg<realnum>>& distance2, int xslice);
-	void GetDistancemean(SVoxImg<SWorkImg<realnum>>& distance, int xslice);
+	void GetDistancemean(sitk::Image& distance, int xslice);
 	void Iterate();
 	std::unordered_set<unsigned long> m_bound;
 	// collects bounding points into a set
@@ -86,39 +86,56 @@ public:
 	-4: neither map nor gradient
 	0<: was smoothed along every dimension
 	*/
-	SVoxImg<SWorkImg<int>> m_smoothstate;
-	SVoxImg<SWorkImg<int>> m_thickstate;
-	SVoxImg<SWorkImg<realnum>> m_Sumcurvature;
+	//SVoxImg<SWorkImg<int>> m_smoothstate;
+	sitk::Image m_smoothstate;
+	//SVoxImg<SWorkImg<int>> m_thickstate;
+	sitk::Image m_thickstate;
+	//SVoxImg<SWorkImg<realnum>> m_Sumcurvature;
+	sitk::Image m_Sumcurvature;
 	//SVoxImg<SWorkImg<realnum>> m_Hessian[6];
 
-	SVoxImg<SWorkImg<realnum>> m_distance[2];
-	SVoxImg<SWorkImg<realnum>> m_combined_distance;
+	//SVoxImg<SWorkImg<realnum>> m_distance[2];
+	sitk::Image m_distance[2];
+	//SVoxImg<SWorkImg<realnum>> m_combined_distance;
+	sitk::Image m_combined_distance;
 	// for every pixel stores which flow reached it first
-	SVoxImg<SWorkImg<int>> m_flow_idx;
+	//SVoxImg<SWorkImg<int>> m_flow_idx;
+	sitk::Image m_flow_idx;
 
 	double m_plane_slice;
-	sitk::Image m_distance_image;
 	// expansion
 
 	// gradients of the distance maps
-	SVoxImg<SWorkImg<realnum>> unx;
-	SVoxImg<SWorkImg<realnum>> uny;
-	SVoxImg<SWorkImg<realnum>> unz;
+	//SVoxImg<SWorkImg<realnum>> unx;
+	sitk::Image unx;
+	//SVoxImg<SWorkImg<realnum>> uny;
+	sitk::Image uny;
+	//SVoxImg<SWorkImg<realnum>> unz;
+	sitk::Image unz;
 
 	// Working field
-	SVoxImg<SWorkImg<realnum>> m_field[2];
+	//SVoxImg<SWorkImg<realnum>> m_field[2];
+	sitk::Image m_field[2];
 	//SVoxImg<SWorkImg<realnum>> m_gradlen;
 	//SVoxImg<SWorkImg<realnum>> m_n[3];
-	SVoxImg<SWorkImg<realnum>> m_aux; // temp
-	SVoxImg<SWorkImg<realnum>> m_smoothaux; // temp
-	SVoxImg<SWorkImg<realnum>> m_smoothaux2; // temp
-	SVoxImg<SWorkImg<realnum>> m_smoothdist; // temp
+	//SVoxImg<SWorkImg<realnum>> m_aux; // temp
+	sitk::Image m_aux;
+	//SVoxImg<SWorkImg<realnum>> m_smoothaux; // temp
+	sitk::Image m_smoothaux;
+	//SVoxImg<SWorkImg<realnum>> m_smoothaux2; // temp
+	sitk::Image m_smoothaux2;
+	//SVoxImg<SWorkImg<realnum>> m_smoothdist; // temp
+	sitk::Image m_smoothdist;
+	//SVoxImg<SWorkImg<realnum>> m_velo[2];
+	sitk::Image m_velo[2];
 
-	SVoxImg<SWorkImg<realnum>> m_velo[2];
+	sitk::Image m_sample_image;
 	// Image data
-	SVoxImg<SWorkImg<realnum>> m_data;
+	//SVoxImg<SWorkImg<realnum>> m_data;
+	sitk::Image m_data;
 
-	SVoxImg<SWorkImg<int>> meeting_plane_positions;
+	//SVoxImg<SWorkImg<int>> meeting_plane_positions;
+	sitk::Image meeting_plane_positions;
 	bool m_bdone;
 	realnum m_currentdistance;
 
@@ -132,10 +149,9 @@ public:
 	// Calculate fundamental quantities, like distance gradient, sum curvature and thick state(?)
 	void CalculateFundQuant(int i = 0, int test = 0);
 	// Creates a smoother version of the distance map in smoothdist
-	void SmoothMap(SVoxImg<SWorkImg<realnum>>& src1, SVoxImg<SWorkImg<realnum>>& src2, SVoxImg<SWorkImg<realnum>>& out);
+	void SmoothMap(sitk::Image& src1, sitk::Image& src2, sitk::Image& out);
 	// Update velocity, then phase field based on velocity, and distance map, where phase field passes threshold value
 	void Iterate(bool use_correction);
-	void RegularizePhaseField(SVoxImg<SWorkImg<realnum>>& field, SVoxImg<SWorkImg<realnum>>& velo);
 };
 
 class CCurvEikonal

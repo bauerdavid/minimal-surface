@@ -1,8 +1,12 @@
 #include "stdafx.h"
 #include "Transport.h"
+#include "SimpleITK.h"
+#include "Utils.h"
+namespace sitk = itk::simple;
+using namespace std;
 
 
-void CTransport::TrInit(SVoxImg<SWorkImg<realnum>> &distmap, SVoxImg<SWorkImg<realnum>>& inimap, realnum maxdistance)
+void CTransport::TrInit(sitk::Image &distmap, SVoxImg<SWorkImg<realnum>>& inimap, realnum maxdistance)
 {
 	/*
 		called with:
@@ -10,8 +14,10 @@ void CTransport::TrInit(SVoxImg<SWorkImg<realnum>> &distmap, SVoxImg<SWorkImg<re
 			inimap = passi
 			maxdistance = m_liftedEikonal.currentdistance[0]
 	*/
-
-	int xs = distmap.xs, ys = distmap.ys, zs = distmap.zs;
+	vector<unsigned> size = distmap.GetSize();
+	SVoxImg<SWorkImg<double>> distmap_vox;
+	double* distmap_buffer = distmap.GetBufferAsDouble();
+	int xs = size[0], ys = size[1], zs = size[2];
 	if (inimap.xs != xs) return;
 	if (inimap.ys != ys) return;
 	if (inimap.zs != zs) return;
@@ -28,13 +34,13 @@ void CTransport::TrInit(SVoxImg<SWorkImg<realnum>> &distmap, SVoxImg<SWorkImg<re
 		for (int yy = 0; yy < ys; ++yy)
 			for (int xx = 0; xx < xs; ++xx) {
 				if (inimap[zz][yy][xx] < mmin) mmin = inimap[zz][yy][xx]; // minimal value by plane distance function
-				if (distmap[zz][yy][xx] < -0.5) // not calculated
-					distmap[zz][yy][xx] = 1.2 * maxdistance; // new
+				if (distmap_buffer[xx + xs * (yy + ys * zz)] < -0.5) // not calculated
+					distmap_buffer[xx + xs * (yy + ys * zz)] = 1.2 * maxdistance; // new
 				if (!xx || xx == xs - 1 || !yy || yy == ys - 1 || !zz || zz == zs - 1) // external borders
-					distmap[zz][yy][xx] = 1.2 * maxdistance; // new
+					distmap_buffer[xx + xs * (yy + ys * zz)] = 1.2 * maxdistance; // new
 			}
-
-	distmap.GetGrad(m_gx, m_gy, m_gz);
+	sitk_2_vox_img<double>(distmap, distmap_vox);
+	distmap_vox.GetGrad(m_gx, m_gy, m_gz);
 
 	m_min = mmin;
 	for (int zz = 0; zz < zs; ++zz) {

@@ -8,6 +8,9 @@
 #include <Eigen/Core>
 #include <sitkImageFileWriter.h>
 #include <sitkAdditionalProcedures.h>
+#include <sitkCastImageFilter.h>
+#include <sitkImageOperators.h>
+#include "SimpleITK.h"
 
 using namespace std;
 namespace sitk = itk::simple;
@@ -56,6 +59,7 @@ void rotate(const std::vector<double> rotation_matrix, const std::vector<double>
 
 void save_image(string filename, sitk::Image img) {
 	sitk::ImageFileWriter writer;
+	img = sitk::Cast(img, sitk::sitkFloat32);
 	writer.SetFileName(filename);
 	writer.Execute(img);
 }
@@ -77,4 +81,8 @@ void find_rotated_size(vector<unsigned int>& original_size, vector<double>& rota
 		}
 	}
 	std::transform(upper_bound.begin(), upper_bound.end(), lower_bound.begin(), std::back_inserter(rotated_size), [](double l, double r) {return ceil(l - r); });
+}
+
+void neg_to_minus1(sitk::Image& img) {
+	img = sitk::Cast(sitk::GreaterEqual(img, 0), img.GetPixelID()) * img - sitk::Cast(sitk::Less(img, 0), img.GetPixelID());
 }
