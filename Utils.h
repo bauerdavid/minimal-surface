@@ -125,6 +125,21 @@ public:
 	}
 };
 
+template<>
+struct PixelManagerTrait<sitk::sitkUInt8> {
+public:
+	static void SetPixel(sitk::Image& img, const vector<unsigned int>& idx, unsigned char value) {
+		img.SetPixelAsUInt8(idx, value);
+	}
+	static unsigned char GetPixel(sitk::Image& img, const vector<unsigned int>& idx) {
+		return img.GetPixelAsUInt8(idx);
+	}
+
+	static unsigned char* GetBuffer(sitk::Image& img) {
+		return img.GetBufferAsUInt8();
+	}
+};
+
 std::pair<IPoi3<double>, IPoi3<double>> best_plane_from_points(const std::unordered_set<IPoi3<double>, IPoi3Hash<double>>& c);
 
 void rotate(const std::vector<double> rotation_matrix, const std::vector<double> value, std::vector<double>& dest);
@@ -352,3 +367,35 @@ void neg_to_minus1(SVoxImg<SWorkImg<T>>& data) {
 }
 
 void neg_to_minus1(sitk::Image& img);
+
+template
+<sitk::PixelIDValueEnum pixelID=sitk::sitkUInt8, class PixelManager = PixelManagerTrait<pixelID>>
+sitk::Image create_6_neighbors_SE() {
+	sitk::Image se({ 3, 3, 3 }, pixelID);
+	for (int zz = 0; zz < 3; zz++) {
+		for (int yy = 0; yy < 3; yy++) {
+			for (int xx = 0; xx < 3; xx++) {
+				if (xx % 2 + yy % 2 + zz % 2 == 2) {
+					PixelManager::SetPixel(se, { (unsigned)xx, (unsigned)yy, (unsigned)zz }, 1);
+				}
+			}
+		}
+	}
+	return se;
+}
+
+template
+<sitk::PixelIDValueEnum pixelID = sitk::sitkUInt8, class PixelManager = PixelManagerTrait<pixelID>>
+sitk::Image create_19_neighbors_SE() {
+	sitk::Image se({ 3, 3, 3 }, pixelID);
+	for (int zz = 0; zz < 3; zz++) {
+		for (int yy = 0; yy < 3; yy++) {
+			for (int xx = 0; xx < 3; xx++) {
+				if (xx % 2 + yy % 2 + zz % 2 > 0) {
+					PixelManager::SetPixel(se, { (unsigned)xx, (unsigned)yy, (unsigned)zz }, 1);
+				}
+			}
+		}
+	}
+	return se;
+}

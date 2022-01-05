@@ -6,7 +6,7 @@
 #include "MinArea.h"
 #include "ChildView.h"
 #include "Utils.h"
-
+#include "AreaEikonal.h"
 #ifdef _DEBUG
 #define new DEBUG_NEW
 #endif
@@ -14,6 +14,7 @@
 #include <fstream>
 #include <sitkImage.h>
 #include <sitkAdditionalProcedures.h>
+#include <omp.h>
 
 #define DISTANCE_ITERATION 1
 #define DISTANCE_MEAN_ITERATION 2
@@ -330,6 +331,15 @@ UINT BackgroundThread(LPVOID params)
 	int cyc = 0;
 	extern bool g_modeswitch;
 	save_image("Y:/BIOMAG/shortest path/data.tif", view->m_liftedEikonal.m_phasefield.m_data);
+	double start = omp_get_wtime();
+	ofstream f_stream;
+	f_stream.open("Y:/BIOMAG/shortest path/" INFO_FILENAME);
+	f_stream << "FindMeetPoints schedule: " << TOSTRING(FIND_MEET_POINTS_SCHEDULE) << endl;
+	f_stream << "SmoothMap schedule: " << TOSTRING(SMOOTH_MAP_SCHEDULE) << endl;
+	f_stream << "CalculateFundQuant schedule: " << TOSTRING(CALCULATE_FUND_QUANT_SCHEDULE) << endl;
+	f_stream << "UpdateVelo schedule: " << TOSTRING(UPDATE_VELO_SCHEDULE) << endl;
+	f_stream << "UpdateDistanceSchedule schedule: " << TOSTRING(UPDATE_DISTANCE_SCHEDULE) << endl;
+	f_stream.close();
 	while (view->m_threadactivated) {
 
 		if (view->m_threadactivated == DISTANCE_ITERATION) { // 3D
@@ -337,7 +347,7 @@ UINT BackgroundThread(LPVOID params)
 			{
 				view->m_liftedEikonal.m_phasefield.Iterate(g_modeswitch);
 				if (view->m_liftedEikonal.m_phasefield.m_bdone) {
-					save_image("Y:/BIOMAG/shortest path/flow_idx.tif", view->m_liftedEikonal.m_phasefield.m_flow_idx);
+					//save_image("Y:/BIOMAG/shortest path/flow_idx.tif", view->m_liftedEikonal.m_phasefield.m_flow_idx);
 					view->m_liftedEikonal.ExtractMeetingPlane();
 					//view->m_liftedEikonal.rotation_matrix = { 1, 0, 0, 0, 1, 0, 0, 0, 1 };
 					view->m_liftedEikonal.m_rotated_phasefield.Initialize(view->m_liftedEikonal.m_phasefield, view->m_liftedEikonal.rotation_matrix);
@@ -356,22 +366,24 @@ UINT BackgroundThread(LPVOID params)
 					vector<unsigned int> rot_size = view->m_liftedEikonal.m_rotated_phasefield.m_distance[0].GetSize();
 
 					
-					save_image("Y:/BIOMAG/shortest path/combined_distance.tif", view->m_liftedEikonal.m_phasefield.m_combined_distance);
-					save_image("Y:/BIOMAG/shortest path/distance_0.tif", view->m_liftedEikonal.m_phasefield.m_distance[0]);
-					save_image("Y:/BIOMAG/shortest path/distance_1.tif", view->m_liftedEikonal.m_phasefield.m_distance[1]);
+					//save_image("Y:/BIOMAG/shortest path/combined_distance.tif", view->m_liftedEikonal.m_phasefield.m_combined_distance);
+					//save_image("Y:/BIOMAG/shortest path/distance_0.tif", view->m_liftedEikonal.m_phasefield.m_distance[0]);
+					//save_image("Y:/BIOMAG/shortest path/distance_1.tif", view->m_liftedEikonal.m_phasefield.m_distance[1]);
 					ofstream f_stream;
-					f_stream.open("Y:/BIOMAG/shortest path/info.txt");
+					f_stream.open("Y:/BIOMAG/shortest path/" INFO_FILENAME, std::ios::app);
 					f_stream << "size (x, y, z):";
 					f_stream << " " << rot_size[0];
 					f_stream << " " << rot_size[1];
 					f_stream << " " << rot_size[2];
 					f_stream << endl;
 					f_stream << "plane center: " << plane_center_transformed[0] << endl;
+					double length = omp_get_wtime() - start;
+					f_stream << "execution time: " << length << endl;
 					f_stream.close();
-					if (view->m_liftedEikonal.m_phasefield.m_bdone) {
-						view->m_threadactivated = DISTANCE_MEAN_ITERATION;
-						view->Invalidate(FALSE);
-					}
+					view->m_threadactivated = DISTANCE_MEAN_ITERATION;
+
+					view->Invalidate(FALSE);
+					
 				}
 			}
 			else if (!view->m_liftedEikonal.m_rotated_phasefield.m_bdone) {
@@ -447,7 +459,14 @@ UINT BackgroundThread(LPVOID params)
 void CChildView::InitThread()
 {
 	if (m_threadactivated) return;
-	if (!m_bispoint) return;
+	if (!m_bispoint) {
+		m_start_point.x = 40;
+		m_end_point.x = 201;
+		m_start_point.y = m_end_point.y = 87;
+		m_start_point.z = m_end_point.z = 54;
+		m_bispoint = 2;
+	}
+	
 	
 	if (m_bispoint <= 1) {
 		m_end_point.x = -100;

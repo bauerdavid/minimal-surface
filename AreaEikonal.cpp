@@ -6,11 +6,24 @@
 #include "SimpleITK.h"
 #include <vector>
 #include <sitkImageOperators.h>
+#include <itkBinaryErodeImageFilter.h>
+#include <itkFlatStructuringElement.h>
 #define BIG_NUMBER 1e11
 #define MAX_THREADS 32
+//							x  210210210210210210210210210
+//							y  222111000222111000222111000
+//							z  222222222111111111000000000
+#define CONNECTIVITY_MASK_19 0b010111010111111111010111010
+#define CONNECTIVITY_MASK_6  0b000010000010101010000010000
+
+inline unsigned int connectivity_bit(bool val, int x, int y, int z) {
+
+	return (unsigned int)val << (x + 1) + 3 * ((y + 1) + 3 * (z + 1));
+}
 namespace sitk = itk::simple;
 using namespace std;
 
+#define BUF_IDX(buffer, xs, ys, zs, xx, yy, zz) buffer[(xx) + (xs)*((yy)+(ys)*(zz))]
 //const int max_threads = omp_get_max_threads();
 int a = 0;
 CCurvEikonal::CCurvEikonal(void)
@@ -116,7 +129,7 @@ void CPhaseContainer::FindMeetPoints() {
 		sitk::Image& counterd = m_distance[(ii + 1) % 2];
 		double* distance_buffer = distance.GetBufferAsDouble();
 		double* counterd_buffer = counterd.GetBufferAsDouble();
-#pragma omp parallel for schedule(static)
+#pragma omp parallel for FIND_MEET_POINTS_SCHEDULE
 
 		for (int zz = 1; zz < zs - 1; ++zz) {
 			for (int yy = 1; yy < ys - 1; ++yy) {
@@ -152,6 +165,31 @@ void CPhaseContainer::FindMeetPoints() {
 						}
 
 						//continue;
+					}
+				}
+			}
+		}
+	}
+}
+
+void CPhaseContainer::InitializeNeighbors() {
+	return;
+	vector<unsigned> size = m_distance[0].GetSize();
+	m_distance_connectivity = sitk::Image(size, sitk::sitkUInt32);
+	unsigned int* connectivity_buffer = m_distance_connectivity.GetBufferAsUInt32();
+	sitk::Image& pos_distance = sitk::GreaterEqual(sitk::Maximum(m_distance[0], m_distance[1]), 0);
+	unsigned char* pos_dist_buffer = pos_distance.GetBufferAsUInt8();
+	int xs(size[0]), ys(size[1]), zs(size[2]);
+	for (int zz = 1; zz < zs - 1; zz++) {
+		for (int yy = 1; yy < ys - 1; yy++) {
+			for (int xx = 1; xx < xs - 1; xx++) {
+				for (int k = -1; k <= 1; k++) {
+					for (int j = -1; j <= 1; j++) {
+						for (int i = -1; i <= 1; i++) {
+							if (BUF_IDX(pos_dist_buffer, xs, ys, zs, xx + i, yy + j, zz + k)) {
+								BUF_IDX(connectivity_buffer, xs, ys, zs, xx, yy, zz) |= connectivity_bit(BUF_IDX(pos_dist_buffer, xs, ys, zs, xx + i, yy + j, zz + k), i, j, k);
+							}
+						}
 					}
 				}
 			}
@@ -201,11 +239,11 @@ void CPhaseContainer::Initialize(SVoxImg<SWorkImg<realnum>>& data, CVec3& start_
 		double* field_buffer = m_field[ii].GetBufferAsDouble();
 		double* distance_buffer = m_distance[ii].GetBufferAsDouble();
 		for (int zz = point.z - hs; zz < point.z + hs; ++zz) {
-			if (zz < 0) continue;
+			if (zz < 0 || zz >= spacez) continue;
 			for (int yy = point.y - hs; yy < point.y + hs; ++yy) {
-				if (yy < 0) continue;
+				if (yy < 0 || yy >=spacey) continue;
 				for (int xx = point.x - hs; xx < point.x + hs; ++xx) {
-					if (xx < 0) continue;
+					if (xx < 0 || xx >= spacex) continue;
 					int dx = xx - point.x, dy = yy - point.y;
 					int dz = zz - point.z;
 					realnum dd = (realnum)(dx * dx + dy * dy + dz * dz);
@@ -227,7 +265,7 @@ void CPhaseContainer::Initialize(SVoxImg<SWorkImg<realnum>>& data, CVec3& start_
 		}
 
 	}
-
+	InitializeNeighbors();
 
 	m_bdone = false;
 }
@@ -263,7 +301,6 @@ void CPhaseContainer::Initialize(CPhaseContainer& phasefield, vector<double>& ro
 	neg_to_minus1(m_combined_distance);
 	resample_img<sitk::sitkNearestNeighbor>(phasefield.m_flow_idx, m_flow_idx, rotation_matrix, sample_size, inverse, true);
 
-
 	resample_img(phasefield.m_velo[0], m_velo[0], rotation_matrix, sample_size, inverse);
 	resample_img(phasefield.m_velo[1], m_velo[1], rotation_matrix, sample_size, inverse);
 	resample_img(phasefield.m_aux, m_aux, rotation_matrix, sample_size, inverse);
@@ -278,6 +315,7 @@ void CPhaseContainer::Initialize(CPhaseContainer& phasefield, vector<double>& ro
 
 	
 	m_bdone = phasefield.m_bdone;
+	InitializeNeighbors();
 }
 
 void CPhaseContainer::SmoothMap(sitk::Image &src1, sitk::Image& src2, sitk::Image &out)
@@ -299,7 +337,7 @@ void CPhaseContainer::SmoothMap(sitk::Image &src1, sitk::Image& src2, sitk::Imag
 	double* src2_buffer = src2.GetBufferAsDouble();
 	double* out_buffer = out.GetBufferAsDouble();
 
-	#pragma omp parallel for schedule(static)
+	#pragma omp parallel for SMOOTH_MAP_SCHEDULE
 	/*for (int zz = 0; zz < zs; ++zz) {
 		for (int yy = 0; yy < ys; ++yy) {
 			for (int xx = 0; xx < xs; ++xx) {*/
@@ -336,7 +374,7 @@ void CPhaseContainer::SmoothMap(sitk::Image &src1, sitk::Image& src2, sitk::Imag
 			}
 		}
 	}
-	#pragma omp parallel for schedule(static)
+	#pragma omp parallel for SMOOTH_MAP_SCHEDULE
 	/*for (int zz = 0; zz < zs; ++zz) {
 		for (int yy = 0; yy < ys; ++yy) {
 			for (int xx = 0; xx < xs; ++xx) {*/
@@ -371,7 +409,7 @@ void CPhaseContainer::SmoothMap(sitk::Image &src1, sitk::Image& src2, sitk::Imag
 			}
 		}
 	}
-	#pragma omp parallel for schedule(static)
+	#pragma omp parallel for SMOOTH_MAP_SCHEDULE
 	/*for (int zz = 0; zz < zs; ++zz) {
 		for (int yy = 0; yy < ys; ++yy) {
 			for (int xx = 0; xx < xs; ++xx) {*/
@@ -416,11 +454,13 @@ void CPhaseContainer::CalculateFundQuant(int i, int test)
 	// int j = i;
 	int* thstat_buffer = m_thickstate.GetBufferAsInt32();
 	double* Sum_buffer = m_Sumcurvature.GetBufferAsDouble();
-	double* distance_buffer = m_smoothdist.GetBufferAsDouble(); // STAYS
+	sitk::Image& distance = m_smoothdist;
+	double* distance_buffer = distance.GetBufferAsDouble(); // STAYS
+	//unsigned int* connectivity_buffer = m_distance_connectivity.GetBufferAsUInt32();
 	double* unx_buffer = unx.GetBufferAsDouble();
 	double* uny_buffer = uny.GetBufferAsDouble();
 	double* unz_buffer = unz.GetBufferAsDouble();
-	SmoothMap(m_distance[i], m_distance[(i + 1) % 2], m_smoothdist); // m_distance[i];
+	SmoothMap(m_distance[i], m_distance[(i + 1) % 2], distance); // m_distance[i];
 	int* smstat_buffer = m_smoothstate.GetBufferAsInt32();
 	vector<unsigned> size = m_smoothdist.GetSize();
 	int xs = size[0], ys = size[1], zs = size[2];
@@ -431,7 +471,7 @@ void CPhaseContainer::CalculateFundQuant(int i, int test)
 	static int nsh; nsh = 0;
 	//int ign(0), ian(0);
 
-	#pragma omp parallel for schedule(static)
+	#pragma omp parallel for CALCULATE_FUND_QUANT_SCHEDULE
 	/*for (int zz = 0; zz < zs; ++zz) {
 		for (int yy = 0; yy < ys; ++yy) {
 			for (int xx = 0; xx < xs; ++xx) {*/
@@ -451,7 +491,8 @@ void CPhaseContainer::CalculateFundQuant(int i, int test)
 				if (thstat_buffer[xx + xs * (yy + ys * zz)] == 2) continue;
 
 				//Gau[zz][yy][xx] = 0; Sum[zz][yy][xx] = 0;
-
+				/*unsigned int val= (BUF_IDX(connectivity_buffer, xs, ys, zs, xx, yy, zz) & CONNECTIVITY_MASK_19);
+				if (val == CONNECTIVITY_MASK_19)*/
 				if (distance_buffer[xx + xs * (yy + ys * zz)] >= 0
 				 &&	distance_buffer[xx + xs * (yp + ys * zz)] >= 0 && distance_buffer[xx + xs * (ym + ys * zz)] >= 0
 				 && distance_buffer[xp + xs * (yy + ys * zz)] >= 0 && distance_buffer[xm + xs * (yy + ys * zz)] >= 0
@@ -540,11 +581,12 @@ realnum CPhaseContainer::UpdateVelo(int i, bool use_correction) {
 	sitk::Image& velo = m_velo[i];
 
 	// m_distance[i]
-	double* distance_buffer = m_distance[i].GetBufferAsDouble();
+	sitk::Image& distance = m_distance[i];
+	double* distance_buffer = distance.GetBufferAsDouble();
 
 	// m_distance[(i+1)&1]
 	double* counterd_buffer = m_distance[(i + 1) & 1].GetBufferAsDouble();
-
+	//unsigned int* connectivity_buffer = m_distance_connectivity.GetBufferAsUInt32();
 
 	// m_Sumcurvature[i]
 	double* Sum_buffer = m_Sumcurvature.GetBufferAsDouble();
@@ -582,9 +624,13 @@ realnum CPhaseContainer::UpdateVelo(int i, bool use_correction) {
 	// Calculate the velocity at every point (velo[zz][yy][xx]), and the maximum velocity (maxv)
 	velo = velo - velo;
 	double* velo_buffer = velo.GetBufferAsDouble();
+
+	//sitk::Image&& pos_dist = sitk::Greater(distance, 0);
+	//sitk::Image&& any_neighs = sitk::DilateObjectMorphology(pos_dist, { 1, 1, 1 }, sitk::sitkCross);
+	//unsigned char* any_neighs_buffer = any_neighs.GetBufferAsUInt8();
 	{
-#pragma omp parallel for shared(maxinfo) schedule(static)
-		/*for (int zyx = 0; zyx < zs * ys * xs; zyx++) {
+#pragma omp parallel for shared(maxinfo) UPDATE_VELO_SCHEDULE
+		for (int zyx = 0; zyx < zs * ys * xs; zyx++) {
 			int zz = zyx / (ys * xs);
 			if (zz == 0 || zz >= zs - 1) continue;
 			{
@@ -592,10 +638,10 @@ realnum CPhaseContainer::UpdateVelo(int i, bool use_correction) {
 				if (yy == 0 || yy >= ys - 1) continue;
 				{
 					int xx = zyx % xs;
-					if (xx == 0 || xx >= xs - 1) continue;*/
-		for (int zz = 1; zz < zs - 1; ++zz) {
-			for (int yy = 1; yy < ys - 1; ++yy) {
-				for (int xx = 1; xx < xs - 1; ++xx) {
+					if (xx == 0 || xx >= xs - 1) continue;
+		//for (int zz = 1; zz < zs - 1; ++zz) {
+		//	for (int yy = 1; yy < ys - 1; ++yy) {
+		//		for (int xx = 1; xx < xs - 1; ++xx) {
 					int id = omp_get_thread_num();
 					counts[id]++;
 					// velo[zz][yy][xx] = 0; // zero out
@@ -615,7 +661,9 @@ realnum CPhaseContainer::UpdateVelo(int i, bool use_correction) {
 					int zp = zz + 1, zm = zz - 1;
 					int yp = yy + 1, ym = yy - 1;
 					int xp = xx + 1, xm = xx - 1;
-
+					/*unsigned int val = (BUF_IDX(connectivity_buffer, xs, ys, zs, xx, yy, zz) & CONNECTIVITY_MASK_6);
+					if (val == 0) continue;*/
+					if (field_buffer[xx + xs * (yy + ys * zz)] >= 0.95) continue; 
 					if (distance_buffer[xx + xs * (yp + ys * zz)] < 0 && distance_buffer[xx + xs * (ym + ys * zz)] < 0
 						&& distance_buffer[xp + xs * (yy + ys * zz)] < 0 && distance_buffer[xm + xs * (yy + ys * zz)] < 0
 						&& distance_buffer[xx + xs * (yy + ys * zp)] < 0 && distance_buffer[xx + xs * (yy + ys * zm)] < 0) continue;
@@ -623,7 +671,7 @@ realnum CPhaseContainer::UpdateVelo(int i, bool use_correction) {
 
 
 					
-					if (field_buffer[xx + xs * (yy + ys * zz)] >= 0.95) continue;
+					
 
 					realnum xn = field_buffer[xp + xs * (yy + ys * zz)] - field_buffer[xm + xs * (yy + ys * zz)];
 					realnum yn = field_buffer[xx + xs * (yp + ys * zz)] - field_buffer[xx + xs * (ym + ys * zz)];
@@ -670,7 +718,7 @@ realnum CPhaseContainer::UpdateVelo(int i, bool use_correction) {
 
 					} // for rr
 
-					realnum eikon = data_buffer[xx + xs * (yy + ys * zz)];
+					realnum eikon;
 
 					realnum d0 = data_buffer[xx + xs * (yy + ys * zz)];
 					if (d0 < 1e-33) d0 = 1e-33;
@@ -686,16 +734,9 @@ realnum CPhaseContainer::UpdateVelo(int i, bool use_correction) {
 						squar = d0;
 					}
 
-					if (use_correction) {
-						//realnum den = 1.0 + sumcur/1.2; if (den < 1e-6) den = 1e-6;	eikon = data[zz][yy][xx]/den;
-						if (squar > 0) {
-							eikon = squar;
-							//eikon *= exp(-sumcur); // best
-						}
-						else {
-							eikon = data_buffer[xx + xs * (yy + ys * zz)];
-						}
-					}
+					if (use_correction && squar > 0) 
+						eikon = squar;
+					
 					else
 						eikon = data_buffer[xx + xs * (yy + ys * zz)];
 
@@ -737,35 +778,7 @@ realnum CPhaseContainer::UpdateVelo(int i, bool use_correction) {
 	return maxv;
 }
 void CPhaseContainer::UpdateField(int i, realnum maxv) {
-	double* field_buffer = m_field[i].GetBufferAsDouble();
-	double* velo_buffer = m_velo[i].GetBufferAsDouble();
-	int* flow_idx_buffer = m_flow_idx.GetBufferAsInt32();
-	vector<unsigned> size = m_field[i].GetSize();
-	int xs = size[0], ys = size[1], zs = size[2];
-#pragma omp parallel for schedule(static)
-	for (int zyx = 0; zyx < zs * ys * xs; zyx++) {
-		int zz = zyx / (ys * xs);
-		if (zz == 0 || zz >= zs - 1) continue;
-		{
-			int yy = (zyx / xs) % ys;
-			if (yy == 0 || yy >= ys - 1) continue;
-			{
-				int xx = zyx % xs;
-				if (xx == 0 || xx >= xs - 1) continue;
-	/*for (int zz = 1; zz < zs - 1; ++zz) {
-		for (int yy = 0 + 1; yy < ys - 1; ++yy) {
-			for (int xx = 0 + 1; xx < xs - 1; ++xx) {*/
-				field_buffer[xx + xs * (yy + ys * zz)] += velo_buffer[xx + xs * (yy + ys * zz)] * maxv;// ;
-				if (field_buffer[xx + xs * (yy + ys * zz)] > 0) {
-					if (field_buffer[xx + xs * (yy + ys * zz)] > 1.25) field_buffer[xx + xs * (yy + ys * zz)] = 1.25;
-					if (flow_idx_buffer[xx + xs * (yy + ys * zz)] < 0) {
-						flow_idx_buffer[xx + xs * (yy + ys * zz)] = i;
-					}
-				}
-
-			}
-		}
-	}
+	m_field[i] = sitk::Minimum(m_field[i] + m_velo[i] * maxv, 1.25);
 }
 void CPhaseContainer::UpdateDistance(int i, realnum current_distance) {
 	double* field_buffer = m_field[i].GetBufferAsDouble();
@@ -774,9 +787,10 @@ void CPhaseContainer::UpdateDistance(int i, realnum current_distance) {
 
 	// m_phasefield.m_distance[(i+1)&1]
 	double* counterd_buffer = m_distance[(i + 1) & 1].GetBufferAsDouble();
+	//unsigned int* connectivity_buffer = m_distance_connectivity.GetBufferAsUInt32();
 	vector<unsigned> size = m_field[i].GetSize();
 	int xs = size[0], ys = size[1], zs = size[2];
-#pragma omp parallel for schedule(static)
+#pragma omp parallel for UPDATE_DISTANCE_SCHEDULE
 	for (int zyx = 0; zyx < zs * ys * xs; zyx++) {
 			int zz = zyx / (ys * xs);
 			if (zz == 0 || zz >= zs - 1) continue;
@@ -791,6 +805,13 @@ void CPhaseContainer::UpdateDistance(int i, realnum current_distance) {
 			for (int xx = 0 + 1; xx < xs - 1; ++xx) {*/
 				if (field_buffer[xx + xs * (yy + ys * zz)] > 0 && distance_buffer[xx + xs * (yy + ys * zz)] < -0.5f) {
 					distance_buffer[xx + xs * (yy + ys * zz)] = current_distance;
+					/*for (int k = -1; k <= 1; k++) {
+						for (int j = -1; j <= 1; j++) {
+							for (int i = -1; i <= 1; i++) {
+								BUF_IDX(connectivity_buffer, xs, ys, zs, xx + i, yy + j, zz + k) |= connectivity_bit(1, -i, -j, -k);
+							}
+						}
+					}*/
 				}
 				if (distance_buffer[xx + xs * (yy + ys * zz)] < -0.5f && counterd_buffer[xx + xs * (yy + ys * zz)] < -0.5f) {
 					m_bdone = false;

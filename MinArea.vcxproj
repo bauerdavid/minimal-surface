@@ -31,14 +31,14 @@
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
-    <PlatformToolset>v142</PlatformToolset>
+    <PlatformToolset>v143</PlatformToolset>
     <UseOfMfc>Dynamic</UseOfMfc>
     <CharacterSet>MultiByte</CharacterSet>
     <WholeProgramOptimization>true</WholeProgramOptimization>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
-    <PlatformToolset>v142</PlatformToolset>
+    <PlatformToolset>v143</PlatformToolset>
     <UseOfMfc>Dynamic</UseOfMfc>
     <CharacterSet>MultiByte</CharacterSet>
     <WholeProgramOptimization>true</WholeProgramOptimization>
@@ -58,7 +58,9 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
     <CharacterSet>MultiByte</CharacterSet>
-    <PlatformToolset>v142</PlatformToolset>
+    <PlatformToolset>v143</PlatformToolset>
+    <UseOfMfc>Dynamic</UseOfMfc>
+    <WholeProgramOptimization>false</WholeProgramOptimization>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <ImportGroup Label="ExtensionSettings">
@@ -444,17 +446,20 @@
       <AdditionalOptions>%(AdditionalOptions) /bigobj -D_AFXDLL</AdditionalOptions>
       <AssemblerListingLocation>$(IntDir)</AssemblerListingLocation>
       <ExceptionHandling>Sync</ExceptionHandling>
-      <InlineFunctionExpansion>OnlyExplicitInline</InlineFunctionExpansion>
+      <InlineFunctionExpansion>Default</InlineFunctionExpansion>
       <LanguageStandard>stdcpp14</LanguageStandard>
-      <Optimization>Disabled</Optimization>
+      <Optimization>MaxSpeed</Optimization>
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
-      <RuntimeTypeInfo>true</RuntimeTypeInfo>
+      <RuntimeTypeInfo>
+      </RuntimeTypeInfo>
       <UseFullPaths>false</UseFullPaths>
       <WarningLevel>Level3</WarningLevel>
       <PreprocessorDefinitions>WIN32;_WINDOWS;NDEBUG;ITK_IO_FACTORY_REGISTER_MANAGER;CMAKE_INTDIR="MinSizeRel";%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ObjectFileName>$(IntDir)</ObjectFileName>
-      <DebugInformationFormat>EditAndContinue</DebugInformationFormat>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <WholeProgramOptimization>true</WholeProgramOptimization>
+      <OmitFramePointers>false</OmitFramePointers>
     </ClCompile>
     <ResourceCompile>
       <PreprocessorDefinitions>WIN32;_WINDOWS;NDEBUG;ITK_IO_FACTORY_REGISTER_MANAGER;CMAKE_INTDIR=\"MinSizeRel\";%(PreprocessorDefinitions)</PreprocessorDefinitions>
@@ -474,16 +479,17 @@
       <ProxyFileName>%(Filename)_p.c</ProxyFileName>
     </Midl>
     <Link>
-      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <GenerateDebugInformation>false</GenerateDebugInformation>
       <SubSystem>Windows</SubSystem>
       <OptimizeReferences>true</OptimizeReferences>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <AdditionalDependencies>C:\SimpleITK-build\ITK-build\lib\MinSizeRel\itkdouble-conversion-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\itksys-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\itkvnl_algo-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\itkvnl-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\itkv3p_netlib-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\itkvcl-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\ITKCommon-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\itkNetlibSlatec-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\ITKStatistics-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\ITKTransform-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\ITKMesh-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\itkzlib-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\ITKMetaIO-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\ITKSpatialObjects-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\ITKPath-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\ITKLabelMap-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\ITKMathematicalMorphology-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\ITKQuadEdgeMesh-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\ITKFastMarching-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\ITKIOImageBase-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\ITKSmoothing-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\ITKImageFeature-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\ITKOptimizers-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\ITKPolynomials-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\ITKBiasCorrection-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\ITKColormap-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\ITKFFT-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\ITKConvolution-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\ITKDICOMParser-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\ITKDeformableMesh-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\ITKDenoising-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\ITKDiffusionTensorImage-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\ITKEXPAT-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\itkgdcmDICT-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\itkgdcmMSFF-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\ITKznz-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\ITKniftiio-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\ITKgiftiio-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\ITKPDEDeformableRegistration-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\itkhdf5_cpp-static-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\itkhdf5-static-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\ITKIOBMP-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\ITKIOBioRad-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\ITKIOBruker-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\ITKIOCSV-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\ITKIOGDCM-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\ITKIOIPL-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\ITKIOGE-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\ITKIOGIPL-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\ITKIOHDF5-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\itkjpeg-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\ITKIOJPEG-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\itkopenjpeg-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\ITKIOJPEG2000-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\itktiff-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\ITKIOTIFF-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\ITKIOLSM-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\itkminc2-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\ITKIOMINC-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\ITKIOMRC-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\ITKIOMeshBase-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\ITKIOMeshBYU-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\ITKIOMeshFreeSurfer-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\ITKIOMeshGifti-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\ITKIOMeshOBJ-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\ITKIOMeshOFF-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\ITKIOMeshVTK-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\ITKIOMeta-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\ITKIONIFTI-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\ITKNrrdIO-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\ITKIONRRD-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\itkpng-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\ITKIOPNG-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\ITKIOSiemens-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\ITKIOXML-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\ITKIOSpatialObjects-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\ITKIOStimulate-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\ITKTransformFactory-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\ITKIOTransformBase-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\ITKIOTransformHDF5-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\ITKIOTransformInsightLegacy-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\ITKIOTransformMINC-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\ITKIOTransformMatlab-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\ITKIOVTK-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\ITKKLMRegionGrowing-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\itklbfgs-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\ITKMarkovRandomFieldsClassifiers-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\ITKOptimizersv4-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\ITKQuadEdgeMeshFiltering-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\ITKRegionGrowing-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\ITKRegistrationMethodsv4-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\ITKVTK-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\ITKWatersheds-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\ITKReview-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\ITKTestKernel-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\ITKVideoCore-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\ITKVideoIO-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\itkSimpleITKFilters-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\itkgdcmIOD-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\itkgdcmDSED-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\itkgdcmCommon-5.3.lib;crypt32.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\itkgdcmjpeg8-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\itkgdcmjpeg12-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\itkgdcmjpeg16-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\itkgdcmopenjp2-5.3.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\itkgdcmcharls-5.3.lib;rpcrt4.lib;comctl32.lib;wsock32.lib;ws2_32.lib;dbghelp.lib;psapi.lib;C:\SimpleITK-build\ITK-build\lib\MinSizeRel\ITKVNLInstantiation-5.3.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;comdlg32.lib;advapi32.lib;C:\SimpleITK-build\lib\SimpleITK_ITKAnisotropicSmoothing-2.2.lib;C:\SimpleITK-build\lib\SimpleITK_ITKAntiAlias-2.2.lib;C:\SimpleITK-build\lib\SimpleITK_ITKBiasCorrection-2.2.lib;C:\SimpleITK-build\lib\SimpleITK_ITKBinaryMathematicalMorphology-2.2.lib;C:\SimpleITK-build\lib\SimpleITK_ITKClassifiers-2.2.lib;C:\SimpleITK-build\lib\SimpleITK_ITKColormap-2.2.lib;C:\SimpleITK-build\lib\SimpleITK_ITKCommon-2.2.lib;C:\SimpleITK-build\lib\SimpleITK_ITKConnectedComponents-2.2.lib;C:\SimpleITK-build\lib\SimpleITK_ITKConvolution-2.2.lib;C:\SimpleITK-build\lib\SimpleITK_ITKCurvatureFlow-2.2.lib;C:\SimpleITK-build\lib\SimpleITK_ITKDeconvolution-2.2.lib;C:\SimpleITK-build\lib\SimpleITK_ITKDenoising-2.2.lib;C:\SimpleITK-build\lib\SimpleITK_ITKDisplacementField-2.2.lib;C:\SimpleITK-build\lib\SimpleITK_ITKDistanceMap-2.2.lib;C:\SimpleITK-build\lib\SimpleITK_ITKFastMarching-2.2.lib;C:\SimpleITK-build\lib\SimpleITK_ITKFFT-2.2.lib;C:\SimpleITK-build\lib\SimpleITK_ITKImageCompare-2.2.lib;C:\SimpleITK-build\lib\SimpleITK_ITKImageCompose-2.2.lib;C:\SimpleITK-build\lib\SimpleITK_ITKImageFeature-2.2.lib;C:\SimpleITK-build\lib\SimpleITK_ITKImageFilterBase-2.2.lib;C:\SimpleITK-build\lib\SimpleITK_ITKImageFunction-2.2.lib;C:\SimpleITK-build\lib\SimpleITK_ITKImageFusion-2.2.lib;C:\SimpleITK-build\lib\SimpleITK_ITKImageGradient-2.2.lib;C:\SimpleITK-build\lib\SimpleITK_ITKImageGrid-2.2.lib;C:\SimpleITK-build\lib\SimpleITK_ITKImageIntensity-2.2.lib;C:\SimpleITK-build\lib\SimpleITK_ITKImageLabel-2.2.lib;C:\SimpleITK-build\lib\SimpleITK_ITKImageNoise-2.2.lib;C:\SimpleITK-build\lib\SimpleITK_ITKImageSources-2.2.lib;C:\SimpleITK-build\lib\SimpleITK_ITKImageStatistics-2.2.lib;C:\SimpleITK-build\lib\SimpleITK_ITKLabelMap-2.2.lib;C:\SimpleITK-build\lib\SimpleITK_ITKLabelVoting-2.2.lib;C:\SimpleITK-build\lib\SimpleITK_ITKLevelSets-2.2.lib;C:\SimpleITK-build\lib\SimpleITK_ITKMathematicalMorphology-2.2.lib;C:\SimpleITK-build\lib\SimpleITK_ITKPDEDeformableRegistration-2.2.lib;C:\SimpleITK-build\lib\SimpleITK_ITKRegionGrowing-2.2.lib;C:\SimpleITK-build\lib\SimpleITK_ITKRegistrationCommon-2.2.lib;C:\SimpleITK-build\lib\SimpleITK_ITKReview-2.2.lib;C:\SimpleITK-build\lib\SimpleITK_ITKSmoothing-2.2.lib;C:\SimpleITK-build\lib\SimpleITK_ITKSuperPixel-2.2.lib;C:\SimpleITK-build\lib\SimpleITK_ITKThresholding-2.2.lib;C:\SimpleITK-build\lib\SimpleITK_ITKTransform-2.2.lib;C:\SimpleITK-build\lib\SimpleITK_ITKWatersheds-2.2.lib;C:\SimpleITK-build\lib\SimpleITK_SimpleITKFilters-2.2.lib;C:\SimpleITK-build\lib\SimpleITKBasicFilters0-2.2.lib;C:\SimpleITK-build\lib\SimpleITKBasicFilters1-2.2.lib;C:\SimpleITK-build\lib\SimpleITKCommon-2.2.lib;C:\SimpleITK-build\lib\SimpleITKIO-2.2.lib;C:\SimpleITK-build\lib\SimpleITKRegistration-2.2.lib</AdditionalDependencies>
       <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalOptions>%(AdditionalOptions) /machine:x64 /F2000000</AdditionalOptions>
+      <AdditionalOptions>%(AdditionalOptions) /machine:x64</AdditionalOptions>
       <IgnoreSpecificDefaultLibraries>%(IgnoreSpecificDefaultLibraries)</IgnoreSpecificDefaultLibraries>
       <ImportLibrary>Y:/BIOMAG/shortest path/MinArea/MinArea_SITK/MinSizeRel/MinArea.lib</ImportLibrary>
       <ProgramDataBaseFile>Y:/BIOMAG/shortest path/MinArea/MinArea_SITK/MinSizeRel/MinArea.pdb</ProgramDataBaseFile>
+      <LinkTimeCodeGeneration>UseLinkTimeCodeGeneration</LinkTimeCodeGeneration>
     </Link>
     <ProjectReference>
       <LinkLibraryDependencies>false</LinkLibraryDependencies>

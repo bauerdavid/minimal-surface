@@ -6,6 +6,39 @@
 #include <vector>
 #include <sitkImage.h>
 
+#define CHUNK_SIZE 1//34100
+//#define FIND_MEET_POINTS_SCHEDULE schedule(dynamic, CHUNK_SIZE)
+//#define SMOOTH_MAP_SCHEDULE schedule(dynamic, CHUNK_SIZE)
+//#define CALCULATE_FUND_QUANT_SCHEDULE schedule(dynamic, CHUNK_SIZE)
+#define UPDATE_VELO_SCHEDULE schedule(dynamic, CHUNK_SIZE)
+//#define UPDATE_DISTANCE_SCHEDULE schedule(dynamic, CHUNK_SIZE)
+#define INFO_FILENAME "info_velo_optimized.txt"
+
+#ifndef FIND_MEET_POINTS_SCHEDULE
+#define FIND_MEET_POINTS_SCHEDULE
+#endif
+
+#ifndef SMOOTH_MAP_SCHEDULE
+#define SMOOTH_MAP_SCHEDULE
+#endif
+
+#ifndef CALCULATE_FUND_QUANT_SCHEDULE
+#define CALCULATE_FUND_QUANT_SCHEDULE
+#endif
+
+#ifndef UPDATE_VELO_SCHEDULE
+#define UPDATE_VELO_SCHEDULE
+#endif
+
+#ifndef UPDATE_DISTANCE_SCHEDULE
+#define UPDATE_DISTANCE_SCHEDULE
+#endif
+
+#define GET_MACRO(_0, _1, NAME, ...) NAME
+#define STRINGIFY(x) ""#x
+#define STRINGIFY_EMPTY() "-"
+#define TOSTRING(x) STRINGIFY(x)
+
 namespace sitk = itk::simple;
 using namespace std;
 
@@ -101,6 +134,7 @@ public:
 	// for every pixel stores which flow reached it first
 	//SVoxImg<SWorkImg<int>> m_flow_idx;
 	sitk::Image m_flow_idx;
+	sitk::Image m_distance_connectivity;
 
 	double m_plane_slice;
 	// expansion
@@ -142,6 +176,7 @@ public:
 	void Initialize(SVoxImg<SWorkImg<realnum>>& data, CVec3& start_point, CVec3& end_point);
 	void Initialize(CPhaseContainer& phasefield, vector<double>& rotation_matrix, bool inverse=false);
 	void CalculateAlignedCombinedDistance(double p1_x, double p2_x);
+	void InitializeNeighbors();
 	void FindMeetPoints();
 	realnum UpdateVelo(int i, bool use_correction);
 	void UpdateField(int i, realnum maxv);
