@@ -20,6 +20,11 @@ inline unsigned int connectivity_bit(bool val, int x, int y, int z) {
 
 	return (unsigned int)val << (x + 1) + 3 * ((y + 1) + 3 * (z + 1));
 }
+
+template<typename T>
+inline T squared_sum(T x, T y, T z) {
+	return x * x + y * y + z * z;
+}
 namespace sitk = itk::simple;
 using namespace std;
 
@@ -232,7 +237,7 @@ void CPhaseContainer::Initialize(SVoxImg<SWorkImg<realnum>>& data, CVec3& start_
 	m_data = vox_img_2_sitk(data);
 	m_sample_image = sitk::Image({ spacex, spacey, spacez }, sitk::sitkFloat64);
 
-	int hs = 11 - 0;//5 (int)(1.5f*g_w/2);
+	int hs = 12 - 0;//5 (int)(1.5f*g_w/2);
 	m_currentdistance = 0;
 	for (int ii = 0; ii < 2; ++ii) {
 		CVec3 point = !ii ? start_point : end_point;
@@ -246,20 +251,25 @@ void CPhaseContainer::Initialize(SVoxImg<SWorkImg<realnum>>& data, CVec3& start_
 					if (xx < 0 || xx >= spacex) continue;
 					int dx = xx - point.x, dy = yy - point.y;
 					int dz = zz - point.z;
-					realnum dd = (realnum)(dx * dx + dy * dy + dz * dz);
+					int dd = dx * dx + dy * dy + dz * dz;
 					if ((int)dd < 10 * 10 / 1) {
 						//TODO: initialize the two starting points on different distance maps (instead of [0]: [ii])
 						field_buffer[xx + spacex * (yy + spacey * zz)] = 1.0; // ii->0
-						dd = sqrt(dd);
-						distance_buffer[xx + spacex * (yy + spacey * zz)] = dd; // ii->0
-						if (m_currentdistance < dd) m_currentdistance = dd;
+						double dd_sqrt = sqrt(dd);
+						distance_buffer[xx + spacex * (yy + spacey * zz)] = dd_sqrt; // ii->0
+						if (m_currentdistance < dd_sqrt) m_currentdistance = dd_sqrt;
 
 						// curvatures
 						//if (dd < 1e-11) dd = 1e-11; dd = 1.0/dd;
 						//m_phasefield.m_thickstate[ii][zz][yy][xx] = 2;
 						//m_phasefield.m_Sumcurvature[ii][zz][yy][xx] = dd+dd;
 					}
-
+					else if (squared_sum(dx + 1, dy, dz) < 100 || squared_sum(dx - 1, dy, dz) < 100
+						|| squared_sum(dx, dy + 1, dz) < 100 || squared_sum(dx, dy - 1, dz) < 100
+						|| squared_sum(dx, dy, dz + 1) < 100 || squared_sum(dx, dy, dz - 1) < 100) {
+						vector<int> test_vals;
+						active_set[ii].insert(IPoi3<int>(xx, yy, zz));
+					}
 				}
 			}
 		}
@@ -595,6 +605,7 @@ realnum CPhaseContainer::UpdateVelo(int i, bool use_correction) {
 	double* unx_buffer = unx.GetBufferAsDouble();
 	double* uny_buffer = uny.GetBufferAsDouble();
 	double* unz_buffer = unz.GetBufferAsDouble();
+	
 
 	vector<unsigned> size = m_field[i].GetSize();
 	int xs = size[0], ys = size[1], zs = size[2];
@@ -608,166 +619,136 @@ realnum CPhaseContainer::UpdateVelo(int i, bool use_correction) {
 	////////////////////////////////////////////////////////////////////
 	// evolution logic
 	////////////////////////////////////////////////////////////////////
-	typedef struct {
-		double val;
-		char pad[128];
-	} tvals;
-	tvals maxinfo[MAX_THREADS];
 	realnum maxv(0);
-	unsigned long counts[MAX_THREADS];
-	for (int i = 0; i < MAX_THREADS; i++) {
-		maxinfo[i].val = 0;
-		counts[i] = 0;
 
-	}
 	// Inhomogeneous
 	// Calculate the velocity at every point (velo[zz][yy][xx]), and the maximum velocity (maxv)
-	velo = velo - velo;
+	//velo = velo - velo;
 	double* velo_buffer = velo.GetBufferAsDouble();
-
+	auto& act_set = active_set[i];
+	auto& changed_velo = m_changed_velo[i];
+	changed_velo.clear();
+	int c = 0;
 	//sitk::Image&& pos_dist = sitk::Greater(distance, 0);
 	//sitk::Image&& any_neighs = sitk::DilateObjectMorphology(pos_dist, { 1, 1, 1 }, sitk::sitkCross);
 	//unsigned char* any_neighs_buffer = any_neighs.GetBufferAsUInt8();
+#pragma omp parallel for default(none) shared(changed_velo, act_set)
+	for(size_t b=0; b<act_set.bucket_count(); b++)
 	{
-#pragma omp parallel for shared(maxinfo) UPDATE_VELO_SCHEDULE
-		for (int zyx = 0; zyx < zs * ys * xs; zyx++) {
-			int zz = zyx / (ys * xs);
-			if (zz == 0 || zz >= zs - 1) continue;
+		for (auto bi = act_set.begin(b); bi != act_set.end(b); bi++) {
 			{
-				int yy = (zyx / xs) % ys;
-				if (yy == 0 || yy >= ys - 1) continue;
+				IPoi3<int> p = *bi;
+
+				int zz = p.z;
+				if (zz > 0 && zz < zs - 1)
 				{
-					int xx = zyx % xs;
-					if (xx == 0 || xx >= xs - 1) continue;
-		//for (int zz = 1; zz < zs - 1; ++zz) {
-		//	for (int yy = 1; yy < ys - 1; ++yy) {
-		//		for (int xx = 1; xx < xs - 1; ++xx) {
-					int id = omp_get_thread_num();
-					counts[id]++;
-					// velo[zz][yy][xx] = 0; // zero out
-					/*IPoi3<int>* pos = new IPoi3(xx, yy, zz);
-					bool should_run = true;
-					#pragma omp critical(meeting_plane)
-					if (meeting_plane.count(*pos)) {
-						delete pos;
-						should_run = false;
-					}
-					if (!should_run) continue;
-					delete pos;*/
-					/*
-					if (meeting_plane_positions[zz][yy][xx]) {
-						continue;
-					}*/
-					int zp = zz + 1, zm = zz - 1;
-					int yp = yy + 1, ym = yy - 1;
-					int xp = xx + 1, xm = xx - 1;
-					/*unsigned int val = (BUF_IDX(connectivity_buffer, xs, ys, zs, xx, yy, zz) & CONNECTIVITY_MASK_6);
-					if (val == 0) continue;*/
-					if (field_buffer[xx + xs * (yy + ys * zz)] >= 0.95) continue; 
-					if (distance_buffer[xx + xs * (yp + ys * zz)] < 0 && distance_buffer[xx + xs * (ym + ys * zz)] < 0
-						&& distance_buffer[xp + xs * (yy + ys * zz)] < 0 && distance_buffer[xm + xs * (yy + ys * zz)] < 0
-						&& distance_buffer[xx + xs * (yy + ys * zp)] < 0 && distance_buffer[xx + xs * (yy + ys * zm)] < 0) continue;
-
-
-
-					
-					
-
-					realnum xn = field_buffer[xp + xs * (yy + ys * zz)] - field_buffer[xm + xs * (yy + ys * zz)];
-					realnum yn = field_buffer[xx + xs * (yp + ys * zz)] - field_buffer[xx + xs * (ym + ys * zz)];
-					realnum zn = field_buffer[xx + xs * (yy + ys * zp)] - field_buffer[xx + xs * (yy + ys * zm)];
-					realnum gradlen = sqrt(xn * xn + yn * yn + zn * zn + 1e-99);
-
-
-					realnum sumcur(0.0);
-
-					//Sum[zz][yy][xx] = 0;
-					realnum wAct(0.0);
-					int iok = -1;
-					for (int rr = 1; rr <= 25; ++rr) {
-						for (int iz = -rr; iz <= rr; ++iz) {
-							for (int iy = -rr; iy <= rr; ++iy) {
-								for (int ix = -rr; ix <= rr; ++ix) {
-									if (!ix && !iy && !iz) continue;
-									realnum r2 = (realnum)ix * ix + (realnum)iy * iy + (realnum)iz * iz;
-
-									if (r2 <= rr * rr) {
-										int pz = zz + iz; if (pz < 1) pz = 1; if (pz > zs - 2) pz = zs - 2;
-										int py = yy + iy; if (py < 1) py = 1; if (py > ys - 2) py = ys - 2;
-										int px = xx + ix; if (px < 1) px = 1; if (px > xs - 2) px = xs - 2;
-										if (thickstate_buffer[px + xs * (py + ys * pz)] < 0) continue;
-										realnum dot = unx_buffer[px + xs * (py + ys * pz)] * ix + uny_buffer[px + xs * (py + ys * pz)] * iy + unz_buffer[px + xs * (py + ys * pz)] * iz;
-										dot *= -1;
-										if (dot < 0.82) continue;
-										++iok; if (dot > 0.94) ++iok;
-										wAct += dot / r2;
-										sumcur += (dot / r2) * Sum_buffer[px + xs * (py + ys * pz)];
-									}
-
-
-								} // for ix
-							} // for iy
-						}// for iz
-						if (wAct > 0 && iok > 0) {
-							/*Gau[zz][yy][xx] = gcw / wAct;
-							Sum[zz][yy][xx] = sumcur/wAct;
-							++g_rr[rr];*/
-							sumcur /= wAct;
-							break;
-						}
-
-					} // for rr
-
-					realnum eikon;
-
-					realnum d0 = data_buffer[xx + xs * (yy + ys * zz)];
-					if (d0 < 1e-33) d0 = 1e-33;
-
-					realnum squar = -1.0;
-					realnum discr = 1 + 4 * sumcur * d0 * 1;// *gradlen;
-
-					if (abs(sumcur) > 1e-33) {
-						squar = -1.0 + sqrt(discr);
-						squar /= 2 * sumcur;
-					}
-					else {
-						squar = d0;
-					}
-
-					if (use_correction && squar > 0) 
-						eikon = squar;
-					
-					else
-						eikon = data_buffer[xx + xs * (yy + ys * zz)];
-
-					eikon *= gradlen; // normalize
-					if (eikon < 1e-11) eikon = 1e-11;
-					velo_buffer[xx + xs * (yy + ys * zz)] = eikon; // dS = 1
-
-					/*#pragma omp critical(meeting_plane)
+					int yy = p.y;
+					if (yy > 0 && yy < ys - 1)
 					{
-						if (eikon > maxv) maxv = eikon;
-						if (counterd[zz][yy][xx] >= 0) {
-							// meeting_plane.insert(IPoi3<int>(xx, yy, zz));
-							meeting_plane_positions[zz][yy][xx] = 1;
-						}
-					}*/
-					if (eikon > maxinfo[id].val) maxinfo[id].val = eikon;
-					/*if (counterd[zz][yy][xx] >= 0) {
-						// meeting_plane.insert(IPoi3<int>(xx, yy, zz));
-						meeting_plane_positions[zz][yy][xx] = 1;
-					}*/
+						int xx = p.x;
+						if (xx > 0 && xx < xs - 1)
+							//for (int zz = 1; zz < zs - 1; ++zz) {
+							//	for (int yy = 1; yy < ys - 1; ++yy) {
+							//		for (int xx = 1; xx < xs - 1; ++xx) {
+						{
+							int zp = zz + 1, zm = zz - 1;
+							int yp = yy + 1, ym = yy - 1;
+							int xp = xx + 1, xm = xx - 1;
 
-					//loop body
-				} //for xx
-			} // for yy
+							realnum xn = field_buffer[xp + xs * (yy + ys * zz)] - field_buffer[xm + xs * (yy + ys * zz)];
+							realnum yn = field_buffer[xx + xs * (yp + ys * zz)] - field_buffer[xx + xs * (ym + ys * zz)];
+							realnum zn = field_buffer[xx + xs * (yy + ys * zp)] - field_buffer[xx + xs * (yy + ys * zm)];
+							realnum gradlen = sqrt(xn * xn + yn * yn + zn * zn + 1e-99);
+
+
+							realnum sumcur(0.0);
+
+							//Sum[zz][yy][xx] = 0;
+							realnum wAct(0.0);
+							int iok = -1;
+							for (int rr = 1; rr <= 25; ++rr) {
+								for (int iz = -rr; iz <= rr; ++iz) {
+									for (int iy = -rr; iy <= rr; ++iy) {
+										for (int ix = -rr; ix <= rr; ++ix) {
+											if (!ix && !iy && !iz) continue;
+											realnum r2 = (realnum)ix * ix + (realnum)iy * iy + (realnum)iz * iz;
+
+											if (r2 <= rr * rr) {
+												int pz = zz + iz; if (pz < 1) pz = 1; if (pz > zs - 2) pz = zs - 2;
+												int py = yy + iy; if (py < 1) py = 1; if (py > ys - 2) py = ys - 2;
+												int px = xx + ix; if (px < 1) px = 1; if (px > xs - 2) px = xs - 2;
+												if (thickstate_buffer[px + xs * (py + ys * pz)] < 0) continue;
+												realnum dot = unx_buffer[px + xs * (py + ys * pz)] * ix + uny_buffer[px + xs * (py + ys * pz)] * iy + unz_buffer[px + xs * (py + ys * pz)] * iz;
+												dot *= -1;
+												if (dot < 0.82) continue;
+												++iok; if (dot > 0.94) ++iok;
+												wAct += dot / r2;
+												sumcur += (dot / r2) * Sum_buffer[px + xs * (py + ys * pz)];
+											}
+
+
+										} // for ix
+									} // for iy
+								}// for iz
+								if (wAct > 0 && iok > 0) {
+									/*Gau[zz][yy][xx] = gcw / wAct;
+									Sum[zz][yy][xx] = sumcur/wAct;
+									++g_rr[rr];*/
+									sumcur /= wAct;
+									break;
+								}
+
+							} // for rr
+
+							realnum eikon;
+
+							realnum d0 = data_buffer[xx + xs * (yy + ys * zz)];
+							if (d0 < 1e-33) d0 = 1e-33;
+
+							realnum squar = -1.0;
+							realnum discr = 1 + 4 * sumcur * d0 * 1;// *gradlen;
+
+							if (abs(sumcur) > 1e-33) {
+								squar = -1.0 + sqrt(discr);
+								squar /= 2 * sumcur;
+							}
+							else {
+								squar = d0;
+							}
+
+							if (use_correction && squar > 0)
+								eikon = squar;
+
+							else
+								eikon = data_buffer[xx + xs * (yy + ys * zz)];
+
+							eikon *= gradlen; // normalize
+							if (eikon < 1e-11) eikon = 1e-11;
+							//velo_buffer[xx + xs * (yy + ys * zz)] = eikon; // dS = 1
+#pragma omp critical
+							changed_velo[p] = eikon;
+							/*#pragma omp critical(meeting_plane)
+							{
+								if (eikon > maxv) maxv = eikon;
+								if (counterd[zz][yy][xx] >= 0) {
+									// meeting_plane.insert(IPoi3<int>(xx, yy, zz));
+									meeting_plane_positions[zz][yy][xx] = 1;
+								}
+							}*/
+							if (eikon > maxv) maxv = eikon;
+							/*if (counterd[zz][yy][xx] >= 0) {
+								// meeting_plane.insert(IPoi3<int>(xx, yy, zz));
+								meeting_plane_positions[zz][yy][xx] = 1;
+							}*/
+
+							//loop body
+						}
+						
+					} //for xx
+				} // for yy
+			}
+			
 		} // for zz
-		for (int i = 0; i < MAX_THREADS; i++) {
-			if (maxinfo[i].val > maxv)
-				maxv = maxinfo[i].val;
-		}
-		for (int i = 0; i < MAX_THREADS; i++)
-			counts[i] = 0;
 	}
 
 
@@ -778,9 +759,26 @@ realnum CPhaseContainer::UpdateVelo(int i, bool use_correction) {
 	return maxv;
 }
 void CPhaseContainer::UpdateField(int i, realnum maxv) {
-	m_field[i] = sitk::Minimum(m_field[i] + m_velo[i] * maxv, 1.25);
+	//m_field[i] = sitk::Minimum(m_field[i] + m_velo[i] * maxv, 1.25);
+	double* field_buffer = m_field[i].GetBufferAsDouble();
+	vector<unsigned> size = m_field[i].GetSize();
+	int xs = size[0], ys = size[1], zs = size[2]; 
+	auto& changed_velo = m_changed_velo[i];
+	auto& act_set = active_set[i];
+	for (auto& it: changed_velo) {
+		IPoi3<int> p = it.first;
+		int xx = p.x, yy = p.y, zz = p.z;
+		BUF_IDX(field_buffer, xs, ys, zs, xx, yy, zz) += it.second*maxv;
+		if (BUF_IDX(field_buffer, xs, ys, zs, xx, yy, zz) >= 0.95) {
+			act_set.erase(p);
+			if (BUF_IDX(field_buffer, xs, ys, zs, xx, yy, zz) >= 1.25)
+				BUF_IDX(field_buffer, xs, ys, zs, xx, yy, zz) = 1.25;
+		}
+	}
 }
 void CPhaseContainer::UpdateDistance(int i, realnum current_distance) {
+	auto& changed_velo = m_changed_velo[i];
+	auto& act_set = active_set[i];
 	double* field_buffer = m_field[i].GetBufferAsDouble();
 	// m_phasefield.m_distance[i]
 	double* distance_buffer = m_distance[i].GetBufferAsDouble();
@@ -790,35 +788,53 @@ void CPhaseContainer::UpdateDistance(int i, realnum current_distance) {
 	//unsigned int* connectivity_buffer = m_distance_connectivity.GetBufferAsUInt32();
 	vector<unsigned> size = m_field[i].GetSize();
 	int xs = size[0], ys = size[1], zs = size[2];
-#pragma omp parallel for UPDATE_DISTANCE_SCHEDULE
-	for (int zyx = 0; zyx < zs * ys * xs; zyx++) {
-			int zz = zyx / (ys * xs);
-			if (zz == 0 || zz >= zs - 1) continue;
+	for (auto& it: changed_velo) {
+		IPoi3<int> p = it.first;
+		int zz = p.z;
+		if (zz == 0 || zz >= zs - 1) continue;
+		{
+			int yy = p.y;
+			if (yy == 0 || yy >= ys - 1) continue;
 			{
-				int yy = (zyx / xs) % ys;
-				if (yy == 0 || yy >= ys - 1) continue;
-				{
-					int xx = zyx % xs;
-					if (xx == 0 || xx >= xs - 1) continue;
+				int xx = p.x;
+				if (xx == 0 || xx >= xs - 1) continue;
 	/*for (int zz = 1; zz < zs - 1; ++zz) {
 		for (int yy = 0 + 1; yy < ys - 1; ++yy) {
 			for (int xx = 0 + 1; xx < xs - 1; ++xx) {*/
 				if (field_buffer[xx + xs * (yy + ys * zz)] > 0 && distance_buffer[xx + xs * (yy + ys * zz)] < -0.5f) {
 					distance_buffer[xx + xs * (yy + ys * zz)] = current_distance;
-					/*for (int k = -1; k <= 1; k++) {
+					for (int k = -1; k <= 1; k++) {
 						for (int j = -1; j <= 1; j++) {
 							for (int i = -1; i <= 1; i++) {
-								BUF_IDX(connectivity_buffer, xs, ys, zs, xx + i, yy + j, zz + k) |= connectivity_bit(1, -i, -j, -k);
+								if ((i+1) % 2 + (j+1) % 2 + (k+1) % 2 == 2) {
+									if (BUF_IDX(field_buffer, xs, ys, zs, xx + i, yy + j, zz + k) < 0.95) {
+										act_set.insert(IPoi3<int>(xx + i, yy + j, zz + k));
+									}
+								}
 							}
 						}
-					}*/
-				}
-				if (distance_buffer[xx + xs * (yy + ys * zz)] < -0.5f && counterd_buffer[xx + xs * (yy + ys * zz)] < -0.5f) {
-					m_bdone = false;
+					}
 				}
 			}
 		}
 	}
+	
+}
+
+bool CPhaseContainer::IsDone() {
+	vector<unsigned> size = m_field[0].GetSize();
+	int xs = size[0], ys = size[1], zs = size[2];
+	double* dist0_buffer = m_distance[0].GetBufferAsDouble();
+	double* dist1_buffer = m_distance[1].GetBufferAsDouble();
+	for (int zz = 1; zz < zs - 1; zz++) {
+		for (int yy = 1; yy < ys - 1; yy++) {
+			for (int xx = 1; xx < xs - 1; xx++) {
+				if (BUF_IDX(dist0_buffer, xs, ys, zs, xx, yy, zz) < 0 && BUF_IDX(dist1_buffer, xs, ys, zs, xx, yy, zz) < 0)
+					return false;
+			}
+		}
+	}
+	return true;
 }
 void CPhaseContainer::Iterate(bool use_correction)
 {
@@ -836,9 +852,9 @@ void CPhaseContainer::Iterate(bool use_correction)
 	// update phase field values
 	UpdateField(0, maxv);
 	UpdateField(1, maxv);
-	m_bdone = true;
 	UpdateDistance(0, m_currentdistance);
 	UpdateDistance(1, m_currentdistance);
+	m_bdone = IsDone();
 	// TODO: check for collision
 	// updating the distance map to the current value, and checking if it is complete
 	

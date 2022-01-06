@@ -5,6 +5,7 @@
 
 #include <vector>
 #include <sitkImage.h>
+#include <stack>
 
 #define CHUNK_SIZE 1//34100
 //#define FIND_MEET_POINTS_SCHEDULE schedule(dynamic, CHUNK_SIZE)
@@ -170,6 +171,8 @@ public:
 
 	//SVoxImg<SWorkImg<int>> meeting_plane_positions;
 	sitk::Image meeting_plane_positions;
+	unordered_set<IPoi3<int>, IPoi3Hash<int>> active_set[2];
+	unordered_map<IPoi3<int>, double, IPoi3Hash<int>> m_changed_velo[2];
 	bool m_bdone;
 	realnum m_currentdistance;
 
@@ -181,6 +184,7 @@ public:
 	realnum UpdateVelo(int i, bool use_correction);
 	void UpdateField(int i, realnum maxv);
 	void UpdateDistance(int i, realnum current_distance);
+	bool IsDone();
 	// Calculate fundamental quantities, like distance gradient, sum curvature and thick state(?)
 	void CalculateFundQuant(int i = 0, int test = 0);
 	// Creates a smoother version of the distance map in smoothdist
