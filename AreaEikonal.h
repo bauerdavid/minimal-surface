@@ -113,6 +113,10 @@ public:
 class CPhaseContainer
 {
 public:
+
+	CVec3 m_start_point;
+	CVec3 m_end_point;
+
 	// Resolve path
 	/*
 	Smooth distance map state
@@ -170,6 +174,13 @@ public:
 
 	//SVoxImg<SWorkImg<int>> meeting_plane_positions;
 	sitk::Image meeting_plane_positions;
+	std::unordered_set<IPoi3<double>, IPoi3Hash<double>> meeting_plane;
+	IPoi3<double> plane_center = IPoi3<double>(-1, -1, -1);
+	IPoi3<double> plane_normal;
+	int n_meet_points = 0;
+	int m_counter = 0;
+	double plane_offset = 1e11;
+	std::vector<double> rotation_matrix;
 	bool m_bdone;
 	realnum m_currentdistance;
 
@@ -187,6 +198,7 @@ public:
 	void SmoothMap(sitk::Image& src1, sitk::Image& src2, sitk::Image& out);
 	// Update velocity, then phase field based on velocity, and distance map, where phase field passes threshold value
 	void Iterate(bool use_correction);
+	void ExtractMeetingPlane();
 };
 
 class CCurvEikonal
@@ -194,12 +206,9 @@ class CCurvEikonal
 public:
 	CCurvEikonal(void);
 	~CCurvEikonal(void);
-	void ExtractMeetingPlane();
 	CPlanePhaseField m_inicountourCalculator;
-	IPoi3<double> plane_center;
-	IPoi3<double> plane_normal;
-	double plane_offset = 1e11;
-	std::vector<double> rotation_matrix;
+
+	
 	// phase field stuff
 	CPhaseContainer m_phasefield;
 	CPhaseContainer m_rotated_phasefield;
@@ -208,5 +217,4 @@ public:
 	std::vector<CVec3> m_boundcontour;
 
 	// not used
-	std::unordered_set<IPoi3<double>, IPoi3Hash<double>> meeting_plane;
 };
