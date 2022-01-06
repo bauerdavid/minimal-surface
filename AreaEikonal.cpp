@@ -765,16 +765,18 @@ void CPhaseContainer::UpdateField(int i, realnum maxv) {
 	int xs = size[0], ys = size[1], zs = size[2]; 
 	auto& changed_velo = m_changed_velo[i];
 	auto& act_set = active_set[i];
-	for (auto& it: changed_velo) {
-		IPoi3<int> p = it.first;
-		int xx = p.x, yy = p.y, zz = p.z;
-		BUF_IDX(field_buffer, xs, ys, zs, xx, yy, zz) += it.second*maxv;
-		if (BUF_IDX(field_buffer, xs, ys, zs, xx, yy, zz) >= 0.95) {
-			act_set.erase(p);
-			if (BUF_IDX(field_buffer, xs, ys, zs, xx, yy, zz) >= 1.25)
-				BUF_IDX(field_buffer, xs, ys, zs, xx, yy, zz) = 1.25;
+#pragma omp parallel for default(none) shared(changed_velo, act_set)
+	for (size_t b = 0; b < changed_velo.bucket_count(); b++)
+		for (auto bi = changed_velo.begin(b); bi != changed_velo.end(b); bi++) {
+			IPoi3<int> p = bi->first;
+			int xx = p.x, yy = p.y, zz = p.z;
+			BUF_IDX(field_buffer, xs, ys, zs, xx, yy, zz) += bi->second*maxv;
+			if (BUF_IDX(field_buffer, xs, ys, zs, xx, yy, zz) >= 0.95) {
+				act_set.erase(p);
+				if (BUF_IDX(field_buffer, xs, ys, zs, xx, yy, zz) >= 1.25)
+					BUF_IDX(field_buffer, xs, ys, zs, xx, yy, zz) = 1.25;
+			}
 		}
-	}
 }
 void CPhaseContainer::UpdateDistance(int i, realnum current_distance) {
 	auto& changed_velo = m_changed_velo[i];
@@ -788,27 +790,30 @@ void CPhaseContainer::UpdateDistance(int i, realnum current_distance) {
 	//unsigned int* connectivity_buffer = m_distance_connectivity.GetBufferAsUInt32();
 	vector<unsigned> size = m_field[i].GetSize();
 	int xs = size[0], ys = size[1], zs = size[2];
-	for (auto& it: changed_velo) {
-		IPoi3<int> p = it.first;
-		int zz = p.z;
-		if (zz == 0 || zz >= zs - 1) continue;
-		{
-			int yy = p.y;
-			if (yy == 0 || yy >= ys - 1) continue;
+#pragma omp parallel for default(none) shared(changed_velo, act_set)
+	for (size_t b = 0; b < changed_velo.bucket_count(); b++)
+		for (auto bi = changed_velo.begin(b); bi != changed_velo.end(b); bi++) {
+			IPoi3<int> p = bi->first;
+			int zz = p.z;
+			if (zz == 0 || zz >= zs - 1) continue;
 			{
-				int xx = p.x;
-				if (xx == 0 || xx >= xs - 1) continue;
-	/*for (int zz = 1; zz < zs - 1; ++zz) {
-		for (int yy = 0 + 1; yy < ys - 1; ++yy) {
-			for (int xx = 0 + 1; xx < xs - 1; ++xx) {*/
-				if (field_buffer[xx + xs * (yy + ys * zz)] > 0 && distance_buffer[xx + xs * (yy + ys * zz)] < -0.5f) {
-					distance_buffer[xx + xs * (yy + ys * zz)] = current_distance;
-					for (int k = -1; k <= 1; k++) {
-						for (int j = -1; j <= 1; j++) {
-							for (int i = -1; i <= 1; i++) {
-								if ((i+1) % 2 + (j+1) % 2 + (k+1) % 2 == 2) {
-									if (BUF_IDX(field_buffer, xs, ys, zs, xx + i, yy + j, zz + k) < 0.95) {
-										act_set.insert(IPoi3<int>(xx + i, yy + j, zz + k));
+				int yy = p.y;
+				if (yy == 0 || yy >= ys - 1) continue;
+				{
+					int xx = p.x;
+					if (xx == 0 || xx >= xs - 1) continue;
+		/*for (int zz = 1; zz < zs - 1; ++zz) {
+			for (int yy = 0 + 1; yy < ys - 1; ++yy) {
+				for (int xx = 0 + 1; xx < xs - 1; ++xx) {*/
+					if (field_buffer[xx + xs * (yy + ys * zz)] > 0 && distance_buffer[xx + xs * (yy + ys * zz)] < -0.5f) {
+						distance_buffer[xx + xs * (yy + ys * zz)] = current_distance;
+						for (int k = -1; k <= 1; k++) {
+							for (int j = -1; j <= 1; j++) {
+								for (int i = -1; i <= 1; i++) {
+									if ((i+1) % 2 + (j+1) % 2 + (k+1) % 2 == 2) {
+										if (BUF_IDX(field_buffer, xs, ys, zs, xx + i, yy + j, zz + k) < 0.95) {
+											act_set.insert(IPoi3<int>(xx + i, yy + j, zz + k));
+										}
 									}
 								}
 							}
@@ -817,7 +822,6 @@ void CPhaseContainer::UpdateDistance(int i, realnum current_distance) {
 				}
 			}
 		}
-	}
 	
 }
 
