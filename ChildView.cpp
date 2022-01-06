@@ -339,13 +339,14 @@ UINT BackgroundThread(LPVOID params)
 	f_stream << "CalculateFundQuant schedule: " << TOSTRING(CALCULATE_FUND_QUANT_SCHEDULE) << endl;
 	f_stream << "UpdateVelo schedule: " << TOSTRING(UPDATE_VELO_SCHEDULE) << endl;
 	f_stream << "UpdateDistanceSchedule schedule: " << TOSTRING(UPDATE_DISTANCE_SCHEDULE) << endl;
-	f_stream.close();
 	while (view->m_threadactivated) {
 
 		if (view->m_threadactivated == DISTANCE_ITERATION) { // 3D
 			if (!view->m_liftedEikonal.m_phasefield.m_bdone)
 			{
+
 				view->m_liftedEikonal.m_phasefield.Iterate(g_modeswitch);
+				f_stream << view->m_liftedEikonal.m_phasefield.n_meet_points << endl;
 				if (view->m_liftedEikonal.m_phasefield.m_bdone) {
 					//save_image("Y:/BIOMAG/shortest path/flow_idx.tif", view->m_liftedEikonal.m_phasefield.m_flow_idx);
 					view->m_liftedEikonal.ExtractMeetingPlane();
@@ -369,8 +370,8 @@ UINT BackgroundThread(LPVOID params)
 					//save_image("Y:/BIOMAG/shortest path/combined_distance.tif", view->m_liftedEikonal.m_phasefield.m_combined_distance);
 					//save_image("Y:/BIOMAG/shortest path/distance_0.tif", view->m_liftedEikonal.m_phasefield.m_distance[0]);
 					//save_image("Y:/BIOMAG/shortest path/distance_1.tif", view->m_liftedEikonal.m_phasefield.m_distance[1]);
-					ofstream f_stream;
-					f_stream.open("Y:/BIOMAG/shortest path/" INFO_FILENAME, std::ios::app);
+					//ofstream f_stream;
+					//f_stream.open("Y:/BIOMAG/shortest path/" INFO_FILENAME, std::ios::app);
 					f_stream << "size (x, y, z):";
 					f_stream << " " << rot_size[0];
 					f_stream << " " << rot_size[1];

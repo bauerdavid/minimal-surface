@@ -15,6 +15,7 @@
 //							z  222222222111111111000000000
 #define CONNECTIVITY_MASK_19 0b010111010111111111010111010
 #define CONNECTIVITY_MASK_6  0b000010000010101010000010000
+#define REFRESH_ITERS 100
 
 inline unsigned int connectivity_bit(bool val, int x, int y, int z) {
 
@@ -41,13 +42,12 @@ CCurvEikonal::~CCurvEikonal(void)
 {
 }
 
-void CCurvEikonal::ExtractMeetingPlane() {
-	m_phasefield.FindMeetPoints();
-	vector<unsigned> size= m_phasefield.meeting_plane_positions.GetSize();
-	double* distance0_buffer = m_phasefield.m_distance[0].GetBufferAsDouble();
-	double* distance1_buffer = m_phasefield.m_distance[1].GetBufferAsDouble();
-	double* combined_buffer = m_phasefield.m_combined_distance.GetBufferAsDouble();
-	int* meeting_plane_buffer = m_phasefield.meeting_plane_positions.GetBufferAsInt32();
+void CPhaseContainer::ExtractMeetingPlane() {
+	vector<unsigned> size= meeting_plane_positions.GetSize();
+	double* distance0_buffer = m_distance[0].GetBufferAsDouble();
+	double* distance1_buffer = m_distance[1].GetBufferAsDouble();
+	double* combined_buffer = m_combined_distance.GetBufferAsDouble();
+	int* meeting_plane_buffer = meeting_plane_positions.GetBufferAsInt32();
 	int xs(size[0]), ys(size[1]), zs(size[2]);
 	for (int zz = 0; zz < zs; ++zz) {
 		for (int yy = 0; yy < ys; ++yy) {
@@ -121,53 +121,57 @@ void CPhaseContainer::FindMeetPoints() {
 	int xs = size[0], ys = size[1], zs = size[2];
 	int* meeting_plane_buffer = meeting_plane_positions.GetBufferAsInt32();
 	for (int ii = 0; ii < 2; ii++) {
-		/*for (int zyx = 0; zyx < zs * ys * xs; zyx++) {
-			int zz = zyx / (ys * xs);
-			if (zz == 0 || zz >= zs - 1) continue;
-			{
-				int yy = (zyx / xs) % ys;
-				if (yy == 0 || yy >= ys - 1) continue;
-				{
-					int xx = zyx % xs;
-					if (xx == 0 || xx >= xs - 1) continue;*/
 		sitk::Image& distance = m_distance[ii];
 		sitk::Image& counterd = m_distance[(ii + 1) % 2];
 		double* distance_buffer = distance.GetBufferAsDouble();
 		double* counterd_buffer = counterd.GetBufferAsDouble();
 #pragma omp parallel for FIND_MEET_POINTS_SCHEDULE
+		for (int zyx = 0; zyx < zs * ys * xs; zyx++) {
+			int zz = zyx / (ys * xs);
+			if (zz > 0 && zz < zs - 1)
+			{
+				int yy = (zyx / xs) % ys;
+				if (yy > 0 && yy < ys - 1)
+				{
+					int xx = zyx % xs;
+					if (xx > 0 && xx < xs - 1)
+					{
+						int zp = zz + 1, zm = zz - 1;
+						int yp = yy + 1, ym = yy - 1;
+						int xp = xx + 1, xm = xx - 1;
 
-		for (int zz = 1; zz < zs - 1; ++zz) {
-			for (int yy = 1; yy < ys - 1; ++yy) {
-				for (int xx = 1; xx < xs - 1; ++xx) {
-					int zp = zz + 1, zm = zz - 1;
-					int yp = yy + 1, ym = yy - 1;
-					int xp = xx + 1, xm = xx - 1;
 
-					
-					if (counterd_buffer[xx + xs*(yy+ys*zz)] >= 0) {
-						// meeting_plane.insert(IPoi3<int>(xx, yy, zz));
-						/*if (!meeting_plane_positions[zz][yy][xx] &&
-							((distance[zz][yp][xx] >= 0 && !meeting_plane_positions[zz][yp][xx])
-							|| (distance[zz][ym][xx] >= 0 && !meeting_plane_positions[zz][ym][xx])
-							|| (distance[zz][yy][xp] >= 0 && !meeting_plane_positions[zz][yy][xp])
-							|| (distance[zz][yy][xm] >= 0 && !meeting_plane_positions[zz][yy][xm])
-							|| (distance[zp][yy][xx] >= 0 && !meeting_plane_positions[zp][yy][xx])
-							|| (distance[zm][yy][xx] >= 0 && !meeting_plane_positions[zm][yy][xx]))
-							&& xm > 2 && xp < xs - 2 && ym > 2 && yp < ys - 2 && zm > 2 && zp < zs - 2) {
-							meeting_plane_positions[zz][yy][xx] = 1;
-						}*/
-						/*if (distance[zz][yy][xx] == counterd[zz][yy][xx]) {
-							meeting_plane_positions[zz][yy][xx] = 1;
-						}*/
-						if (distance_buffer[xx + xs * (yy + ys * zz)] - counterd_buffer[xx + xs * (yy + ys * zz)] >= 0 &&
-							((distance_buffer[xx + xs * (yp + ys * zz)] > 0 && distance_buffer[xx + xs * (yp + ys * zz)] - counterd_buffer[xx + xs * (yp + ys * zz)] < 0) ||
-								(distance_buffer[xx + xs * (ym + ys * zz)] > 0 && distance_buffer[xx + xs * (ym + ys * zz)] - counterd_buffer[xx + xs * (ym + ys * zz)] < 0) ||
-								(distance_buffer[xp + xs * (yy + ys * zz)] > 0 && distance_buffer[xp + xs * (yy + ys * zz)] - counterd_buffer[xp + xs * (yy + ys * zz)] < 0) ||
-								(distance_buffer[xm + xs * (yy + ys * zz)] > 0 && distance_buffer[xm + xs * (yy + ys * zz)] - counterd_buffer[xm + xs * (yy + ys * zz)] < 0) ||
-								(distance_buffer[xx + xs * (yy + ys * zp)] > 0 && distance_buffer[xx + xs * (yy + ys * zp)] - counterd_buffer[xx + xs * (yy + ys * zp)] < 0) ||
-								(distance_buffer[xx + xs * (yy + ys * zm)] > 0 && distance_buffer[xx + xs * (yy + ys * zm)] - counterd_buffer[xx + xs * (yy + ys * zm)] < 0))) {
-							meeting_plane_buffer[xx + xs * (yy + ys * zz)] = 1;
+						if (counterd_buffer[xx + xs * (yy + ys * zz)] >= 0 && !BUF_IDX(meeting_plane_buffer, xs, ys, zs, xx, yy, zz)) {
+							// meeting_plane.insert(IPoi3<int>(xx, yy, zz));
+							/*if (!meeting_plane_positions[zz][yy][xx] &&
+								((distance[zz][yp][xx] >= 0 && !meeting_plane_positions[zz][yp][xx])
+								|| (distance[zz][ym][xx] >= 0 && !meeting_plane_positions[zz][ym][xx])
+								|| (distance[zz][yy][xp] >= 0 && !meeting_plane_positions[zz][yy][xp])
+								|| (distance[zz][yy][xm] >= 0 && !meeting_plane_positions[zz][yy][xm])
+								|| (distance[zp][yy][xx] >= 0 && !meeting_plane_positions[zp][yy][xx])
+								|| (distance[zm][yy][xx] >= 0 && !meeting_plane_positions[zm][yy][xx]))
+								&& xm > 2 && xp < xs - 2 && ym > 2 && yp < ys - 2 && zm > 2 && zp < zs - 2) {
+								meeting_plane_positions[zz][yy][xx] = 1;
+							}*/
+							/*if (distance[zz][yy][xx] == counterd[zz][yy][xx]) {
+								meeting_plane_positions[zz][yy][xx] = 1;
+							}*/
+							if (distance_buffer[xx + xs * (yy + ys * zz)] - counterd_buffer[xx + xs * (yy + ys * zz)] >= 0 &&
+								((distance_buffer[xx + xs * (yp + ys * zz)] > 0 && distance_buffer[xx + xs * (yp + ys * zz)] - counterd_buffer[xx + xs * (yp + ys * zz)] < 0) ||
+									(distance_buffer[xx + xs * (ym + ys * zz)] > 0 && distance_buffer[xx + xs * (ym + ys * zz)] - counterd_buffer[xx + xs * (ym + ys * zz)] < 0) ||
+									(distance_buffer[xp + xs * (yy + ys * zz)] > 0 && distance_buffer[xp + xs * (yy + ys * zz)] - counterd_buffer[xp + xs * (yy + ys * zz)] < 0) ||
+									(distance_buffer[xm + xs * (yy + ys * zz)] > 0 && distance_buffer[xm + xs * (yy + ys * zz)] - counterd_buffer[xm + xs * (yy + ys * zz)] < 0) ||
+									(distance_buffer[xx + xs * (yy + ys * zp)] > 0 && distance_buffer[xx + xs * (yy + ys * zp)] - counterd_buffer[xx + xs * (yy + ys * zp)] < 0) ||
+									(distance_buffer[xx + xs * (yy + ys * zm)] > 0 && distance_buffer[xx + xs * (yy + ys * zm)] - counterd_buffer[xx + xs * (yy + ys * zm)] < 0))) {
+								meeting_plane_buffer[xx + xs * (yy + ys * zz)] = 1;
+#pragma omp atomic
+								n_meet_points++;
+							}
 						}
+		/*for (int zz = 1; zz < zs - 1; ++zz) {
+			for (int yy = 1; yy < ys - 1; ++yy) {
+				for (int xx = 1; xx < xs - 1; ++xx) {*/
+					
 
 						//continue;
 					}
@@ -236,6 +240,8 @@ void CPhaseContainer::Initialize(SVoxImg<SWorkImg<realnum>>& data, CVec3& start_
 
 	m_data = vox_img_2_sitk(data);
 	m_sample_image = sitk::Image({ spacex, spacey, spacez }, sitk::sitkFloat64);
+	m_start_point = start_point;
+	m_end_point = end_point;
 
 	int hs = 12 - 0;//5 (int)(1.5f*g_w/2);
 	m_currentdistance = 0;
@@ -843,6 +849,16 @@ bool CPhaseContainer::IsDone() {
 void CPhaseContainer::Iterate(bool use_correction)
 {
 	// m_phasefield.m_field[i]
+	if(plane_center.x < -0.5)
+		if (++m_counter % REFRESH_ITERS == 0) {
+			int n_prev_meet_points = n_meet_points >= 100? n_meet_points : 100;
+			FindMeetPoints();
+			if (n_prev_meet_points > 0) {
+				if (n_meet_points == n_prev_meet_points) {
+					ExtractMeetingPlane();
+				}
+			}
+		}
 	realnum maxv0 = UpdateVelo(0, use_correction);
 	realnum maxv1 = UpdateVelo(1, use_correction);
 	realnum maxv = maxv0 > maxv1? maxv0 : maxv1;
