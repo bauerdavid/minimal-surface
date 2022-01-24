@@ -6,7 +6,19 @@
 #include <vector>
 #include <sitkImage.h>
 #include <stack>
-
+#define USE_VECTOR_AS_SET
+//#define STORE_POINT_AS_INTEGER
+#ifdef STORE_POINT_AS_INTEGER
+#define POINT3D unsigned long long
+#define POINT3D_MAP(val_type) POINT3D, val_type
+#define POINT3D_SET POINT3D
+#define REMOVABLE_POINT ULLONG_MAX
+#else
+#define POINT3D IPoi3<int>
+#define POINT3D_MAP(val_type) IPoi3<int>, val_type, IPoi3Hash<int>
+#define POINT3D_SET IPoi3<int>, IPoi3Hash<int>
+#define REMOVABLE_POINT POINT3D(-1, -1, -1)
+#endif
 #define CHUNK_SIZE 1//34100
 //#define FIND_MEET_POINTS_SCHEDULE schedule(dynamic, CHUNK_SIZE)
 //#define SMOOTH_MAP_SCHEDULE schedule(dynamic, CHUNK_SIZE)
@@ -58,6 +70,15 @@ struct IPoi {
 	IPoi():x(0),y(0) {}
 	IPoi(int xx, int yy):x(xx),y(yy) {}
 };
+
+template<typename T> struct IPoi3;
+
+template<typename T>
+inline size_t hash_ipoi3(const IPoi3<T>& p) {
+	//return ((((size_t)p.x) * 73856093) ^ (((size_t)p.y) * 19349663) ^ (((size_t)p.z) * 83492791)) % 1000000;
+	return (size_t)p.x << (2 * 21) | (size_t)p.y << 21 | (size_t)p.z;
+}
+
 template<typename T>
 struct IPoi3 {
 	T x;
@@ -68,13 +89,21 @@ struct IPoi3 {
 	bool operator==(const IPoi3<T>& p) const {
 		return this->x == p.x && this->y == p.y && this->z == p.z;
 	}
+
+	bool operator<(const IPoi3<T>& p) const
+	{
+		
+		return (hash_ipoi3<T>(*this) < hash_ipoi3<T>(p));
+	}
 };
+
 
 template<typename T>
 struct IPoi3Hash {
 public:
+	
 	size_t operator()(const IPoi3<T>& p) const {
-		return ((((long) p.x) * 73856093) ^ (((long) p.y) * 19349663) ^ (((long)p.z) * 83492791)) % 1000000;
+		return hash_ipoi3(p);
 	}
 };
 
@@ -175,13 +204,23 @@ public:
 
 	//SVoxImg<SWorkImg<int>> meeting_plane_positions;
 	sitk::Image meeting_plane_positions;
-	unordered_set<IPoi3<int>, IPoi3Hash<int>> active_set[2];
-	unordered_map<IPoi3<int>, double, IPoi3Hash<int>> m_changed_velo[2];
-	std::unordered_set<IPoi3<double>, IPoi3Hash<double>> meeting_plane;
+	//unordered_set<IPoi3<int>, IPoi3Hash<int>> active_set[2];
+#ifdef USE_VECTOR_AS_SET
+	vector<POINT3D> active_set[2];
+	vector<pair<POINT3D, double>> m_changed_velo[2];
+#else
+	unordered_set<POINT3D_SET> active_set[2];
+	unordered_map<POINT3D_MAP(double)> m_changed_velo[2];
+#endif
+	//unordered_map<IPoi3<int>, double, IPoi3Hash<int>> m_changed_velo[2];
+	//unordered_set<IPoi3<double>, IPoi3Hash<double>> meeting_plane;
+	unordered_set<POINT3D_SET> meeting_plane;
 	IPoi3<double> plane_center = IPoi3<double>(-1, -1, -1);
 	IPoi3<double> plane_normal;
 	int n_meet_points = 0;
 	int m_counter = 0;
+	int n_min_meet_points;
+	bool n_plane_finalized = false;
 	double plane_offset = 1e11;
 	std::vector<double> rotation_matrix;
 	bool m_bdone;

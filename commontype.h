@@ -401,7 +401,7 @@ struct SDisImg {
 		dat = 0;
 		xs = ys = 0;
 	}
-	SDisImg(int x, int y, byte *buf, int mod = 0, int pitch = 0) {
+	SDisImg(int x, int y, ::byte *buf, int mod = 0, int pitch = 0) {
 		dat = 0;
 		xs = ys = 0;
 		Set(x,y,buf,mod, pitch);
@@ -424,7 +424,7 @@ struct SDisImg {
 			}
 		}
 	}
-	void Set(int x, int y, byte *buf, int mod = 0, int pitch = 0) {
+	void Set(int x, int y, ::byte *buf, int mod = 0, int pitch = 0) {
 		if (dat && (x != xs || y != ys))
 			Clean();
 		xs = x;
@@ -438,7 +438,7 @@ struct SDisImg {
 		}
 		for (int q = 0; q < ys; ++q) {
 			for (int p = 0; p < xs; ++p) {
-				byte r, g, b;
+				::byte r, g, b;
 				r = g = b = *buf++;
 				dat[q*xs+p] = (r<<16)+(g<<8)+b;
 			}
@@ -459,7 +459,7 @@ struct SDisImg {
 			for (int p = 0; p < xs; ++p)
 				dat[q*ys+p] = 0;
 	}
-	void Set32Kaggle(int x, int y, byte *buf, int mod = 0, int pitch = 0) {
+	void Set32Kaggle(int x, int y, ::byte *buf, int mod = 0, int pitch = 0) {
 
 		if (dat && (x != xs || y != ys))
 			Clean();
@@ -476,13 +476,13 @@ struct SDisImg {
 		for (int q = 0+HFRAME; q < ys-HFRAME; ++q) {
 			for (int p = 0+HFRAME; p < xs-HFRAME; ++p) {
 				realnum gray;
-				byte r, g, b;
+				::byte r, g, b;
 				r = *buf++; 
 				g = *buf++;
 				b = *buf++;
 				gray = 0.3f*r+0.5f*g+0.2f*b; 
 				if (gray > 255) gray = 255;
-				r = g = b = byte(gray);
+				r = g = b = ::byte(gray);
 				dat[q*xs+p] = (r<<16)+(g<<8)+b;
 				avg += b;
 				buf++;
@@ -496,7 +496,7 @@ struct SDisImg {
 		for (int q = 0+HFRAME; q < ys-HFRAME; ++q)
 			for (int p = 0+HFRAME; p < xs-HFRAME; ++p)
 				hist[dat[q*xs+p]&0xff]++;
-		int max = 0; byte mi = 0;
+		int max = 0; ::byte mi = 0;
 		for (int i = 0; i < 256; ++i) {
 			if (hist[i] > max) { max = hist[i]; mi = i; }
 		}
@@ -515,7 +515,7 @@ struct SDisImg {
 
 	}
 	// kaggle
-	void SetColor(int x, int y, byte *buf, int mod = 0, int pitch = 0) {
+	void SetColor(int x, int y, ::byte *buf, int mod = 0, int pitch = 0) {
 		if (dat && (x != xs || y != ys))
 			Clean();
 		xs = x;
@@ -529,7 +529,7 @@ struct SDisImg {
 		}
 		for (int q = 0; q < ys; ++q) {
 			for (int p = 0; p < xs; ++p) {
-				byte r, g, b;
+				::byte r, g, b;
 				r = *buf++;
 				g = *buf++;
 				b = *buf++;
@@ -609,7 +609,7 @@ template <class T> struct SWorkImg {
 		xs = ys = 0;
 		Set(x,y);
 	}
-	SWorkImg(int x, int y, byte *buf) {
+	SWorkImg(int x, int y, ::byte *buf) {
 		dat = 0;
 		xs = ys = 0;
 		Set(x,y,buf);
@@ -662,7 +662,7 @@ template <class T> struct SWorkImg {
 			}
 		}
 	}
-	void Set(int x, int y, byte *buf) {
+	void Set(int x, int y, ::byte *buf) {
 		if (dat && (x != xs || y != ys))
 			Clean();
 		xs = x;
@@ -1023,8 +1023,8 @@ template <class T> struct SWorkImg {
 				T t = dat[q*xs+p];
 				t *= 0xff;
 				if (t > (T)0xff) t = (T)0xff;
-				byte b;
-				b = (byte)t;
+				::byte b;
+				b = (::byte)t;
 				if (!channel) 
 					r.dat[q*xs+p] = b;
 				else if (channel == 1)
@@ -1051,8 +1051,8 @@ template <class T> struct SWorkImg {
 				T t = dat[q*xs+p];
 				t *= 0xff;
 				if (t > (T)0xff) t = (T)0xff;
-				byte R, g, b;
-				R = g = b = (byte)t;
+				::byte R, g, b;
+				R = g = b = (::byte)t;
 				r.dat[q*xs+p] = (R<<16)+(g<<8)+b;
 			}
 		}
@@ -1084,8 +1084,8 @@ template <class T> struct SWorkImg {
 				T t = dat[q*xs+p]-min; t /= max-min;
 				t *= 0xff;
 				if (t > (T)0xff) t = (T)0xff;
-				byte R, g, b;
-				R = g = b = (byte)t;
+				::byte R, g, b;
+				R = g = b = (::byte)t;
 				r.dat[q*xs+p] = (R<<16)+(g<<8)+b;
 			}
 		}
@@ -1107,9 +1107,9 @@ template <class T> struct SWorkImg {
 				T t = dat[q*xs+p];
 				t *= 0xff;
 				if (t > (T)0xff) t = (T)0xff;
-				byte R, G, B;
-				if (t < 0) { B = -(byte)t; G = -(byte)(2*t/3); R = 0; }
-				else { R = (byte)t; G = (byte)t/3; B = 0; }
+				::byte R, G, B;
+				if (t < 0) { B = -(::byte)t; G = -(::byte)(2*t/3); R = 0; }
+				else { R = (::byte)t; G = (::byte)t/3; B = 0; }
 				r.dat[q*xs+p] = (R<<16)+(G<<8)+B;
 			}
 		}
@@ -1131,10 +1131,10 @@ template <class T> struct SWorkImg {
 				T t = dat[q*xs+p];
 				t *= 0xff;
 				if (t > (T)0xff) t = (T)0xff;
-				byte R(0), G(0), B(0);
+				::byte R(0), G(0), B(0);
 				if (t > 5) {
-					R = (byte)t;
-					B = 0xff-(byte)t;
+					R = (::byte)t;
+					B = 0xff-(::byte)t;
 					G = 0x7f;
 				}
 				else if (t > 0) {
@@ -1161,8 +1161,8 @@ template <class T> struct SWorkImg {
 				T t = dat[q*xs+p];
 				t *= 0xff;
 				if (t > (T)0xff) t = (T)0xff;
-				byte R, g, b;
-				R = g = b = (byte)t;
+				::byte R, g, b;
+				R = g = b = (::byte)t;
 				r.dat[(q*xs+p)*3] = R;
 				r.dat[(q*xs+p)*3+1] = R;
 				r.dat[(q*xs+p)*3+2] = R;

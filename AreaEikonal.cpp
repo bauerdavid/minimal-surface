@@ -15,11 +15,32 @@
 //							z  222222222111111111000000000
 #define CONNECTIVITY_MASK_19 0b010111010111111111010111010
 #define CONNECTIVITY_MASK_6  0b000010000010101010000010000
-#define REFRESH_ITERS 100
+#define REFRESH_ITERS 50
+#define MAX_DIST_FROM_PLANE 10
+#define MAX_FIELD_VAL 0.95
 
 inline unsigned int connectivity_bit(bool val, int x, int y, int z) {
 
 	return (unsigned int)val << (x + 1) + 3 * ((y + 1) + 3 * (z + 1));
+}
+
+inline POINT3D point_to_representation(unsigned int x, unsigned int y, unsigned int z) {
+#ifdef STORE_POINT_AS_INTEGER
+	return (POINT3D) x << (2 * 21) | (POINT3D) y << 21 | (POINT3D) z;
+#else
+	return POINT3D(x, y, z);
+#endif
+}
+template<typename T>
+inline tuple<T, T, T> representation_to_point(POINT3D representation) {
+#ifdef STORE_POINT_AS_INTEGER
+	T x = representation >> (2 * 21);
+	T y = (representation >> 21) & 0b111111111111111111111;
+	T z = representation & 0b111111111111111111111;
+	return {x, y, z};
+#else
+	return { representation.x, representation.y, representation.z };
+#endif
 }
 
 template<typename T>
@@ -70,7 +91,8 @@ void CPhaseContainer::ExtractMeetingPlane() {
 					distance1_buffer[xx + xs * (yy + ys * zz)] = distance1_buffer[sample_x + xs * (sample_y + ys * sample_z)];
 				}
 				if (meeting_plane_buffer[xx + xs * (yy + ys * zz)] > 0)
-					meeting_plane.insert(IPoi3<double>(xx, yy, zz));
+				meeting_plane.insert(point_to_representation(xx, yy, zz));
+
 				double newval;
 				double d0 = distance0_buffer[xx + xs * (yy + ys * zz)];
 				double d1 = distance1_buffer[xx + xs * (yy + ys * zz)];
@@ -82,8 +104,25 @@ void CPhaseContainer::ExtractMeetingPlane() {
 			}
 		}
 	}
+	vector<vector<double>> meeting_plane_vec;
+	meeting_plane_vec.reserve(meeting_plane.size());
 
-	std::pair<IPoi3<double>, IPoi3<double>> plane_info = best_plane_from_points(meeting_plane);
+	transform(meeting_plane.begin(), meeting_plane.end(), back_inserter(meeting_plane_vec),
+#ifdef STORE_POINT_AS_INTEGER
+		[](unsigned long long val) {
+			
+			auto [x, y, z] = representation_to_point<double>(val);
+			vector<double> v({x, y, z});
+			return v;
+		}
+#else
+		[](const IPoi3<int>& val) {
+
+			return vector<double>({ (double)val.x, (double)val.y, (double)val.z });
+		}
+#endif
+	);
+	std::pair<IPoi3<double>, IPoi3<double>> plane_info = best_plane_from_points(meeting_plane_vec);
 	plane_center = plane_info.first;
 	plane_normal = plane_info.second;
 	double max_norm_val = abs(plane_normal.x);
@@ -273,14 +312,20 @@ void CPhaseContainer::Initialize(SVoxImg<SWorkImg<realnum>>& data, CVec3& start_
 					else if (squared_sum(dx + 1, dy, dz) < 100 || squared_sum(dx - 1, dy, dz) < 100
 						|| squared_sum(dx, dy + 1, dz) < 100 || squared_sum(dx, dy - 1, dz) < 100
 						|| squared_sum(dx, dy, dz + 1) < 100 || squared_sum(dx, dy, dz - 1) < 100) {
-						vector<int> test_vals;
-						active_set[ii].insert(IPoi3<int>(xx, yy, zz));
+#ifdef USE_VECTOR_AS_SET
+						active_set[ii].push_back(point_to_representation(xx, yy, zz));
+#else
+						active_set[ii].insert(point_to_representation(xx, yy, zz));
+#endif
 					}
 				}
 			}
 		}
 
 	}
+	n_min_meet_points = spacex * spacey < spacex* spacez ? spacex * spacey :
+		spacex * spacez < spacey* spacez ? spacex * spacez : spacey * spacez;
+	n_min_meet_points /= 4;
 	InitializeNeighbors();
 
 	m_bdone = false;
@@ -332,6 +377,10 @@ void CPhaseContainer::Initialize(CPhaseContainer& phasefield, vector<double>& ro
 	
 	m_bdone = phasefield.m_bdone;
 	InitializeNeighbors();
+	vector<unsigned> new_size = m_sample_image.GetSize();
+	n_min_meet_points = new_size[0] * new_size[1] < new_size[0] * new_size[2] ? new_size[0] * new_size[1] :
+		new_size[0] * new_size[2] < new_size[1] * new_size[2] ? new_size[0] * new_size[2] : new_size[1] * new_size[2];
+	n_min_meet_points /= 4;
 }
 
 void CPhaseContainer::SmoothMap(sitk::Image &src1, sitk::Image& src2, sitk::Image &out)
@@ -633,25 +682,35 @@ realnum CPhaseContainer::UpdateVelo(int i, bool use_correction) {
 	double* velo_buffer = velo.GetBufferAsDouble();
 	auto& act_set = active_set[i];
 	auto& changed_velo = m_changed_velo[i];
-	changed_velo.clear();
+#ifdef USE_VECTOR_AS_SET
+	changed_velo.resize(act_set.size());
+#else
+	changed_velo.reserve(act_set.size());
+#endif
+	//changed_velo.clear();
 	int c = 0;
 	//sitk::Image&& pos_dist = sitk::Greater(distance, 0);
 	//sitk::Image&& any_neighs = sitk::DilateObjectMorphology(pos_dist, { 1, 1, 1 }, sitk::sitkCross);
 	//unsigned char* any_neighs_buffer = any_neighs.GetBufferAsUInt8();
 #pragma omp parallel for default(none) shared(changed_velo, act_set)
-	for(size_t b=0; b<act_set.bucket_count(); b++)
+#ifdef USE_VECTOR_AS_SET
+	for(int i=0; i<act_set.size(); i++)
+	{
+		{
+			POINT3D pn = act_set[i];
+#else
+	for(int b=0; b<act_set.bucket_count(); b++)
 	{
 		for (auto bi = act_set.begin(b); bi != act_set.end(b); bi++) {
+			POINT3D pn = *bi;
+#endif
 			{
-				IPoi3<int> p = *bi;
-
-				int zz = p.z;
+				
+				auto [xx, yy, zz] = representation_to_point<int>(pn);
 				if (zz > 0 && zz < zs - 1)
 				{
-					int yy = p.y;
 					if (yy > 0 && yy < ys - 1)
 					{
-						int xx = p.x;
 						if (xx > 0 && xx < xs - 1)
 							//for (int zz = 1; zz < zs - 1; ++zz) {
 							//	for (int yy = 1; yy < ys - 1; ++yy) {
@@ -731,8 +790,14 @@ realnum CPhaseContainer::UpdateVelo(int i, bool use_correction) {
 							eikon *= gradlen; // normalize
 							if (eikon < 1e-11) eikon = 1e-11;
 							//velo_buffer[xx + xs * (yy + ys * zz)] = eikon; // dS = 1
+
+#ifdef USE_VECTOR_AS_SET
 #pragma omp critical
-							changed_velo[p] = eikon;
+							changed_velo[i] = make_pair(pn, eikon);
+#else
+#pragma omp critical
+							changed_velo[pn] = eikon;
+#endif
 							/*#pragma omp critical(meeting_plane)
 							{
 								if (eikon > maxv) maxv = eikon;
@@ -764,71 +829,118 @@ realnum CPhaseContainer::UpdateVelo(int i, bool use_correction) {
 	////////////////////////////////////////////////////////////////////
 	return maxv;
 }
-void CPhaseContainer::UpdateField(int i, realnum maxv) {
+void CPhaseContainer::UpdateField(int idx, realnum maxv) {
 	//m_field[i] = sitk::Minimum(m_field[i] + m_velo[i] * maxv, 1.25);
-	double* field_buffer = m_field[i].GetBufferAsDouble();
-	vector<unsigned> size = m_field[i].GetSize();
+	double* field_buffer = m_field[idx].GetBufferAsDouble();
+	vector<unsigned> size = m_field[idx].GetSize();
 	int xs = size[0], ys = size[1], zs = size[2]; 
-	auto& changed_velo = m_changed_velo[i];
-	auto& act_set = active_set[i];
+	auto& changed_velo = m_changed_velo[idx];
+	auto& act_set = active_set[idx];
 #pragma omp parallel for default(none) shared(changed_velo, act_set)
-	for (size_t b = 0; b < changed_velo.bucket_count(); b++)
+#ifdef USE_VECTOR_AS_SET
+	for (int i = 0; i < changed_velo.size(); i++) {
+		
+			POINT3D pn = changed_velo[i].first;
+			double velo = changed_velo[i].second;
+#else
+	for (int b = 0; b < changed_velo.bucket_count(); b++)
 		for (auto bi = changed_velo.begin(b); bi != changed_velo.end(b); bi++) {
-			IPoi3<int> p = bi->first;
-			int xx = p.x, yy = p.y, zz = p.z;
-			BUF_IDX(field_buffer, xs, ys, zs, xx, yy, zz) += bi->second*maxv;
-			if (BUF_IDX(field_buffer, xs, ys, zs, xx, yy, zz) >= 0.95) {
-				act_set.erase(p);
+			POINT3D pn = bi->first;
+			double velo = bi->second;
+#endif
+			
+			auto [xx, yy, zz] = representation_to_point<int>(pn);
+			BUF_IDX(field_buffer, xs, ys, zs, xx, yy, zz) += velo*maxv;
+			if (BUF_IDX(field_buffer, xs, ys, zs, xx, yy, zz) >= MAX_FIELD_VAL) {
+#pragma omp critical
+#ifdef USE_VECTOR_AS_SET
+				act_set[i] = REMOVABLE_POINT;
+#else
+				act_set.erase(pn);
+#endif
 				if (BUF_IDX(field_buffer, xs, ys, zs, xx, yy, zz) >= 1.25)
 					BUF_IDX(field_buffer, xs, ys, zs, xx, yy, zz) = 1.25;
 			}
 		}
+	return;
 }
-void CPhaseContainer::UpdateDistance(int i, realnum current_distance) {
-	auto& changed_velo = m_changed_velo[i];
-	auto& act_set = active_set[i];
-	double* field_buffer = m_field[i].GetBufferAsDouble();
+void CPhaseContainer::UpdateDistance(int idx, realnum current_distance) {
+	CVec3 origin_point = !idx ? m_start_point : m_end_point;
+	auto& changed_velo = m_changed_velo[idx];
+	auto& act_set = active_set[idx];
+	double* field_buffer = m_field[idx].GetBufferAsDouble();
 	// m_phasefield.m_distance[i]
-	double* distance_buffer = m_distance[i].GetBufferAsDouble();
+	double* distance_buffer = m_distance[idx].GetBufferAsDouble();
 
 	// m_phasefield.m_distance[(i+1)&1]
-	double* counterd_buffer = m_distance[(i + 1) & 1].GetBufferAsDouble();
+	double* counterd_buffer = m_distance[(idx + 1) & 1].GetBufferAsDouble();
 	//unsigned int* connectivity_buffer = m_distance_connectivity.GetBufferAsUInt32();
-	vector<unsigned> size = m_field[i].GetSize();
+	vector<unsigned> size = m_field[idx].GetSize();
 	int xs = size[0], ys = size[1], zs = size[2];
-#pragma omp parallel for default(none) shared(changed_velo, act_set)
-	for (size_t b = 0; b < changed_velo.bucket_count(); b++)
-		for (auto bi = changed_velo.begin(b); bi != changed_velo.end(b); bi++) {
-			IPoi3<int> p = bi->first;
-			int zz = p.z;
-			if (zz == 0 || zz >= zs - 1) continue;
-			{
-				int yy = p.y;
-				if (yy == 0 || yy >= ys - 1) continue;
+#pragma omp parallel
+	{
+#ifdef USE_VECTOR_AS_SET
+		vector<POINT3D> temp;
+#else
+		unordered_set<POINT3D_SET> temp;
+#endif
+		temp.reserve(1000);
+
+#pragma omp for nowait
+#ifdef USE_VECTOR_AS_SET
+		for (int i = 0; i < changed_velo.size(); i++) {
+			POINT3D pn = changed_velo[i].first;
+#else
+		for (int b = 0; b < changed_velo.bucket_count(); b++)
+			for (auto bi = changed_velo.begin(b); bi != changed_velo.end(b); bi++) {
+				POINT3D pn = bi->first;
+
+#endif
+				auto [xx, yy, zz] = representation_to_point<int>(pn);
+				if (zz == 0 || zz >= zs - 1) continue;
 				{
-					int xx = p.x;
-					if (xx == 0 || xx >= xs - 1) continue;
-		/*for (int zz = 1; zz < zs - 1; ++zz) {
-			for (int yy = 0 + 1; yy < ys - 1; ++yy) {
-				for (int xx = 0 + 1; xx < xs - 1; ++xx) {*/
-					if (field_buffer[xx + xs * (yy + ys * zz)] > 0 && distance_buffer[xx + xs * (yy + ys * zz)] < -0.5f) {
-						distance_buffer[xx + xs * (yy + ys * zz)] = current_distance;
-						for (int k = -1; k <= 1; k++) {
-							for (int j = -1; j <= 1; j++) {
-								for (int i = -1; i <= 1; i++) {
-									if ((i+1) % 2 + (j+1) % 2 + (k+1) % 2 == 2) {
-										if (BUF_IDX(field_buffer, xs, ys, zs, xx + i, yy + j, zz + k) < 0.95) {
-											act_set.insert(IPoi3<int>(xx + i, yy + j, zz + k));
-										}
-									}
-								}
-							}
-						}
-					}
-				}
-			}
-		}
-	
+					if (yy == 0 || yy >= ys - 1) continue;
+					{
+						if (xx == 0 || xx >= xs - 1) continue;
+						/*for (int zz = 1; zz < zs - 1; ++zz) {
+							for (int yy = 0 + 1; yy < ys - 1; ++yy) {
+								for (int xx = 0 + 1; xx < xs - 1; ++xx) {*/
+						if (field_buffer[xx + xs * (yy + ys * zz)] > 0 && distance_buffer[xx + xs * (yy + ys * zz)] < -0.5f) {
+							distance_buffer[xx + xs * (yy + ys * zz)] = current_distance;
+							for (int k = -1; k <= 1; k++) {
+								for (int j = -1; j <= 1; j++) {
+									for (int i = -1; i <= 1; i++) {
+										if ((i + 1) % 2 + (j + 1) % 2 + (k + 1) % 2 == 2) {
+											if (BUF_IDX(field_buffer, xs, ys, zs, xx + i, yy + j, zz + k) < MAX_FIELD_VAL
+												&& (plane_center.x < -0.5 || sgn(plane_normal.x * origin_point.x + plane_normal.y * origin_point.y + plane_normal.z * origin_point.z + plane_offset) * (plane_normal.x * xx + i + plane_normal.y * yy + j + plane_normal.z * zz + k + plane_offset) + MAX_DIST_FROM_PLANE > 0)) {
+
+#ifdef USE_VECTOR_AS_SET
+												temp.push_back(point_to_representation(xx + i, yy + j, zz + k));
+#else
+												temp.insert(point_to_representation(xx + i, yy + j, zz + k));
+#endif
+											} // end if
+										} // end if
+									} // end for i
+								} // end for j
+							} // end for k
+						} // end if xx
+					} // end if yy
+				} // end if zz
+		} // end for i
+#pragma omp critical
+#ifdef USE_VECTOR_AS_SET
+		act_set.insert(act_set.end(), temp.begin(), temp.end());
+#else
+		act_set.insert(temp.begin(), temp.end());
+#endif
+	}
+
+	changed_velo.clear();
+#ifdef USE_VECTOR_AS_SET
+	sort(act_set.begin(), act_set.end());
+	act_set.erase(unique(act_set.begin(), act_set.end()), act_set.end());
+#endif
 }
 
 bool CPhaseContainer::IsDone() {
@@ -849,15 +961,16 @@ bool CPhaseContainer::IsDone() {
 void CPhaseContainer::Iterate(bool use_correction)
 {
 	// m_phasefield.m_field[i]
-	if(plane_center.x < -0.5)
+	if(!n_plane_finalized)
 		if (++m_counter % REFRESH_ITERS == 0) {
 			int n_prev_meet_points = n_meet_points >= 100? n_meet_points : 100;
 			FindMeetPoints();
-			if (n_prev_meet_points > 0) {
-				if (n_meet_points == n_prev_meet_points) {
-					ExtractMeetingPlane();
-				}
+			if(n_meet_points > n_min_meet_points)
+				ExtractMeetingPlane();
+			if (n_meet_points == n_prev_meet_points && n_meet_points > 0) {
+				n_plane_finalized = true;
 			}
+			
 		}
 	realnum maxv0 = UpdateVelo(0, use_correction);
 	realnum maxv1 = UpdateVelo(1, use_correction);

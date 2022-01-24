@@ -6,6 +6,8 @@
 #include <sitkImageFileWriter.h>
 #include <sitkAdditionalProcedures.h>
 #include <sitkImage.h>
+#include <Eigen/Dense>
+#include <Eigen/Core>
 
 using namespace std;
 namespace sitk = itk::simple;
@@ -140,7 +142,32 @@ public:
 	}
 };
 
-std::pair<IPoi3<double>, IPoi3<double>> best_plane_from_points(const std::unordered_set<IPoi3<double>, IPoi3Hash<double>>& c);
+template<typename T>
+std::pair<IPoi3<double>, IPoi3<double>> best_plane_from_points(const vector<vector<T>>& c)
+{
+	// copy coordinates to  matrix in Eigen format
+	size_t num_atoms = c.size();
+	Eigen::Matrix< double, Eigen::Dynamic, Eigen::Dynamic > coord(3, num_atoms);
+	for (size_t i = 0; i < num_atoms; ++i) {
+		coord.col(i)[0] = c[i][0];
+		coord.col(i)[1] = c[i][1];
+		coord.col(i)[2] = c[i][2];
+	}
+	// calculate centroid
+	IPoi3<double> centroid(coord.row(0).mean(), coord.row(1).mean(), coord.row(2).mean());
+
+	// subtract centroid
+	coord.row(0).array() -= centroid.x;
+	coord.row(1).array() -= centroid.y;
+	coord.row(2).array() -= centroid.z;
+
+	// we only need the left-singular matrix here
+	//  http://math.stackexchange.com/questions/99299/best-fitting-plane-given-a-set-of-points
+	auto svd = coord.jacobiSvd(Eigen::ComputeThinU | Eigen::ComputeThinV);
+	auto U = svd.matrixU().data();
+	IPoi3<double> plane_normal(U[6], U[7], U[8]);
+	return std::make_pair(centroid, plane_normal);
+}
 
 void rotate(const std::vector<double> rotation_matrix, const std::vector<double> value, std::vector<double>& dest);
 
