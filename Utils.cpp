@@ -29,11 +29,11 @@ void rotate(const std::vector<double> rotation_matrix, const std::vector<double>
 
 
 
-void save_image(string filename, sitk::Image img) {
+void save_image(string filename, sitk::Image& img) {
 	sitk::ImageFileWriter writer;
-	img = sitk::Cast(img, sitk::sitkFloat32);
+	sitk::Image&& cast_img = sitk::Cast(img, sitk::sitkFloat32);
 	writer.SetFileName(filename);
-	writer.Execute(img);
+	writer.Execute(cast_img);
 }
 
 void find_rotated_size(vector<unsigned int>& original_size, vector<double>& rotation_matrix, vector<unsigned int>& rotated_size) {

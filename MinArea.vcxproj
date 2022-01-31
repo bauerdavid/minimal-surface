@@ -448,7 +448,7 @@
       <ExceptionHandling>Sync</ExceptionHandling>
       <InlineFunctionExpansion>Default</InlineFunctionExpansion>
       <LanguageStandard>stdcpp17</LanguageStandard>
-      <Optimization>MaxSpeed</Optimization>
+      <Optimization>Disabled</Optimization>
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
       <RuntimeTypeInfo>
@@ -460,6 +460,7 @@
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
       <WholeProgramOptimization>true</WholeProgramOptimization>
       <OmitFramePointers>false</OmitFramePointers>
+      <ShowIncludes>false</ShowIncludes>
     </ClCompile>
     <ResourceCompile>
       <PreprocessorDefinitions>WIN32;_WINDOWS;NDEBUG;ITK_IO_FACTORY_REGISTER_MANAGER;CMAKE_INTDIR=\"MinSizeRel\";%(PreprocessorDefinitions)</PreprocessorDefinitions>
@@ -499,6 +500,7 @@
     <ClCompile Include="AreaEikonal.cpp" />
     <ClCompile Include="ChildFrm.cpp" />
     <ClCompile Include="ChildView.cpp" />
+    <ClCompile Include="FMSigned.cpp" />
     <ClCompile Include="Utils.cpp" />
     <ClCompile Include="ImageOp.cpp" />
     <ClCompile Include="MainFrm.cpp" />
@@ -516,6 +518,8 @@
     <ClInclude Include="ChildFrm.h" />
     <ClInclude Include="ChildView.h" />
     <ClInclude Include="commontype.h" />
+    <ClInclude Include="FMSigned.h" />
+    <ClInclude Include="IndexedPriorityQueue.h" />
     <ClInclude Include="Utils.h" />
     <ClInclude Include="ImageOp.h" />
     <ClInclude Include="MainFrm.h" />

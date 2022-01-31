@@ -9,8 +9,29 @@
 #include <Eigen/Dense>
 #include <Eigen/Core>
 
-using namespace std;
+#define BUF_IDX(buffer, xs, ys, zs, xx, yy, zz) buffer[(xx) + (xs)*((yy)+(ys)*(zz))]
+
+
 namespace sitk = itk::simple;
+
+inline POINT3D point_to_representation(int x, int y, int z) {
+#ifdef STORE_POINT_AS_INTEGER
+	return (POINT3D)x << (2 * 21) | (POINT3D)y << 21 | (POINT3D)z;
+#else
+	return POINT3D(x, y, z);
+#endif
+}
+template<typename T>
+inline std::tuple<T, T, T> representation_to_point(POINT3D representation) {
+#ifdef STORE_POINT_AS_INTEGER
+	T x = representation >> (2 * 21);
+	T y = (representation >> 21) & 0b111111111111111111111;
+	T z = representation & 0b111111111111111111111;
+	return { x, y, z };
+#else
+	return { representation.x, representation.y, representation.z };
+#endif
+}
 
 template<sitk::PixelIDValueEnum pixelIdValueEnum>
 struct CType {
@@ -72,10 +93,10 @@ public:
 template<>
 struct PixelManagerTrait<sitk::sitkFloat64> {
 public:
-	static void SetPixel(sitk::Image& img, const vector<unsigned int>& idx, double value) {
+	static void SetPixel(sitk::Image& img, const std::vector<unsigned int>& idx, double value) {
 		img.SetPixelAsDouble(idx, value);
 	}
-	static CType<sitk::sitkFloat64>::Type GetPixel(sitk::Image& img, const vector<unsigned int>& idx) {
+	static CType<sitk::sitkFloat64>::Type GetPixel(sitk::Image& img, const std::vector<unsigned int>& idx) {
 		return img.GetPixelAsDouble(idx);
 	}
 
@@ -99,11 +120,11 @@ public:
 template<>
 struct PixelManagerTrait<sitk::sitkFloat32> {
 public:
-	static void SetPixel(sitk::Image& img, const vector<unsigned int>& idx, float value) {
+	static void SetPixel(sitk::Image& img, const std::vector<unsigned int>& idx, float value) {
 		img.SetPixelAsFloat(idx, value);
 	}
 
-	static float GetPixel(sitk::Image& img, const vector<unsigned int>& idx) {
+	static float GetPixel(sitk::Image& img, const std::vector<unsigned int>& idx) {
 		return img.GetPixelAsFloat(idx);
 	}
 
@@ -115,10 +136,10 @@ public:
 template<>
 struct PixelManagerTrait<sitk::sitkInt32> {
 public:
-	static void SetPixel(sitk::Image& img, const vector<unsigned int>& idx, int value) {
+	static void SetPixel(sitk::Image& img, const std::vector<unsigned int>& idx, int value) {
 		img.SetPixelAsInt32(idx, value);
 	}
-	static int GetPixel(sitk::Image& img, const vector<unsigned int>& idx) {
+	static int GetPixel(sitk::Image& img, const std::vector<unsigned int>& idx) {
 		return img.GetPixelAsInt32(idx);
 	}
 
@@ -130,10 +151,10 @@ public:
 template<>
 struct PixelManagerTrait<sitk::sitkUInt8> {
 public:
-	static void SetPixel(sitk::Image& img, const vector<unsigned int>& idx, unsigned char value) {
+	static void SetPixel(sitk::Image& img, const std::vector<unsigned int>& idx, unsigned char value) {
 		img.SetPixelAsUInt8(idx, value);
 	}
-	static unsigned char GetPixel(sitk::Image& img, const vector<unsigned int>& idx) {
+	static unsigned char GetPixel(sitk::Image& img, const std::vector<unsigned int>& idx) {
 		return img.GetPixelAsUInt8(idx);
 	}
 
@@ -143,7 +164,7 @@ public:
 };
 
 template<typename T>
-std::pair<IPoi3<double>, IPoi3<double>> best_plane_from_points(const vector<vector<T>>& c)
+std::pair<IPoi3<double>, IPoi3<double>> best_plane_from_points(const std::vector<std::vector<T>>& c)
 {
 	// copy coordinates to  matrix in Eigen format
 	size_t num_atoms = c.size();
@@ -176,7 +197,7 @@ template <typename T> int sgn(T val) {
 }
 
 template<typename T>
-void cross_product(const vector<T> vec1, const vector<T> vec2, vector<T>& out) {
+void cross_product(const std::vector<T> vec1, const std::vector<T> vec2, std::vector<T>& out) {
 	if (vec1.size() != 3 || vec2.size() != 3) {
 		return;
 	}
@@ -186,35 +207,35 @@ void cross_product(const vector<T> vec1, const vector<T> vec2, vector<T>& out) {
 }
 
 template<typename T>
-vector<double> rotation_matrix_from_vectors(vector<T>& vec1, vector<T>& vec2) {
-	vector<T> vec1_sqr;
+std::vector<double> rotation_matrix_from_vectors(std::vector<T>& vec1, std::vector<T>& vec2) {
+	std::vector<T> vec1_sqr;
 	transform(vec1.begin(), vec1.end(), back_inserter(vec1_sqr), [](T& v) { return v * v; });
-	vector<T> vec2_sqr;
+	std::vector<T> vec2_sqr;
 	transform(vec2.begin(), vec2.end(), back_inserter(vec2_sqr), [](T& v) { return v * v; });
 
 	T sum1 = accumulate(vec1_sqr.begin(), vec1_sqr.end(), 0.0);
 	T sum2 = accumulate(vec2_sqr.begin(), vec2_sqr.end(), 0.0);
 	transform(vec1.begin(), vec1.end(), vec1.begin(), [sum1](T& c) { return c / sum1; });
 	transform(vec2.begin(), vec2.end(), vec2.begin(), [sum2](T& c) { return c / sum2; });
-	vector<double> v;
+	std::vector<double> v;
 	cross_product(vec1, vec2, v);
 	double c = inner_product(vec1.begin(), vec1.end(), vec2.begin(), 0.0);
 	double norm = sqrt(inner_product(v.begin(), v.end(), v.begin(), 0.0));
-	vector<double> kmat_plus_eye = vector<double>({
+	std::vector<double> kmat_plus_eye = std::vector<double>({
 		1, -v[2], v[1],
 		v[2], 1, -v[0],
 		-v[1], v[0], 1 });
-	vector<double> kmat_2 = vector<double>({
+	std::vector<double> kmat_2 = std::vector<double>({
 		(-v[2] * v[2] - v[1] * v[1]),				 (v[0] * v[1]),				   (v[2] * v[0]),
 					   (v[1] * v[0]), (-v[2] * v[2] - v[0] * v[0]),				   (v[2] * v[1]),
 					   (v[0] * v[2]),				 (v[1] * v[2]), (-v[0] * v[0] - v[1] * v[1]) });
 	transform(kmat_2.begin(), kmat_2.end(), kmat_2.begin(), [c, norm](T& val) {return val * ((1 - c) / (norm * norm)); });
-	vector<double> rotation_matrix = vector<double>(9);
+	std::vector<double> rotation_matrix = std::vector<double>(9);
 	transform(kmat_plus_eye.begin(), kmat_plus_eye.end(), kmat_2.begin(), rotation_matrix.begin(), plus<double>());
 	return rotation_matrix;
 }
 
-void find_rotated_size(vector<unsigned int>& original_size, vector<double>& rotation_matrix, vector<unsigned int>& rotated_size);
+void find_rotated_size(std::vector<unsigned int>& original_size, std::vector<double>& rotation_matrix, std::vector<unsigned int>& rotated_size);
 
 template<typename T, sitk::PixelIDValueEnum pixelIdValueEnum = TypeEnumTrait<T>::value, class PixelManager = PixelManagerTrait<pixelIdValueEnum>>
 sitk::Image vox_img_2_sitk(SVoxImg<SWorkImg<T>>& data) {
@@ -248,26 +269,26 @@ sitk::Image work_img_2_sitk(SWorkImg<T>& data) {
 }
 template
 <sitk::InterpolatorEnum interpolator = sitk::sitkLinear>
-sitk::Image resample_img(sitk::Image& src, sitk::Image& dst, vector<double>& rotation_matrix, vector<unsigned int> sample_size, bool inverse = false, bool useNearestNeighborExtrapolator = false) {
-	vector<unsigned> data_size = src.GetSize();
+sitk::Image resample_img(sitk::Image& src, sitk::Image& dst, std::vector<double>& rotation_matrix, std::vector<unsigned int> sample_size, bool inverse = false, bool useNearestNeighborExtrapolator = false) {
+	std::vector<unsigned> data_size = src.GetSize();
 	if (sample_size.size() == 0)
 		find_rotated_size(data_size, rotation_matrix, sample_size);
 	sitk::Image sample_img(sample_size, src.GetPixelID());
-	vector<double> original_direction = src.GetDirection();
-	vector<double> original_origin = src.GetOrigin();
+	std::vector<double> original_direction = src.GetDirection();
+	std::vector<double> original_origin = src.GetOrigin();
 	if (inverse)
 		src.SetDirection(rotation_matrix);
 	else
 		sample_img.SetDirection(rotation_matrix);
-	vector<double> sample_center;
+	std::vector<double> sample_center;
 	std::transform(sample_size.begin(), sample_size.end(), std::back_inserter(sample_center), [](double v) { return v / 2; });
 	sample_center = sample_img.TransformContinuousIndexToPhysicalPoint(sample_center);
 
-	vector<double> data_center;
+	std::vector<double> data_center;
 	std::transform(data_size.begin(), data_size.end(), std::back_inserter(data_center), [](double v) { return (double)v / 2; });
 	data_center = src.TransformContinuousIndexToPhysicalPoint(data_center);
 
-	vector<double> sample_origin;
+	std::vector<double> sample_origin;
 	std::transform(data_center.begin(), data_center.end(), sample_center.begin(), std::back_inserter(sample_origin), std::minus<double>());
 	sample_img.SetOrigin(sample_origin);
 	
@@ -276,9 +297,9 @@ sitk::Image resample_img(sitk::Image& src, sitk::Image& dst, vector<double>& rot
 }
 
 template<typename T, sitk::PixelIDValueEnum pixelIdValueEnum = TypeEnumTrait<T>::value, sitk::InterpolatorEnum interpolatorEnum = TypeEnumTrait<T>::interpolator, class PixelManager = PixelManagerTrait<pixelIdValueEnum>>
-sitk::Image resample_vox_img(SVoxImg<SWorkImg<T>>& data, SVoxImg<SWorkImg<T>>& out, vector<double>& rotation_matrix, vector<unsigned int> sample_size, bool inverse=false, bool useNearestNeighborExtrapolator=false) {
+sitk::Image resample_vox_img(SVoxImg<SWorkImg<T>>& data, SVoxImg<SWorkImg<T>>& out, std::vector<double>& rotation_matrix, std::vector<unsigned int> sample_size, bool inverse=false, bool useNearestNeighborExtrapolator=false) {
 	unsigned int xs(data.xs), ys(data.ys), zs(data.zs);
-	vector<unsigned int> data_size = { (unsigned int)xs, (unsigned int)ys, (unsigned int)zs };
+	std::vector<unsigned int> data_size = { (unsigned int)xs, (unsigned int)ys, (unsigned int)zs };
 	sitk::Image data_img = vox_img_2_sitk<T, pixelIdValueEnum, PixelManager>(data);
 	sitk::Image resampled;
 
@@ -303,7 +324,7 @@ void sitk_2_vox_img(sitk::Image& sitk_img, SVoxImg<SWorkImg<T>>& vox_img) {
 }
 
 
-void save_image(string filename, sitk::Image img);
+void save_image(std::string filename, sitk::Image& img);
 /*
 template<typename T, class TypeEnum = TypeEnumTrait<T>, class PixelManager = PixelManagerTrait<T>>
 void save_slice(string filename, SVoxImg <SWorkImg<T>>& data, int xslice) {
@@ -321,7 +342,7 @@ void save_slice(string filename, SVoxImg <SWorkImg<T>>& data, int xslice) {
 }*/
 
 template<typename T, typename K=T, sitk::PixelIDValueEnum pixelIdValueEnum = TypeEnumTrait<K>::value, class PixelManager = PixelManagerTrait<pixelIdValueEnum>>
-void save_vox_img(string filename, SVoxImg < SWorkImg<T>>& data) {
+void save_vox_img(std::string filename, SVoxImg < SWorkImg<T>>& data) {
 	unsigned int xs(data.xs), ys(data.ys), zs(data.zs);
 	sitk::Image img(xs, ys, zs, pixelIdValueEnum);
 	K* buffer = PixelManager::GetBuffer(img);
@@ -338,7 +359,7 @@ void save_vox_img(string filename, SVoxImg < SWorkImg<T>>& data) {
 
 template<>
 inline void save_vox_img<double>
-(string filename, SVoxImg < SWorkImg<double>>& data) {
+(std::string filename, SVoxImg < SWorkImg<double>>& data) {
 	unsigned int xs(data.xs), ys(data.ys), zs(data.zs);
 	sitk::Image img(xs, ys, zs, sitk::sitkFloat32);
 	float* buffer = img.GetBufferAsFloat();
@@ -355,7 +376,7 @@ inline void save_vox_img<double>
 
 
 template<typename T, sitk::PixelIDValueEnum pixelIdValueEnum = TypeEnumTrait<T>::value, class PixelManager = PixelManagerTrait<pixelIdValueEnum>>
-void save_work_img(string filename, SWorkImg<T>& data) {
+void save_work_img(std::string filename, SWorkImg<T>& data) {
 	unsigned int xs(data.xs), ys(data.ys);
 	sitk::Image img(xs, ys, pixelIdValueEnum);
 	for (unsigned int yy = 0; yy < ys; yy++) {
@@ -368,7 +389,7 @@ void save_work_img(string filename, SWorkImg<T>& data) {
 
 template<>
 inline void save_work_img<double>
-(string filename, SWorkImg<double>& data) {
+(std::string filename, SWorkImg<double>& data) {
 	unsigned int xs(data.xs), ys(data.ys);
 	sitk::Image img(xs, ys, TypeEnumTrait<float>::value);
 	for (unsigned int yy = 0; yy < ys; yy++) {

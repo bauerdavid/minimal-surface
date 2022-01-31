@@ -24,24 +24,7 @@ inline unsigned int connectivity_bit(bool val, int x, int y, int z) {
 	return (unsigned int)val << (x + 1) + 3 * ((y + 1) + 3 * (z + 1));
 }
 
-inline POINT3D point_to_representation(unsigned int x, unsigned int y, unsigned int z) {
-#ifdef STORE_POINT_AS_INTEGER
-	return (POINT3D) x << (2 * 21) | (POINT3D) y << 21 | (POINT3D) z;
-#else
-	return POINT3D(x, y, z);
-#endif
-}
-template<typename T>
-inline tuple<T, T, T> representation_to_point(POINT3D representation) {
-#ifdef STORE_POINT_AS_INTEGER
-	T x = representation >> (2 * 21);
-	T y = (representation >> 21) & 0b111111111111111111111;
-	T z = representation & 0b111111111111111111111;
-	return {x, y, z};
-#else
-	return { representation.x, representation.y, representation.z };
-#endif
-}
+
 
 template<typename T>
 inline T squared_sum(T x, T y, T z) {
@@ -50,7 +33,6 @@ inline T squared_sum(T x, T y, T z) {
 namespace sitk = itk::simple;
 using namespace std;
 
-#define BUF_IDX(buffer, xs, ys, zs, xx, yy, zz) buffer[(xx) + (xs)*((yy)+(ys)*(zz))]
 //const int max_threads = omp_get_max_threads();
 int a = 0;
 CCurvEikonal::CCurvEikonal(void)

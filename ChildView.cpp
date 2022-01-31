@@ -15,7 +15,7 @@
 #include <sitkImage.h>
 #include <sitkAdditionalProcedures.h>
 #include <omp.h>
-
+#include "FMSigned.h"
 #define DISTANCE_ITERATION 1
 #define DISTANCE_MEAN_ITERATION 2
 #define PLANE_PHASEFIELD_ITERATION 3
@@ -339,6 +339,11 @@ UINT BackgroundThread(LPVOID params)
 	f_stream << "CalculateFundQuant schedule: " << TOSTRING(CALCULATE_FUND_QUANT_SCHEDULE) << endl;
 	f_stream << "UpdateVelo schedule: " << TOSTRING(UPDATE_VELO_SCHEDULE) << endl;
 	f_stream << "UpdateDistanceSchedule schedule: " << TOSTRING(UPDATE_DISTANCE_SCHEDULE) << endl;
+	save_image("Y:/BIOMAG/shortest path/init_dist.tif", view->m_liftedEikonal.m_phasefield.m_distance[0]);
+	sitk::Image signed_dist;
+	FMSigned::build(view->m_liftedEikonal.m_phasefield.m_distance[0], signed_dist, 10);
+	vector<unsigned int> size = signed_dist.GetSize();
+	save_image("Y:/BIOMAG/shortest path/signed_dist.tif", signed_dist);
 	while (view->m_threadactivated) {
 
 		if (view->m_threadactivated == DISTANCE_ITERATION) { // 3D
