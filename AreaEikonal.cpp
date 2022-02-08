@@ -8,6 +8,7 @@
 #include <sitkImageOperators.h>
 #include <itkBinaryErodeImageFilter.h>
 #include <itkFlatStructuringElement.h>
+#include "FMSigned.h"
 #define BIG_NUMBER 1e11
 #define MAX_THREADS 32
 //							x  210210210210210210210210210
@@ -46,6 +47,7 @@ CCurvEikonal::~CCurvEikonal(void)
 }
 
 void CPhaseContainer::ExtractMeetingPlane() {
+	_PROFILING;
 	vector<unsigned> size= meeting_plane_positions.GetSize();
 	double* distance0_buffer = m_distance[0].GetBufferAsDouble();
 	double* distance1_buffer = m_distance[1].GetBufferAsDouble();
@@ -138,6 +140,7 @@ realnum g_w = 2.75;
 
 
 void CPhaseContainer::FindMeetPoints() {
+	_PROFILING;
 	vector<unsigned> size = m_field[0].GetSize();
 	int xs = size[0], ys = size[1], zs = size[2];
 	int* meeting_plane_buffer = meeting_plane_positions.GetBufferAsInt32();
@@ -203,6 +206,7 @@ void CPhaseContainer::FindMeetPoints() {
 }
 
 void CPhaseContainer::InitializeNeighbors() {
+	_PROFILING;
 	return;
 	vector<unsigned> size = m_distance[0].GetSize();
 	m_distance_connectivity = sitk::Image(size, sitk::sitkUInt32);
@@ -231,6 +235,7 @@ void CPhaseContainer::InitializeNeighbors() {
 
 
 void CPhaseContainer::Initialize(SVoxImg<SWorkImg<realnum>>& data, CVec3& start_point, CVec3& end_point) {
+	_PROFILING;
 	unsigned int spacex(data.xs), spacey(data.ys), spacez(data.zs);
 	//g_cyc = 0;
 	m_thickstate = sitk::Image({ spacex, spacey, spacez }, sitk::sitkInt32) - 1;
@@ -240,6 +245,9 @@ void CPhaseContainer::Initialize(SVoxImg<SWorkImg<realnum>>& data, CVec3& start_
 	unx = sitk::Image({ spacex, spacey, spacez }, sitk::sitkFloat64);
 	uny = sitk::Image({ spacex, spacey, spacez }, sitk::sitkFloat64);
 	unz = sitk::Image({ spacex, spacey, spacez }, sitk::sitkFloat64);
+
+	m_temp_sdist[0] = sitk::Image({spacex, spacey, spacez}, sitk::sitkFloat64);
+	m_temp_sdist[1] = sitk::Image({ spacex, spacey, spacez }, sitk::sitkFloat64);
 	m_smoothstate = sitk::Image({ spacex, spacey, spacez }, sitk::sitkInt32) - 1;
 	// expansion
 
@@ -279,11 +287,20 @@ void CPhaseContainer::Initialize(SVoxImg<SWorkImg<realnum>>& data, CVec3& start_
 					int dx = xx - point.x, dy = yy - point.y;
 					int dz = zz - point.z;
 					int dd = dx * dx + dy * dy + dz * dz;
-					if ((int)dd < 10 * 10 / 1) {
-						//TODO: initialize the two starting points on different distance maps (instead of [0]: [ii])
-						field_buffer[xx + spacex * (yy + spacey * zz)] = 1.0; // ii->0
+					if ((int)dd <= 10 * 10 / 1) {
 						double dd_sqrt = sqrt(dd);
-						distance_buffer[xx + spacex * (yy + spacey * zz)] = dd_sqrt; // ii->0
+						if (dd > 9*9) {
+							field_buffer[xx + spacex * (yy + spacey * zz)] = 10-dd_sqrt;
+#ifdef USE_VECTOR_AS_SET
+							active_set[ii].push_back(point_to_representation(xx, yy, zz));
+#else
+							active_set[ii].insert(point_to_representation(xx, yy, zz));
+#endif
+						}
+						else {
+							field_buffer[xx + spacex * (yy + spacey * zz)] = 1.0;
+						}
+						distance_buffer[xx + spacex * (yy + spacey * zz)] = dd_sqrt;
 						if (m_currentdistance < dd_sqrt) m_currentdistance = dd_sqrt;
 
 						// curvatures
@@ -291,14 +308,13 @@ void CPhaseContainer::Initialize(SVoxImg<SWorkImg<realnum>>& data, CVec3& start_
 						//m_phasefield.m_thickstate[ii][zz][yy][xx] = 2;
 						//m_phasefield.m_Sumcurvature[ii][zz][yy][xx] = dd+dd;
 					}
-					else if (squared_sum(dx + 1, dy, dz) < 100 || squared_sum(dx - 1, dy, dz) < 100
-						|| squared_sum(dx, dy + 1, dz) < 100 || squared_sum(dx, dy - 1, dz) < 100
-						|| squared_sum(dx, dy, dz + 1) < 100 || squared_sum(dx, dy, dz - 1) < 100) {
+					else if (dd < 11*11) {
 #ifdef USE_VECTOR_AS_SET
 						active_set[ii].push_back(point_to_representation(xx, yy, zz));
 #else
 						active_set[ii].insert(point_to_representation(xx, yy, zz));
 #endif
+						BUF_IDX(field_buffer, spacex, spacey, spacez, xx, yy, zz) = 10-sqrt(dd);
 					}
 				}
 			}
@@ -314,6 +330,7 @@ void CPhaseContainer::Initialize(SVoxImg<SWorkImg<realnum>>& data, CVec3& start_
 }
 
 void CPhaseContainer::Initialize(CPhaseContainer& phasefield, vector<double>& rotation_matrix, bool inverse) {
+	_PROFILING;
 	vector<unsigned int> sample_size;
 	resample_img(phasefield.m_thickstate, m_thickstate, rotation_matrix, sample_size, inverse);
 	resample_img(phasefield.m_Sumcurvature, m_Sumcurvature, rotation_matrix, sample_size, inverse);
@@ -328,6 +345,8 @@ void CPhaseContainer::Initialize(CPhaseContainer& phasefield, vector<double>& ro
 	neg_to_minus1(uny);
 	resample_img(phasefield.unz, unz, rotation_matrix, sample_size, inverse);
 	neg_to_minus1(unz);
+	m_temp_sdist[0] = sitk::Image(unx.GetSize(), sitk::sitkFloat64);
+	m_temp_sdist[1] = sitk::Image(unx.GetSize(), sitk::sitkFloat64);
 	resample_img<sitk::sitkNearestNeighbor>(phasefield.m_smoothstate, m_smoothstate, rotation_matrix, sample_size, inverse);
 	// expansion
 
@@ -367,6 +386,7 @@ void CPhaseContainer::Initialize(CPhaseContainer& phasefield, vector<double>& ro
 
 void CPhaseContainer::SmoothMap(sitk::Image &src1, sitk::Image& src2, sitk::Image &out)
 {
+	_PROFILING;
 	int j = 0;
 	// int j = i;
 	//SVoxImg<SWorkImg<realnum>> &src1 = m_phasefield.m_distance[i]; // source
@@ -497,17 +517,18 @@ void CPhaseContainer::SmoothMap(sitk::Image &src1, sitk::Image& src2, sitk::Imag
 
 void CPhaseContainer::CalculateFundQuant(int i, int test)
 {
+	_PROFILING;
 	int j = 0;
 	// int j = i;
 	int* thstat_buffer = m_thickstate.GetBufferAsInt32();
 	double* Sum_buffer = m_Sumcurvature.GetBufferAsDouble();
-	sitk::Image& distance = m_smoothdist;
+	sitk::Image& distance = m_distance[i];
 	double* distance_buffer = distance.GetBufferAsDouble(); // STAYS
 	//unsigned int* connectivity_buffer = m_distance_connectivity.GetBufferAsUInt32();
 	double* unx_buffer = unx.GetBufferAsDouble();
 	double* uny_buffer = uny.GetBufferAsDouble();
 	double* unz_buffer = unz.GetBufferAsDouble();
-	SmoothMap(m_distance[i], m_distance[(i + 1) % 2], distance); // m_distance[i];
+	//SmoothMap(m_distance[i], m_distance[(i + 1) % 2], distance); // m_distance[i];
 	int* smstat_buffer = m_smoothstate.GetBufferAsInt32();
 	vector<unsigned> size = m_smoothdist.GetSize();
 	int xs = size[0], ys = size[1], zs = size[2];
@@ -537,69 +558,34 @@ void CPhaseContainer::CalculateFundQuant(int i, int test)
 
 				if (thstat_buffer[xx + xs * (yy + ys * zz)] == 2) continue;
 
-				//Gau[zz][yy][xx] = 0; Sum[zz][yy][xx] = 0;
-				/*unsigned int val= (BUF_IDX(connectivity_buffer, xs, ys, zs, xx, yy, zz) & CONNECTIVITY_MASK_19);
-				if (val == CONNECTIVITY_MASK_19)*/
 				if (distance_buffer[xx + xs * (yy + ys * zz)] >= 0
 				 &&	distance_buffer[xx + xs * (yp + ys * zz)] >= 0 && distance_buffer[xx + xs * (ym + ys * zz)] >= 0
 				 && distance_buffer[xp + xs * (yy + ys * zz)] >= 0 && distance_buffer[xm + xs * (yy + ys * zz)] >= 0
-				 && distance_buffer[xx + xs * (yy + ys * zp)] >= 0 && distance_buffer[xx + xs * (yy + ys * zm)] >= 0 // sum curvature can be calculated
+				 && distance_buffer[xx + xs * (yy + ys * zp)] >= 0 && distance_buffer[xx + xs * (yy + ys * zm)] >= 0 
 
-				 && distance_buffer[xp + xs * (yp + ys * zz)] >= 0 && distance_buffer[xm + xs * (ym + ys * zz)] >= 0
-				 && distance_buffer[xm + xs * (yp + ys * zz)] >= 0 && distance_buffer[xp + xs * (ym + ys * zz)] >= 0
-				 &&	distance_buffer[xp + xs * (yy + ys * zp)] >= 0 && distance_buffer[xm + xs * (yy + ys * zm)] >= 0
-				 && distance_buffer[xm + xs * (yy + ys * zp)] >= 0 && distance_buffer[xp + xs * (yy + ys * zm)] >= 0
-				 &&	distance_buffer[xx + xs * (yp + ys * zp)] >= 0 && distance_buffer[xx + xs * (ym + ys * zm)] >= 0
-				 && distance_buffer[xx + xs * (yp + ys * zm)] >= 0 && distance_buffer[xx + xs * (ym + ys * zp)] >= 0 // Gauss curvature can be calculated as well
 				 ) {
 					// calculating the gradients
-					realnum gxp = (distance_buffer[xp + xs * (yy + ys * zz)] -distance_buffer[xx + xs * (yy + ys * zz)]);
-					realnum gyp = (distance_buffer[xx + xs * (yp + ys * zz)] -distance_buffer[xx + xs * (yy + ys * zz)]);
-					realnum gzp = (distance_buffer[xx + xs * (yy + ys * zp)] -distance_buffer[xx + xs * (yy + ys * zz)]);
-					realnum gxm = (distance_buffer[xx + xs * (yy + ys * zz)] -distance_buffer[xm + xs * (yy + ys * zz)]);
-					realnum gym = (distance_buffer[xx + xs * (yy + ys * zz)] -distance_buffer[xx + xs * (ym + ys * zz)]);
-					realnum gzm = (distance_buffer[xx + xs * (yy + ys * zz)] -distance_buffer[xx + xs * (yy + ys * zm)]);
+					realnum&& gxp = (distance_buffer[xp + xs * (yy + ys * zz)] -distance_buffer[xx + xs * (yy + ys * zz)]);
+					realnum&& gyp = (distance_buffer[xx + xs * (yp + ys * zz)] -distance_buffer[xx + xs * (yy + ys * zz)]);
+					realnum&& gzp = (distance_buffer[xx + xs * (yy + ys * zp)] -distance_buffer[xx + xs * (yy + ys * zz)]);
+					realnum&& gxm = (distance_buffer[xx + xs * (yy + ys * zz)] -distance_buffer[xm + xs * (yy + ys * zz)]);
+					realnum&& gym = (distance_buffer[xx + xs * (yy + ys * zz)] -distance_buffer[xx + xs * (ym + ys * zz)]);
+					realnum&& gzm = (distance_buffer[xx + xs * (yy + ys * zz)] -distance_buffer[xx + xs * (yy + ys * zm)]);
 
 					realnum gx = 0.5*(gxp+gxm);
 					realnum gy = 0.5*(gyp+gym);
 					realnum gz = 0.5*(gzp+gzm);
-					realnum hxx = (distance_buffer[xp + xs * (yy + ys * zz)] +distance_buffer[xm + xs * (yy + ys * zz)] -2*distance_buffer[xx + xs * (yy + ys * zz)]);
-					realnum hyy = (distance_buffer[xx + xs * (yp + ys * zz)] +distance_buffer[xx + xs * (ym + ys * zz)] -2*distance_buffer[xx + xs * (yy + ys * zz)]);
-					realnum hzz = (distance_buffer[xx + xs * (yy + ys * zp)] +distance_buffer[xx + xs * (yy + ys * zm)] -2*distance_buffer[xx + xs * (yy + ys * zz)]);
-					realnum hxy = 0.25*(distance_buffer[xp + xs * (yp + ys * zz)] +distance_buffer[xm + xs * (ym + ys * zz)] -distance_buffer[xm + xs * (yp + ys * zz)] -distance_buffer[xp + xs * (ym + ys * zz)]);
-					realnum hxz = 0.25*(distance_buffer[xp + xs * (yy + ys * zp)] +distance_buffer[xm + xs * (yy + ys * zm)] -distance_buffer[xm + xs * (yy + ys * zp)] -distance_buffer[xp + xs * (yy + ys * zm)]);
-					realnum hyz = 0.25*(distance_buffer[xx + xs * (yp + ys * zp)] +distance_buffer[xx + xs * (ym + ys * zm)] -distance_buffer[xx + xs * (ym + ys * zp)] -distance_buffer[xx + xs * (yp + ys * zm)]);
 					
-					realnum ig2 = 1.0/(gx*gx+gy*gy+gz*gz+1e-99);
-					realnum ig = sqrt(ig2);
+					
+					realnum&& ig2 = 1.0/(gx*gx+gy*gy+gz*gz+1e-99);
+					realnum&& ig = sqrt(ig2);
 					gx *= ig; gy *= ig; gz *= ig; // unit here
 					unx_buffer[xx + xs * (yy + ys * zz)] = gx;
 					uny_buffer[xx + xs * (yy + ys * zz)] = gy;
 					unz_buffer[xx + xs * (yy + ys * zz)] = gz;
 
-					/*realnum cr1 = gx * gy * (hxz * hyz - hxy * hzz) + gx * gz * (hxy * hyz - hxz * hyy) + gy * gz * (hxy * hxz - hyz * hxx); cr1 *= ig2;
-					realnum cr2 = gx*gx*(hyy*hzz-hyz*hyz)+gy*gy*(hxx*hzz-hxz*hxz)+gz*gz*(hxx*hyy-hxy*hxy); cr2 *= ig2;
-					Gau[zz][yy][xx] = 2*cr1+cr2;*/
+					thstat_buffer[xx + xs * (yy + ys * zz)] = 2; // calculated
 
-					realnum cr1 = gx*gx*(hyy+hzz)+gy*gy*(hxx+hzz)+gz*gz*(hxx+hyy); cr1 *= ig;
-					realnum cr2 = gx*gy*hxy+gx*gz*hxz+gy*gz*hyz; cr2 *= ig;
-					Sum_buffer[xx + xs * (yy + ys * zz)] = cr1-2*cr2;
-
-					thstat_buffer[xx + xs * (yy + ys * zz)] = 1; // calculated
-
-					if (smstat_buffer[xx + xs * (yp + ys * zz)] == 1 && smstat_buffer[xx + xs * (ym + ys * zz)] == 1
-					 && smstat_buffer[xp + xs * (yy + ys * zz)] == 1 && smstat_buffer[xm + xs * (yy + ys * zz)] == 1
-					 && smstat_buffer[xx + xs * (yy + ys * zp)] == 1 && smstat_buffer[xx + xs * (yy + ys * zm)] == 1
-						
-						&& smstat_buffer[xp + xs * (yp + ys * zz)] == 1 && smstat_buffer[xm + xs * (ym + ys * zz)] == 1
-						&& smstat_buffer[xm + xs * (yp + ys * zz)] == 1 && smstat_buffer[xp + xs * (ym + ys * zz)] == 1
-						&& smstat_buffer[xp + xs * (yy + ys * zp)] == 1 && smstat_buffer[xm + xs * (yy + ys * zm)] == 1
-						&& smstat_buffer[xm + xs * (yy + ys * zp)] == 1 && smstat_buffer[xp + xs * (yy + ys * zm)] == 1
-						&& smstat_buffer[xx + xs * (yp + ys * zp)] == 1 && smstat_buffer[xx + xs * (ym + ys * zm)] == 1
-						&& smstat_buffer[xx + xs * (yp + ys * zm)] == 1 && smstat_buffer[xx + xs * (ym + ys * zp)] == 1
-
-					 && smstat_buffer[xx + xs * (yy + ys * zz)] == 1)
-						thstat_buffer[xx + xs * (yy + ys * zz)] = 2;/**/
 
 				}
 
@@ -620,61 +606,36 @@ void CPhaseContainer::CalculateFundQuant(int i, int test)
 bool g_modeswitch = false;
 
 realnum CPhaseContainer::UpdateVelo(int i, bool use_correction) {
-	double* field_buffer = m_field[i].GetBufferAsDouble();
+	static int n_threads = omp_get_max_threads();
+	//_PROFILING;
+	sitk::Image& field = m_field[i];
+	double* field_buffer = field.GetBufferAsDouble();
 
-	double* counterfield_buffer = m_field[(i + 1) % 2].GetBufferAsDouble();
-
-	// m_velo
-	sitk::Image& velo = m_velo[i];
-
-	// m_distance[i]
-	sitk::Image& distance = m_distance[i];
-	double* distance_buffer = distance.GetBufferAsDouble();
-
-	// m_distance[(i+1)&1]
-	double* counterd_buffer = m_distance[(i + 1) & 1].GetBufferAsDouble();
-	//unsigned int* connectivity_buffer = m_distance_connectivity.GetBufferAsUInt32();
-
-	// m_Sumcurvature[i]
-	double* Sum_buffer = m_Sumcurvature.GetBufferAsDouble();
-	int* thickstate_buffer = m_thickstate.GetBufferAsInt32();
 	double* data_buffer = m_data.GetBufferAsDouble();
-	double* unx_buffer = unx.GetBufferAsDouble();
-	double* uny_buffer = uny.GetBufferAsDouble();
-	double* unz_buffer = unz.GetBufferAsDouble();
 	
 
-	vector<unsigned> size = m_field[i].GetSize();
+	const vector<unsigned>& size = m_field[i].GetSize();
 	int xs = size[0], ys = size[1], zs = size[2];
-
-	////////////////////////////////////////////////////////////////////
-	// fundamental quantities
-	////////////////////////////////////////////////////////////////////
-
-	CalculateFundQuant(i); // for object-level evolution
 
 	////////////////////////////////////////////////////////////////////
 	// evolution logic
 	////////////////////////////////////////////////////////////////////
+	auto& act_set = active_set[i];
+	sitk::Image& temp_sdist = FMSigned::build_for_neighbors(i, field, 2, 1, act_set);
+	double* sdist_buffer = temp_sdist.GetBufferAsDouble();
 	realnum maxv(0);
 
 	// Inhomogeneous
 	// Calculate the velocity at every point (velo[zz][yy][xx]), and the maximum velocity (maxv)
-	//velo = velo - velo;
-	double* velo_buffer = velo.GetBufferAsDouble();
-	auto& act_set = active_set[i];
 	auto& changed_velo = m_changed_velo[i];
 #ifdef USE_VECTOR_AS_SET
 	changed_velo.resize(act_set.size());
 #else
 	changed_velo.reserve(act_set.size());
 #endif
-	//changed_velo.clear();
 	int c = 0;
-	//sitk::Image&& pos_dist = sitk::Greater(distance, 0);
-	//sitk::Image&& any_neighs = sitk::DilateObjectMorphology(pos_dist, { 1, 1, 1 }, sitk::sitkCross);
-	//unsigned char* any_neighs_buffer = any_neighs.GetBufferAsUInt8();
-#pragma omp parallel for default(none) shared(changed_velo, act_set)
+
+#pragma omp parallel for num_threads(n_threads/2)
 #ifdef USE_VECTOR_AS_SET
 	for(int i=0; i<act_set.size(); i++)
 	{
@@ -702,50 +663,20 @@ realnum CPhaseContainer::UpdateVelo(int i, bool use_correction) {
 							int yp = yy + 1, ym = yy - 1;
 							int xp = xx + 1, xm = xx - 1;
 
-							realnum xn = field_buffer[xp + xs * (yy + ys * zz)] - field_buffer[xm + xs * (yy + ys * zz)];
-							realnum yn = field_buffer[xx + xs * (yp + ys * zz)] - field_buffer[xx + xs * (ym + ys * zz)];
-							realnum zn = field_buffer[xx + xs * (yy + ys * zp)] - field_buffer[xx + xs * (yy + ys * zm)];
+							realnum &&xn = field_buffer[xp + xs * (yy + ys * zz)] - field_buffer[xm + xs * (yy + ys * zz)];
+							realnum &&yn = field_buffer[xx + xs * (yp + ys * zz)] - field_buffer[xx + xs * (ym + ys * zz)];
+							realnum &&zn = field_buffer[xx + xs * (yy + ys * zp)] - field_buffer[xx + xs * (yy + ys * zm)];
 							realnum gradlen = sqrt(xn * xn + yn * yn + zn * zn + 1e-99);
 
+							realnum sumcur = 
+								BUF_IDX(sdist_buffer, xs, ys, zs, xp, yy, zz) +
+								BUF_IDX(sdist_buffer, xs, ys, zs, xm, yy, zz) +
+								BUF_IDX(sdist_buffer, xs, ys, zs, xx, yp, zz) +
+								BUF_IDX(sdist_buffer, xs, ys, zs, xx, ym, zz) +
+								BUF_IDX(sdist_buffer, xs, ys, zs, xx, yy, zp) +
+								BUF_IDX(sdist_buffer, xs, ys, zs, xx, yy, zm) -
+								6 * BUF_IDX(sdist_buffer, xs, ys, zs, xx, yy, zz);
 
-							realnum sumcur(0.0);
-
-							//Sum[zz][yy][xx] = 0;
-							realnum wAct(0.0);
-							int iok = -1;
-							for (int rr = 1; rr <= 25; ++rr) {
-								for (int iz = -rr; iz <= rr; ++iz) {
-									for (int iy = -rr; iy <= rr; ++iy) {
-										for (int ix = -rr; ix <= rr; ++ix) {
-											if (!ix && !iy && !iz) continue;
-											realnum r2 = (realnum)ix * ix + (realnum)iy * iy + (realnum)iz * iz;
-
-											if (r2 <= rr * rr) {
-												int pz = zz + iz; if (pz < 1) pz = 1; if (pz > zs - 2) pz = zs - 2;
-												int py = yy + iy; if (py < 1) py = 1; if (py > ys - 2) py = ys - 2;
-												int px = xx + ix; if (px < 1) px = 1; if (px > xs - 2) px = xs - 2;
-												if (thickstate_buffer[px + xs * (py + ys * pz)] < 0) continue;
-												realnum dot = unx_buffer[px + xs * (py + ys * pz)] * ix + uny_buffer[px + xs * (py + ys * pz)] * iy + unz_buffer[px + xs * (py + ys * pz)] * iz;
-												dot *= -1;
-												if (dot < 0.82) continue;
-												++iok; if (dot > 0.94) ++iok;
-												wAct += dot / r2;
-												sumcur += (dot / r2) * Sum_buffer[px + xs * (py + ys * pz)];
-											}
-
-
-										} // for ix
-									} // for iy
-								}// for iz
-								if (wAct > 0 && iok > 0) {
-									/*Gau[zz][yy][xx] = gcw / wAct;
-									Sum[zz][yy][xx] = sumcur/wAct;
-									++g_rr[rr];*/
-									sumcur /= wAct;
-									break;
-								}
-
-							} // for rr
 
 							realnum eikon;
 
@@ -771,36 +702,20 @@ realnum CPhaseContainer::UpdateVelo(int i, bool use_correction) {
 
 							eikon *= gradlen; // normalize
 							if (eikon < 1e-11) eikon = 1e-11;
-							//velo_buffer[xx + xs * (yy + ys * zz)] = eikon; // dS = 1
 
 #ifdef USE_VECTOR_AS_SET
-#pragma omp critical
 							changed_velo[i] = make_pair(pn, eikon);
 #else
 #pragma omp critical
 							changed_velo[pn] = eikon;
 #endif
-							/*#pragma omp critical(meeting_plane)
-							{
-								if (eikon > maxv) maxv = eikon;
-								if (counterd[zz][yy][xx] >= 0) {
-									// meeting_plane.insert(IPoi3<int>(xx, yy, zz));
-									meeting_plane_positions[zz][yy][xx] = 1;
-								}
-							}*/
-							if (eikon > maxv) maxv = eikon;
-							/*if (counterd[zz][yy][xx] >= 0) {
-								// meeting_plane.insert(IPoi3<int>(xx, yy, zz));
-								meeting_plane_positions[zz][yy][xx] = 1;
-							}*/
 
+							if (eikon > maxv) maxv = eikon;
 							//loop body
 						}
-						
 					} //for xx
 				} // for yy
 			}
-			
 		} // for zz
 	}
 
@@ -812,13 +727,15 @@ realnum CPhaseContainer::UpdateVelo(int i, bool use_correction) {
 	return maxv;
 }
 void CPhaseContainer::UpdateField(int idx, realnum maxv) {
+	static int n_threads = omp_get_max_threads();
+	_PROFILING;
 	//m_field[i] = sitk::Minimum(m_field[i] + m_velo[i] * maxv, 1.25);
 	double* field_buffer = m_field[idx].GetBufferAsDouble();
 	vector<unsigned> size = m_field[idx].GetSize();
 	int xs = size[0], ys = size[1], zs = size[2]; 
 	auto& changed_velo = m_changed_velo[idx];
 	auto& act_set = active_set[idx];
-#pragma omp parallel for default(none) shared(changed_velo, act_set)
+#pragma omp parallel for default(none) shared(changed_velo, act_set) num_threads(n_threads/2)
 #ifdef USE_VECTOR_AS_SET
 	for (int i = 0; i < changed_velo.size(); i++) {
 		
@@ -834,10 +751,11 @@ void CPhaseContainer::UpdateField(int idx, realnum maxv) {
 			auto [xx, yy, zz] = representation_to_point<int>(pn);
 			BUF_IDX(field_buffer, xs, ys, zs, xx, yy, zz) += velo*maxv;
 			if (BUF_IDX(field_buffer, xs, ys, zs, xx, yy, zz) >= MAX_FIELD_VAL) {
-#pragma omp critical
+
 #ifdef USE_VECTOR_AS_SET
 				act_set[i] = REMOVABLE_POINT;
 #else
+#pragma omp critical
 				act_set.erase(pn);
 #endif
 				if (BUF_IDX(field_buffer, xs, ys, zs, xx, yy, zz) >= 1.25)
@@ -847,6 +765,8 @@ void CPhaseContainer::UpdateField(int idx, realnum maxv) {
 	return;
 }
 void CPhaseContainer::UpdateDistance(int idx, realnum current_distance) {
+	static int n_threads = omp_get_max_threads();
+	_PROFILING;
 	CVec3 origin_point = !idx ? m_start_point : m_end_point;
 	auto& changed_velo = m_changed_velo[idx];
 	auto& act_set = active_set[idx];
@@ -859,7 +779,7 @@ void CPhaseContainer::UpdateDistance(int idx, realnum current_distance) {
 	//unsigned int* connectivity_buffer = m_distance_connectivity.GetBufferAsUInt32();
 	vector<unsigned> size = m_field[idx].GetSize();
 	int xs = size[0], ys = size[1], zs = size[2];
-#pragma omp parallel
+#pragma omp parallel num_threads(n_threads/2)
 	{
 #ifdef USE_VECTOR_AS_SET
 		vector<POINT3D> temp;
@@ -911,21 +831,26 @@ void CPhaseContainer::UpdateDistance(int idx, realnum current_distance) {
 				} // end if zz
 		} // end for i
 #pragma omp critical
+		{
 #ifdef USE_VECTOR_AS_SET
-		act_set.insert(act_set.end(), temp.begin(), temp.end());
+			act_set.insert(act_set.end(), temp.begin(), temp.end());
 #else
-		act_set.insert(temp.begin(), temp.end());
+			act_set.insert(temp.begin(), temp.end());
 #endif
+		}
 	}
 
 	changed_velo.clear();
 #ifdef USE_VECTOR_AS_SET
 	sort(act_set.begin(), act_set.end());
 	act_set.erase(unique(act_set.begin(), act_set.end()), act_set.end());
+	if (act_set.back() == REMOVABLE_POINT)
+		act_set.pop_back();
 #endif
 }
 
 bool CPhaseContainer::IsDone() {
+	_PROFILING;
 	vector<unsigned> size = m_field[0].GetSize();
 	int xs = size[0], ys = size[1], zs = size[2];
 	double* dist0_buffer = m_distance[0].GetBufferAsDouble();
@@ -942,6 +867,7 @@ bool CPhaseContainer::IsDone() {
 }
 void CPhaseContainer::Iterate(bool use_correction)
 {
+	_PROFILING;
 	// m_phasefield.m_field[i]
 	if(!n_plane_finalized)
 		if (++m_counter % REFRESH_ITERS == 0) {
@@ -954,9 +880,14 @@ void CPhaseContainer::Iterate(bool use_correction)
 			}
 			
 		}
-	realnum maxv0 = UpdateVelo(0, use_correction);
-	realnum maxv1 = UpdateVelo(1, use_correction);
-	realnum maxv = maxv0 > maxv1? maxv0 : maxv1;
+	vector<double> maxvs(2);
+	_BLOCK_PROFILING;
+#pragma omp parallel for num_threads(2)
+	for (int i = 0; i < 2; i++) {
+		maxvs[i] = UpdateVelo(i, use_correction);
+	}
+	_UNBLOCK_PROFILING;
+	realnum maxv = maxvs[0] > maxvs[1]? maxvs[0] : maxvs[1];
 	if (maxv < 1e-11) maxv = 1e-11;
 
 	realnum mdatspedmax = 0.5 * 4; //*2 set max speed
@@ -965,10 +896,13 @@ void CPhaseContainer::Iterate(bool use_correction)
 	//m_currentdistance += 1;
 
 	// update phase field values
-	UpdateField(0, maxv);
-	UpdateField(1, maxv);
-	UpdateDistance(0, m_currentdistance);
-	UpdateDistance(1, m_currentdistance);
+	_BLOCK_PROFILING;
+#pragma omp parallel for num_threads(2)
+	for (int i = 0; i < 2; i++) {
+		UpdateField(i, maxv);
+		UpdateDistance(i, m_currentdistance);
+	}
+	_UNBLOCK_PROFILING;
 	m_bdone = IsDone();
 	// TODO: check for collision
 	// updating the distance map to the current value, and checking if it is complete
@@ -980,6 +914,7 @@ void CPhaseContainer::Iterate(bool use_correction)
 
 }
 void CPhaseContainer::CalculateAlignedCombinedDistance(double p0_x, double p1_x) {
+	_PROFILING;
 	vector<unsigned> size = m_data.GetSize();
 	int xs(size[0]), ys(size[1]), zs(size[2]);
 	m_combined_distance = sitk::Image({ (unsigned) xs, (unsigned)ys, (unsigned)zs }, sitk::sitkFloat64) - 1;
@@ -1014,6 +949,7 @@ void CPhaseContainer::CalculateAlignedCombinedDistance(double p0_x, double p1_x)
 // only for xslice
 void CPlanePhaseField::GetDistancemean(SVoxImg<SWorkImg<realnum>>& distance1, SVoxImg<SWorkImg<realnum>>& distance2,  int xslice)
 {
+	_PROFILING;
 	//TODO: instead of searching for the selected x slice, locate the meeting surface of the two processes, and use that
 	int xs = distance1.xs, ys = distance1.ys, zs = distance1.zs;
 	m_nall = m_npos = 0;
@@ -1052,7 +988,6 @@ void CPlanePhaseField::GetDistancemean(SVoxImg<SWorkImg<realnum>>& distance1, SV
 
 void CPlanePhaseField::GetDistancemean(sitk::Image& distance, int xslice)
 {
-	//TODO: instead of searching for the selected x slice, locate the meeting surface of the two processes, and use that
 	vector<unsigned> size = distance.GetSize();
 	int xs = size[0], ys = size[1], zs = size[2];
 	double* distance_buffer = distance.GetBufferAsDouble();
@@ -1098,6 +1033,7 @@ void CPlanePhaseField::GetDistancemean(sitk::Image& distance, int xslice)
 
 void CPlanePhaseField::Iterate() 
 {
+	_PROFILING;
 	if (!m_bInited) return;
 
 	int xs = m_field2D.xs, ys = m_field2D.ys;
@@ -1152,6 +1088,7 @@ void CPlanePhaseField::Iterate()
 
 std::unordered_set<unsigned long>& CPlanePhaseField::RetrieveBound()
 {
+	_PROFILING;
 	int xs = m_field2D.xs, ys = m_field2D.ys;
 	m_bound.clear();
 	for (int yy = 1; yy < ys - 1; ++yy) {

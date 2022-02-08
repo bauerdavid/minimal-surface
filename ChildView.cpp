@@ -304,10 +304,11 @@ void CChildView::OnPaint()
 
 void CChildView::InitTransport()
 {
+	_PROFILING;
 	vector<unsigned> size = m_liftedEikonal.m_rotated_phasefield.m_distance[0].GetSize();
 	int xs(size[0]), ys(size[1]), zs(size[2]);
 	m_imageOp.GetPlaneDistMap(ys, zs, m_liftedEikonal.m_inicountourCalculator.RetrieveBound());
-	save_work_img("Y:/BIOMAG/shortest path/loc.tif", m_imageOp.m_loc);
+	//save_work_img("Y:/BIOMAG/shortest path/loc.tif", m_imageOp.m_loc);
 	if (xs > 0) {
 		SVoxImg<SWorkImg<realnum>>& passi = m_imageOp.GetIniMap(xs, ys, zs, m_liftedEikonal.m_rotated_phasefield.m_plane_slice);
 		realnum maxdist = m_liftedEikonal.m_rotated_phasefield.m_currentdistance;
@@ -327,10 +328,13 @@ void CChildView::InitTransport()
 
 UINT BackgroundThread(LPVOID params)
 {
+	omp_set_nested(1);
+	omp_set_dynamic(1);
 	CChildView* view = (CChildView*)params;
 	int cyc = 0;
 	extern bool g_modeswitch;
-	save_image("Y:/BIOMAG/shortest path/data.tif", view->m_liftedEikonal.m_phasefield.m_data);
+	bool dumped = false;
+	//save_image("Y:/BIOMAG/shortest path/data.tif", view->m_liftedEikonal.m_phasefield.m_data);
 	double start = omp_get_wtime();
 	ofstream f_stream;
 	f_stream.open("Y:/BIOMAG/shortest path/" INFO_FILENAME);
@@ -339,19 +343,18 @@ UINT BackgroundThread(LPVOID params)
 	f_stream << "CalculateFundQuant schedule: " << TOSTRING(CALCULATE_FUND_QUANT_SCHEDULE) << endl;
 	f_stream << "UpdateVelo schedule: " << TOSTRING(UPDATE_VELO_SCHEDULE) << endl;
 	f_stream << "UpdateDistanceSchedule schedule: " << TOSTRING(UPDATE_DISTANCE_SCHEDULE) << endl;
-	save_image("Y:/BIOMAG/shortest path/init_dist.tif", view->m_liftedEikonal.m_phasefield.m_distance[0]);
-	sitk::Image signed_dist;
-	FMSigned::build(view->m_liftedEikonal.m_phasefield.m_distance[0], signed_dist, 10);
-	vector<unsigned int> size = signed_dist.GetSize();
-	save_image("Y:/BIOMAG/shortest path/signed_dist.tif", signed_dist);
+	//save_image("Y:/BIOMAG/shortest path/init_dist.tif", view->m_liftedEikonal.m_phasefield.m_distance[0]);
+	//save_image("Y:/BIOMAG/shortest path/init_field.tif", view->m_liftedEikonal.m_phasefield.m_field[0]);
+	//sitk::Image signed_dist;
+	//FMSigned::build(view->m_liftedEikonal.m_phasefield.m_field[0], signed_dist, 10, 1, view->m_liftedEikonal.m_phasefield.active_set[0]);
+	//vector<unsigned int> size = signed_dist.GetSize();
+	//save_image("Y:/BIOMAG/shortest path/signed_dist.tif", signed_dist);
+	//save_image("Y:/BIOMAG/shortest path/signed_dist_lapl.tif", sitk::Laplacian(signed_dist, false));
 	while (view->m_threadactivated) {
 
 		if (view->m_threadactivated == DISTANCE_ITERATION) { // 3D
 			if (!view->m_liftedEikonal.m_phasefield.m_bdone)
 			{
-
-				if (view->m_liftedEikonal.m_phasefield.m_counter % 50 == 0)
-					f_stream << view->m_liftedEikonal.m_phasefield.active_set[0].size() << endl;
 				view->m_liftedEikonal.m_phasefield.Iterate(g_modeswitch);
 				if (view->m_liftedEikonal.m_phasefield.m_bdone) {
 					//save_image("Y:/BIOMAG/shortest path/flow_idx.tif", view->m_liftedEikonal.m_phasefield.m_flow_idx);
@@ -409,7 +412,7 @@ UINT BackgroundThread(LPVOID params)
 		else if (view->m_threadactivated == DISTANCE_MEAN_ITERATION) {
 			//view->m_liftedEikonal.m_inicountourCalculator.GetDistancemean(view->m_liftedEikonal.m_phasefield.m_resampled_distance[0], view->m_liftedEikonal.m_phasefield.m_resampled_distance[1], view->m_liftedEikonal.m_phasefield.m_resample_plane_slice);
 			view->m_liftedEikonal.m_inicountourCalculator.GetDistancemean(view->m_liftedEikonal.m_rotated_phasefield.m_combined_distance, view->m_liftedEikonal.m_rotated_phasefield.m_plane_slice);
-			save_image("Y:/BIOMAG/shortest path/r_combined_distance.tif", view->m_liftedEikonal.m_rotated_phasefield.m_combined_distance);
+			/*save_image("Y:/BIOMAG/shortest path/r_combined_distance.tif", view->m_liftedEikonal.m_rotated_phasefield.m_combined_distance);
 			save_image("Y:/BIOMAG/shortest path/r_distance_0.tif", view->m_liftedEikonal.m_rotated_phasefield.m_distance[0]);
 			save_image("Y:/BIOMAG/shortest path/r_distance_1.tif", view->m_liftedEikonal.m_rotated_phasefield.m_distance[1]);
 			save_image("Y:/BIOMAG/shortest path/r_data.tif", view->m_liftedEikonal.m_rotated_phasefield.m_data);
@@ -419,7 +422,7 @@ UINT BackgroundThread(LPVOID params)
 			save_work_img("Y:/BIOMAG/shortest path/slice_gx.tif",view->m_liftedEikonal.m_inicountourCalculator.m_gx2D);
 			save_work_img("Y:/BIOMAG/shortest path/slice_gy.tif", view->m_liftedEikonal.m_inicountourCalculator.m_gy2D);
 			save_work_img("Y:/BIOMAG/shortest path/slice_distance0.tif", view->m_liftedEikonal.m_inicountourCalculator.m_distance2D[0]);
-			save_work_img("Y:/BIOMAG/shortest path/slice_distance1.tif", view->m_liftedEikonal.m_inicountourCalculator.m_distance2D[1]);
+			save_work_img("Y:/BIOMAG/shortest path/slice_distance1.tif", view->m_liftedEikonal.m_inicountourCalculator.m_distance2D[1]);*/
 
 			if (view->m_liftedEikonal.m_inicountourCalculator.m_bInited)
 				view->m_threadactivated = PLANE_PHASEFIELD_ITERATION;
@@ -431,7 +434,7 @@ UINT BackgroundThread(LPVOID params)
 			}
 			else {
 				view->m_threadactivated = TRANSPORT_FUNCTION_ITERATION;
-				save_work_img("Y:/BIOMAG/shortest path/slice_field.tif", view->m_liftedEikonal.m_inicountourCalculator.m_field2D);
+				//save_work_img("Y:/BIOMAG/shortest path/slice_field.tif", view->m_liftedEikonal.m_inicountourCalculator.m_field2D);
 
 			}
 			if (++cyc > 7) { view->Invalidate(FALSE); cyc = 0; }
@@ -441,11 +444,11 @@ UINT BackgroundThread(LPVOID params)
 			vector<unsigned> size = view->m_liftedEikonal.m_phasefield.m_data.GetSize();
 			unsigned int xs(size[0]), ys(size[1]), zs(size[2]);
 			vector<unsigned int> sample_size = { xs, ys, zs };
-			save_vox_img("Y:/BIOMAG/shortest path/r_transportfn.tif", view->m_transport.m_transportfunction[0]);
-			resample_vox_img<double, sitk::sitkFloat32, sitk::sitkNearestNeighbor>(view->m_transport.m_transportfunction[0], view->m_transport.m_transportfunction[0], view->m_liftedEikonal.m_phasefield.rotation_matrix, sample_size, true);
+			//save_vox_img("Y:/BIOMAG/shortest path/r_transportfn.tif", view->m_transport.m_transportfunction[0]);
+			//resample_vox_img<double, sitk::sitkFloat32, sitk::sitkNearestNeighbor>(view->m_transport.m_transportfunction[0], view->m_transport.m_transportfunction[0], view->m_liftedEikonal.m_phasefield.rotation_matrix, sample_size, true);
 			//neg_to_minus1(view->m_transport.m_transportfunction[0]);
-			save_vox_img("Y:/BIOMAG/shortest path/unrot_transportfn.tif", view->m_transport.m_transportfunction[0]);
-			resample_vox_img(view->m_transport.m_isboundary, view->m_transport.m_isboundary, view->m_liftedEikonal.m_phasefield.rotation_matrix, sample_size, true);
+			//save_vox_img("Y:/BIOMAG/shortest path/unrot_transportfn.tif", view->m_transport.m_transportfunction[0]);
+			//resample_vox_img(view->m_transport.m_isboundary, view->m_transport.m_isboundary, view->m_liftedEikonal.m_phasefield.rotation_matrix, sample_size, true);
 			view->m_transport.GetDispSlice(Talox, view->m_xsee, view->m_dispd2); // TaloX - enum
 			view->m_transport.GetDispSlice(Taloy, view->m_ysee, view->m_dispd1);
 			view->m_transport.GetDispSlice(Taloz, view->m_zsee, view->m_disp);
@@ -455,6 +458,10 @@ UINT BackgroundThread(LPVOID params)
 			view->m_threadactivated = DONE_ITERATION;
 		}
 		else if (view->m_threadactivated == DONE_ITERATION) {
+			if (!dumped) {
+				_DUMP_PROFILE_INFO("Y:/BIOMAG/shortest path/profiling.txt");
+				dumped = true;
+			}
 			Sleep(300);
 		}
 
@@ -512,6 +519,7 @@ void CChildView::PauseThread(int threadstat) // 1-(re-)start 2-suspended
 void CChildView::StopThread()
 {
 	m_threadactivated = 0;
+	_DUMP_PROFILE_INFO("Y:/BIOMAG/shortest path/profiling.txt")
 	Invalidate();
 }
 

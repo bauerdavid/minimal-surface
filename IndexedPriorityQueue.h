@@ -5,6 +5,7 @@
 #include <unordered_map>
 #include <limits.h>
 #include <stdio.h>
+#include <algorithm>
 template<typename KeyT, typename ValueT,
     class Hash = std::hash<KeyT>,
     class Comparator = std::less<ValueT>> class IndexedPriorityQueue {
@@ -75,6 +76,32 @@ template<typename KeyT, typename ValueT,
         IndexedPriorityQueue()
         {
             clear();
+        }
+        template <class RandomIt>
+        IndexedPriorityQueue(RandomIt first, RandomIt last, ValueT default_val=ValueT(0)) {
+            clear();
+            std::transform(first, last, back_inserter(v), [default_val](KeyT key) { return std::make_pair(key, default_val); });
+            std::transform(v.begin(), v.end(), inserter(m, m.end()),
+                [](pair<KeyT, ValueT> kv) {
+                    static size_t i = 0;
+                    return std::make_pair(kv.first, ++i);
+                }
+            );
+            numberOfElement = v.size();
+        }
+        template<class KeyIt, class ValueIt>
+        IndexedPriorityQueue(KeyIt keys_first, KeyIt keys_last, ValueIt vals_first, bool fix_heap=true) {
+            clear();
+            std::transform(keys_first, keys_last, vals_first, back_inserter(v), [](KeyT key, ValueT val) { return std::make_pair(key, val); });
+            if(fix_heap)
+                std::make_heap(v.begin(), v.end(), [this](pair<KeyT, ValueT> l, pair<KeyT, ValueT> r) {return comp(l.second, r.second); });
+            std::transform(v.begin(), v.end(), inserter(m, m.end()),
+                [](pair<KeyT, ValueT> kv) {
+                    static size_t i = 0;
+                    return std::make_pair(kv.first, ++i);
+                }
+            );
+            numberOfElement = v.size();
         }
 
         void clear() {

@@ -8,9 +8,183 @@
 #include <sitkImage.h>
 #include <Eigen/Dense>
 #include <Eigen/Core>
+#include <chrono>
+#include <iostream>
+#include <fstream>
+#include <iomanip>
+#include <regex>
+#include <unordered_set>
+
+#define PROFILE_FUNCTIONS
+#ifdef PROFILE_FUNCTIONS
+class profiler {
+	std::chrono::steady_clock::time_point start_time;
+	std::string name;
+public:
+	bool ended_profiling;
+	profiler(std::string name, bool push=true);
+	~profiler();
+	void end_profiling();
+	double get_execution_time();
+};
+struct profile_info {
+public:
+	size_t n_calls = 0;
+	double sum_execution = 0;
+	double mean_execution() {
+		return sum_execution / n_calls;
+	}
+	std::unordered_set<std::string> children;
+};
+class profile_manager {
+	static profile_manager& getInstance() {
+		static profile_manager instance;
+		return instance;
+	}
+	std::unordered_map<std::string, profile_info> profile_data;
+	std::string filename;
+	profiler *main_profiler;
+	profile_manager() {
+		profile_data["__MAIN__"].n_calls = 1;
+		main_profiler = new profiler("__MAIN__", false);
+		main_profiler->ended_profiling = false;
+		call_stack.push("__MAIN__");
+	}
+	~profile_manager() {
+		delete main_profiler;
+	}
+	std::stack<std::string> call_stack;
+public:
+	constexpr static int name_w = 100;
+	constexpr static int n_calls_w = 7;
+	constexpr static int sum_ex_w = 13;
+	constexpr static int mean_ex_w = 13;
+	static void print_children(std::ostream& os, std::string function, int offset) {
+		profile_manager& instance = getInstance();
+		auto& info = instance.profile_data[function];
+		std::string bullet_point;
+		if(offset > 0)
+			switch (offset % 3) {
+			case 0:
+				bullet_point = "- ";
+				break;
+			case 1:
+				bullet_point = "* ";
+				break;
+			case 2:
+				bullet_point = "> ";
+				break;
+			}
+		os << "|"
+			<< std::setfill('.') <<  std::setw(name_w) << std::string(offset, ' ') + bullet_point + function << "|"
+			<< std::setfill(' ') << std::setw(n_calls_w) << (info.n_calls) << "|"
+			<< std::setw(sum_ex_w) << std::setprecision(2) << std::fixed << (info.sum_execution / 1e6) << "|" << std::setw(mean_ex_w)
+			<< (info.mean_execution() / 1e6) << "|" << std::endl;
+
+		auto& child_names = info.children;
+		for (auto& it = child_names.begin(); it != child_names.end(); it++) {
+			std::string child_name = *it;
+			if (child_name == "__BLOCK__") continue;
+			print_children(os, child_name, offset + 1);
+		}
+	}
+
+	static void add_func_as_child(std::string parent, std::string child) {
+		auto& info = getInstance().profile_data[parent];
+		info.children.insert(child);
+	}
+	static void push_func(std::string func) {
+		getInstance().call_stack.push(func);
+	}
+	static void pop_func() {
+		getInstance().call_stack.pop();
+	}
+
+	static std::string current_func() {
+		return getInstance().call_stack.top();
+	}
+	static void set_filename(std::string fname) {
+		getInstance().filename = fname;
+	}
+	static void record_info(std::string name, double execution) {
+		if (name == "__MAIN__")
+			return;
+		profile_manager& instance = getInstance();
+		profile_info& info = instance.profile_data[name];
+		info.n_calls++;
+		info.sum_execution += execution;
+	}
+
+	static void block_profiling() {
+		push_func("__BLOCK__");
+	}
+	static void unblock_profiling() {
+		if (is_blocked())
+			pop_func();
+	}
+
+	static bool is_blocked() {
+		return current_func() == "__BLOCK__";
+	}
+	static void dump(std::ostream& os) {
+		auto& instance = getInstance();
+		instance.profile_data["__MAIN__"].sum_execution = instance.main_profiler->get_execution_time();
+		os << "|" << std::setfill('=') << std::setw(name_w + n_calls_w + sum_ex_w + mean_ex_w+4) << "|" << std::endl << std::setfill(' ');
+		os << std::left;
+		os << "|" << std::setw(name_w) << "name"<<"|" << std::setw(n_calls_w) << "#calls"<<"|" << std::setw(sum_ex_w) << "sum time (ms)"<<"|" << std::setw(mean_ex_w) << "avg time (ms)"<<"|" << std::endl;
+		os << std::right;
+		os << "|" << std::setfill('=') << std::setw(name_w + n_calls_w + sum_ex_w + mean_ex_w+4) << "|" << std::endl << std::setfill(' ');
+		os << std::left;
+		print_children(os, "__MAIN__", 0);
+		os << std::right;
+		os << "|" << std::setfill('=') << std::setw(name_w + n_calls_w + sum_ex_w + mean_ex_w+4) << "|" << std::endl << std::setfill(' ');
+	}
+
+	static void dump(std::string fname) {
+		std::ofstream f_stream;
+		f_stream.open(fname);
+		dump(f_stream);
+		f_stream.close();
+	}
+};
+
+
+static inline std::string methodName(const std::string& prettyFunction)
+{
+	std::string no_template(prettyFunction), prev;
+	std::regex template_match("<[^<>]*>");
+	do {
+		prev = no_template;
+		no_template = std::regex_replace(prev, template_match, "");
+	} while (no_template != prev);
+	size_t lbracket = no_template.rfind("(");
+	size_t colons = no_template.substr(0, lbracket).rfind("::");
+	size_t begin = no_template.substr(0, colons).rfind(" ") + 1;
+	size_t end = lbracket - begin;
+
+	return no_template.substr(begin, end) + "()";
+}
+
+#define __METHOD_NAME__ methodName(__FUNCSIG__)
+#define _SUB_PROFILE(name) profiler name##_profiler(#name, !profile_manager::is_blocked())
+#define _END_SUBPROFILE(name) name##_profiler.end_profiling()
+#define _PROFILING profiler _profiler(__METHOD_NAME__, !profile_manager::is_blocked())
+#define _END_PROFILING delete _profiler;
+#define _DUMP_PROFILE_INFO(output) profile_manager::dump(output);
+#define _BLOCK_PROFILING profile_manager::block_profiling()
+#define _UNBLOCK_PROFILING profile_manager::unblock_profiling()
+#else
+#define _SUB_PROFILE(name)
+#define _END_SUBPROFILE(name)
+#define _PROFILING
+#define _END_PROFILING
+#define _DUMP_PROFILE_INFO(output)
+#define _BLOCK_PROFILING 
+#define _UNBLOCK_PROFILING
+
+#endif
 
 #define BUF_IDX(buffer, xs, ys, zs, xx, yy, zz) buffer[(xx) + (xs)*((yy)+(ys)*(zz))]
-
 
 namespace sitk = itk::simple;
 

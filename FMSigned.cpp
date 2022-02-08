@@ -1,22 +1,21 @@
 #include "FMSigned.h"
 #include <sitkImageOperators.h>
-#define INF (2*m_max_dist)
+//#define USE_SITK_FOR_SDIST
 using namespace std;
 
-int solve_quadratic(double coeff[3], double solutions[2]) {
+bool solve_quadratic(double coeff[3], double& output) {
 	double a = coeff[2], b = coeff[1], c = coeff[0];
 	double discriminant = b * b - 4 * a * c;
-	if (discriminant > 0) {
-		solutions[0] = (-b + sqrt(discriminant)) / (2 * a);
-		solutions[1] = (-b - sqrt(discriminant)) / (2 * a);
-		return 2;
+	if (discriminant >= 0) {
+		if(b <= 0)
+			output = (-b + sqrt(discriminant)) / (2 * a);
+		else
+			output = (-b - sqrt(discriminant)) / (2 * a);
+		return true;
 	}
-	else if (discriminant == 0) {
-		solutions[0] = -b / (2 * a);
-		return 1;
-	}
-	return 0;
+	return false;
 }
+
 FMSigned::FMSigned() {
 
 }
@@ -25,23 +24,35 @@ bool FMSigned::finished() {
 	return m_narrow_band.empty();
 }
 
-void FMSigned::initialize(sitk::Image& distance_map, sitk::Image& output, double max_distance, double velo) {
-	vector<uint32_t> size = distance_map.GetSize();
-	sitk::PixelIDValueEnum type = distance_map.GetPixelID();
-	double* input_buffer = distance_map.GetBufferAsDouble();
+void FMSigned::initialize(sitk::Image& input_map, double max_distance, double velo) {
+	_PROFILING;
+	double* input_buffer = input_map.GetBufferAsDouble();
 	m_max_dist = max_distance;
-	output = sitk::Image(size, sitk::sitkFloat64)+ INF;
-	m_distance_map = output;
+	m_velo = velo;
+	vector<uint32_t> init_size = m_distance_map.GetSize();
+	vector<uint32_t> input_size = input_map.GetSize();
+	if (init_size != input_size) {
+		m_distance_map = sitk::Image(input_size, sitk::sitkFloat64) + INF;
+		m_frozen = sitk::Image(input_size, sitk::sitkUInt8);
+	}
+	else {
+		m_distance_map = -m_distance_map + INF;
+		m_frozen -= m_frozen;
+	}
+	
 	m_distance_buffer = m_distance_map.GetBufferAsDouble();
-	m_frozen = sitk::Image(size, sitk::sitkUInt8);
 	m_frozen_buffer = m_frozen.GetBufferAsUInt8();
-	xs = size[0];
-	ys = size[1];
-	zs = size[2];
-	for (int zz = 0; zz < zs; zz++) {
-		for (int yy = 0; yy < ys; yy++) {
-			for (int xx = 0; xx < xs; xx++) {
-				bool&& pos = BUF_IDX(input_buffer, xs, ys, zs, xx, yy, zz) > 0;
+	xs = input_size[0];
+	ys = input_size[1];
+	zs = input_size[2];
+#pragma omp parallel for
+	for (int zyx = 0; zyx < zs * ys * xs; zyx++) {
+		int zz = zyx / (ys * xs);
+		{
+			int yy = (zyx / xs) % ys;
+			{
+				int xx = zyx % xs;
+				bool&& neg = BUF_IDX(input_buffer, xs, ys, zs, xx, yy, zz) < 0;
 				bool&& xp_pos = xx + 1 < xs && BUF_IDX(input_buffer, xs, ys, zs, xx + 1, yy, zz) > 0;
 				bool&& xp_neg = xx + 1 < xs && BUF_IDX(input_buffer, xs, ys, zs, xx + 1, yy, zz) < 0;
 				bool&& yp_pos = yy + 1 < ys && BUF_IDX(input_buffer, xs, ys, zs, xx, yy + 1, zz) > 0;
@@ -55,11 +66,12 @@ void FMSigned::initialize(sitk::Image& distance_map, sitk::Image& output, double
 				bool&& yn_neg = yy - 1 > 0 && BUF_IDX(input_buffer, xs, ys, zs, xx, yy - 1, zz) < 0;
 				bool&& zn_pos = zz - 1 > 0 && BUF_IDX(input_buffer, xs, ys, zs, xx, yy, zz - 1) > 0;
 				bool&& zn_neg = zz - 1 > 0 && BUF_IDX(input_buffer, xs, ys, zs, xx, yy, zz - 1) < 0;
-				if (pos && (xp_pos || xn_pos || yp_pos || yn_pos || zp_pos || zn_pos)
+				if ((xp_pos || xn_pos || yp_pos || yn_pos || zp_pos || zn_pos) && neg
 					&& (xp_neg || xn_neg || yp_neg || yn_neg || zp_neg || zn_neg)) {
 					BUF_IDX(m_distance_buffer, xs, ys, zs, xx, yy, zz) = 0;
 					BUF_IDX(m_frozen_buffer, xs, ys, zs, xx, yy, zz) = 1;
 					POINT3D point = point_to_representation(xx, yy, zz);
+#pragma omp critical (build_narrow_band)
 					m_narrow_band.push(point, 0);
 				}
 
@@ -68,25 +80,29 @@ void FMSigned::initialize(sitk::Image& distance_map, sitk::Image& output, double
 	}
 }
 
+
+
 bool FMSigned::compute_distance(vector<int> p, double& out) {
-	double coeff[] = {-1, 0, 0};
+	//_PROFILING;
+	double coeff[] = { -1. / (m_velo * m_velo), 0, 0 };
+	bool neg = false;
 	for (int dim = 0; dim < 3; dim++) {
 		double val1 = INF;
 		double val2 = INF;
 		for (int i = 0; i < 2; i++) {
 			const vector<int>& offset = NEIGH6_OFFSET[2 * dim + i];
-			vector<int> pn;
-			transform(p.begin(), p.end(), offset.begin(), back_inserter(pn), plus<int>());
-			if (!BUF_IDX(m_frozen_buffer, xs, ys, zs, pn[0], pn[1], pn[2])) continue;
-			double _val1 = BUF_IDX(m_distance_buffer, xs, ys, zs, pn[0], pn[1], pn[2]);
-			if (_val1 < val1) {
+			int xn(p[0] + offset[0]), yn(p[1] + offset[1]), zn(p[2] + offset[2]);
+			if (xn < 0 || xn >=xs || yn < 0 || yn >=ys || zn < 0 || zn >= zs ||
+				!BUF_IDX(m_frozen_buffer, xs, ys, zs, xn, yn, zn)) continue;
+			double _val1 = BUF_IDX(m_distance_buffer, xs, ys, zs, xn, yn, zn);
+			if (abs(_val1) < abs(val1)) {
 				val1 = _val1;
 #ifdef HIGH_ACCURACY
 				vector<int> pn2;
 				transform(p.begin(), p.end(), offset.begin(), back_inserter(pn2), [](int p, int o) { return p + 2 * o; });
 
-				double _val2 = BUF_IDX(distance_buffer, xs, ys, zs, pn2[0], pn2[1], pn2[2]);
-				if (BUF_IDX(frozen_buffer, xs, ys, zs, pn2[0], pn2[1], pn2[2]) && _val2 <= val2)
+				double _val2 = BUF_IDX(m_distance_buffer, xs, ys, zs, pn2[0], pn2[1], pn2[2]);
+				if (BUF_IDX(m_frozen_buffer, xs, ys, zs, pn2[0], pn2[1], pn2[2]) && _val2 <= val2)
 					val2 = _val2;
 				else
 					val2 = INF;
@@ -102,25 +118,19 @@ bool FMSigned::compute_distance(vector<int> p, double& out) {
 			coeff[0] += a * tp * tp;
 		} else
 #endif
-		if (val1 < INF) {
+		if (abs(val1) < INF) {
 			coeff[2] += 1;
 			coeff[1] -= 2 * val1;
 			coeff[0] += val1 * val1;
 		}
 	}
 	out = INF;
-	double sol[2] = { INF, INF };
-	if (int n_solutions = solve_quadratic(coeff, sol)) {
-		if (n_solutions == 2)
-			out = sol[0] > sol[1] ? sol[0] : sol[1];
-		else
-			out = sol[0];
-		return true;
-	}
-	return false;
+	bool solved = solve_quadratic(coeff, out);
+	return solved;
 }
 
 void FMSigned::iterate() {
+	_PROFILING;
 	POINT3D p;
 	double dist;
 	tie(p, dist) = m_narrow_band.top();
@@ -132,34 +142,54 @@ void FMSigned::iterate() {
 	m_narrow_band.pop();
 	BUF_IDX(m_frozen_buffer, xs, ys, zs, x, y, z) = 1;
 	BUF_IDX(m_distance_buffer, xs, ys, zs, x, y, z) = dist;
+//#pragma omp parallel for
 	for (int i = 0; i < 6; i++) {
-		vector<int> offset = NEIGH6_OFFSET[i];
+		const vector<int> &offset = NEIGH6_OFFSET[i];
 		int xn = x + offset[0], yn = y + offset[1], zn = z + offset[2];
-		if (BUF_IDX(m_frozen_buffer, xs, ys, zs, xn, yn, zn)) continue;
+		if (xn < 0 || xn >= xs || yn < 0 || yn >= ys || zn < 0 || zn >= zs
+			|| BUF_IDX(m_frozen_buffer, xs, ys, zs, xn, yn, zn) < INF) continue;
 		double dist_n;
 		bool solved = compute_distance({ xn, yn, zn }, dist_n);
 		if (solved)
+//#pragma omp critical (push_to_narrow_band)
 			m_narrow_band.push_or_promote(point_to_representation(xn, yn, zn), dist_n);
-		if (m_narrow_band.contains(point_to_representation(36, 84, 45)) && m_narrow_band[point_to_representation(36, 84, 45)] < 0.7) {
-			double val = m_narrow_band[point_to_representation(36, 84, 45)];
-			continue;
-		}
 	}
 }
 
-void FMSigned::build(sitk::Image& distance_map, sitk::Image& output, double max_distance, double velo) {
-	FMSigned signedDistMap;
-	signedDistMap.initialize(distance_map, output, max_distance, velo);
-	save_image("Y:/BIOMAG/shortest path/sdist_init.tif", signedDistMap.m_distance_map);
-	double d = -1;
-	while (!signedDistMap.finished()) {
-		if (signedDistMap.m_narrow_band.top().second > d) {
-			//save_image("Y:/BIOMAG/shortest path/sdist_unsigned_temp_" + std::to_string(d) + ".tif", signedDistMap.m_distance_map);
-			d = signedDistMap.m_narrow_band.top().second;
+void FMSigned::calculateForNeighbors() {
+	_PROFILING;
+	auto& v = m_narrow_band_v;
+#pragma omp parallel for
+	for (int i = 0; i < v.size(); i++) {
+		POINT3D p;
+		double dist;
+		tie(p, dist) = v[i];
+		auto [x, y, z] = representation_to_point<int>(p);
+		//#pragma omp parallel for
+		for (int i = 0; i < 6; i++) {
+			const vector<int>& offset = NEIGH6_OFFSET[i];
+			int xn = x + offset[0], yn = y + offset[1], zn = z + offset[2];
+			if (xn < 0 || xn >= xs || yn < 0 || yn >= ys || zn < 0 || zn >= zs
+				|| BUF_IDX(m_distance_buffer, xs, ys, zs, xn, yn, zn) < INF) continue;
+			double dist_n;
+			bool solved = compute_distance({ xn, yn, zn }, dist_n);
+			if (solved) 
+				BUF_IDX(m_distance_buffer, xs, ys, zs, xn, yn, zn) = dist_n;
+			
 		}
+	}
+	//m_narrow_band_v.clear();
+}
+
+
+void FMSigned::build(int id, sitk::Image& input_map, sitk::Image& output, double max_distance, double velo) {
+	_PROFILING;
+	FMSigned& signedDistMap = getInstance(id);
+	signedDistMap.initialize(input_map, max_distance, velo);
+	while (!signedDistMap.finished()) {
 		signedDistMap.iterate();
 	}
-	save_image("Y:/BIOMAG/shortest path/sdist_unsigned.tif", signedDistMap.m_distance_map);
-	sitk::Image&& signs = sitk::Cast(sitk::GreaterEqual(distance_map, 0), signedDistMap.m_distance_map.GetPixelID()) * 2 - 1;
+	sitk::Image&& signs = sitk::Cast(sitk::GreaterEqual(input_map, 0), signedDistMap.m_distance_map.GetPixelID()) * (-2) + 1;
 	output = signedDistMap.m_distance_map * signs;
 }
+

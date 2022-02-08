@@ -2,6 +2,7 @@
 #include "ImageOp.h"
 #include "math.h"
 #include <queue>
+#include "Utils.h"
 CImageOp::CImageOp(void)
 {
 }
@@ -113,6 +114,7 @@ SVoxImg<SWorkImg<realnum>>& CImageOp::CreateTestImage(int xs, int ys, int zs, in
 
 void CImageOp::GetXTestDisTrans()
 {
+	_PROFILING;
 	int xs(m_loc.xs), ys(m_loc.ys);
 
 	std::unordered_set<unsigned long>::const_iterator pe = m_bound.end();
@@ -152,6 +154,7 @@ void CImageOp::GetXTestDisTrans()
 
 void CImageOp::XTestfill(short x, short y)
 {
+	_PROFILING;
 	std::queue<unsigned long> x_queue;
 	std::queue<unsigned long> y_queue;
 	x_queue.push(x);
@@ -212,6 +215,7 @@ void CImageOp::GetXTestBound(int ix, std::vector<CVec3>& out) // contour on plan
 
 void CImageOp::GetPlaneDistMap(int distmap_ys, int distmap_zs, std::unordered_set<unsigned long>& boundset)
 {
+	_PROFILING;
 	m_bound = boundset;
 	m_loc.Set(distmap_ys, distmap_zs, 1);
 	XTestfill(0, 0);
@@ -221,6 +225,7 @@ void CImageOp::GetPlaneDistMap(int distmap_ys, int distmap_zs, std::unordered_se
 
 SVoxImg<SWorkImg<realnum>>& CImageOp::CImageOp::GetIniMap(int xs, int ys, int zs, int ix) // initial map MAIN 2
 {
+	_PROFILING;
 	m_inimap.Set(xs, ys, zs);
 	for (int zz = 0; zz < zs; ++zz) {
 		m_inimap[zz] = _NO_BOU_;

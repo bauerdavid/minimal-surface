@@ -21,9 +21,6 @@
 #define POINT3D_MAP(val_type) POINT3D, val_type, POINT3D_HASH
 #define POINT3D_SET POINT3D, POINT3D_HASH
 
-inline void wtd(int a) {
-	return;
-}
 #define CHUNK_SIZE 1//34100
 //#define FIND_MEET_POINTS_SCHEDULE schedule(dynamic, CHUNK_SIZE)
 //#define SMOOTH_MAP_SCHEDULE schedule(dynamic, CHUNK_SIZE)
@@ -157,20 +154,12 @@ public:
 	-4: neither map nor gradient
 	0<: was smoothed along every dimension
 	*/
-	//SVoxImg<SWorkImg<int>> m_smoothstate;
 	sitk::Image m_smoothstate;
-	//SVoxImg<SWorkImg<int>> m_thickstate;
 	sitk::Image m_thickstate;
-	//SVoxImg<SWorkImg<realnum>> m_Sumcurvature;
 	sitk::Image m_Sumcurvature;
-	//SVoxImg<SWorkImg<realnum>> m_Hessian[6];
-
-	//SVoxImg<SWorkImg<realnum>> m_distance[2];
 	sitk::Image m_distance[2];
-	//SVoxImg<SWorkImg<realnum>> m_combined_distance;
 	sitk::Image m_combined_distance;
 	// for every pixel stores which flow reached it first
-	//SVoxImg<SWorkImg<int>> m_flow_idx;
 	sitk::Image m_flow_idx;
 	sitk::Image m_distance_connectivity;
 
@@ -178,37 +167,24 @@ public:
 	// expansion
 
 	// gradients of the distance maps
-	//SVoxImg<SWorkImg<realnum>> unx;
 	sitk::Image unx;
-	//SVoxImg<SWorkImg<realnum>> uny;
 	sitk::Image uny;
-	//SVoxImg<SWorkImg<realnum>> unz;
 	sitk::Image unz;
 
+	sitk::Image m_temp_sdist[2];
+
 	// Working field
-	//SVoxImg<SWorkImg<realnum>> m_field[2];
 	sitk::Image m_field[2];
-	//SVoxImg<SWorkImg<realnum>> m_gradlen;
-	//SVoxImg<SWorkImg<realnum>> m_n[3];
-	//SVoxImg<SWorkImg<realnum>> m_aux; // temp
 	sitk::Image m_aux;
-	//SVoxImg<SWorkImg<realnum>> m_smoothaux; // temp
 	sitk::Image m_smoothaux;
-	//SVoxImg<SWorkImg<realnum>> m_smoothaux2; // temp
 	sitk::Image m_smoothaux2;
-	//SVoxImg<SWorkImg<realnum>> m_smoothdist; // temp
 	sitk::Image m_smoothdist;
-	//SVoxImg<SWorkImg<realnum>> m_velo[2];
 	sitk::Image m_velo[2];
 
 	sitk::Image m_sample_image;
 	// Image data
-	//SVoxImg<SWorkImg<realnum>> m_data;
 	sitk::Image m_data;
-
-	//SVoxImg<SWorkImg<int>> meeting_plane_positions;
 	sitk::Image meeting_plane_positions;
-	//unordered_set<IPoi3<int>, IPoi3Hash<int>> active_set[2];
 #ifdef USE_VECTOR_AS_SET
 	std::vector<POINT3D> active_set[2];
 	std::vector<std::pair<POINT3D, double>> m_changed_velo[2];
@@ -216,8 +192,7 @@ public:
 	unordered_set<POINT3D_SET> active_set[2];
 	unordered_map<POINT3D_MAP(double)> m_changed_velo[2];
 #endif
-	//unordered_map<IPoi3<int>, double, IPoi3Hash<int>> m_changed_velo[2];
-	//unordered_set<IPoi3<double>, IPoi3Hash<double>> meeting_plane;
+
 	std::unordered_set<POINT3D_SET> meeting_plane;
 	IPoi3<double> plane_center = IPoi3<double>(-1, -1, -1);
 	IPoi3<double> plane_normal;
@@ -229,6 +204,10 @@ public:
 	std::vector<double> rotation_matrix;
 	bool m_bdone;
 	realnum m_currentdistance;
+
+	//signed distance helpers
+	std::unordered_set<POINT3D_SET> boundary_points[2];
+	sitk::Image m_distance_sign[2];
 
 	void Initialize(SVoxImg<SWorkImg<realnum>>& data, CVec3& start_point, CVec3& end_point);
 	void Initialize(CPhaseContainer& phasefield, std::vector<double>& rotation_matrix, bool inverse=false);

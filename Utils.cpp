@@ -13,7 +13,31 @@
 using namespace std;
 namespace sitk = itk::simple;
 
+#ifdef PROFILE_FUNCTIONS
+profiler::profiler(std::string name, bool push) : name{ name }, start_time{ std::chrono::steady_clock::now() }, ended_profiling(false) {
+	if (push)
+		profile_manager::push_func(name);
+	else
+		ended_profiling = true;
+}
+profiler::~profiler() {
+	end_profiling();
+}
+void profiler::end_profiling() {
+	if (!ended_profiling) {
+		profile_manager::record_info(name, get_execution_time());
+		profile_manager::pop_func();
+		std::string called_from = profile_manager::current_func();
+		profile_manager::add_func_as_child(called_from, name);
+		ended_profiling = true;
+	}
+}
 
+double profiler::get_execution_time() {
+	auto now = std::chrono::steady_clock::now();
+	return std::chrono::duration_cast<std::chrono::nanoseconds>(now - start_time).count();
+}
+#endif
 
 void rotate(const std::vector<double> rotation_matrix, const std::vector<double> value, std::vector<double>& dest) {
 	dest.clear();
