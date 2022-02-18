@@ -54,6 +54,10 @@
 #define STRINGIFY_EMPTY() "-"
 #define TOSTRING(x) STRINGIFY(x)
 
+//#define DEBUG_CURVATURE
+#define DEBUG_STATES
+#define ITERATE_ROTATED
+
 namespace sitk = itk::simple;
 
 #define MAXMINPATH 222 
@@ -124,6 +128,7 @@ public:
 	CPlanePhaseField():m_bInited(false) {}
 	bool m_bInited;
 	int m_npos;
+	int m_since_last_update;
 	int m_nall;
 	int m_nect;
 	int m_nfct;
@@ -167,9 +172,6 @@ public:
 	// expansion
 
 	// gradients of the distance maps
-	sitk::Image unx;
-	sitk::Image uny;
-	sitk::Image unz;
 
 	sitk::Image m_temp_sdist[2];
 
@@ -204,18 +206,20 @@ public:
 	std::vector<double> rotation_matrix;
 	bool m_bdone;
 	realnum m_currentdistance;
-
-	//signed distance helpers
-	std::unordered_set<POINT3D_SET> boundary_points[2];
-	sitk::Image m_distance_sign[2];
-
+	sitk::Image m_curvature[2];
+#ifdef DEBUG_CURVATURE
+	sitk::Image m_new_update[2];
+#endif
 	void Initialize(SVoxImg<SWorkImg<realnum>>& data, CVec3& start_point, CVec3& end_point);
 	void Initialize(CPhaseContainer& phasefield, std::vector<double>& rotation_matrix, bool inverse=false);
+	void CombineDistance();
 	void CalculateAlignedCombinedDistance(double p1_x, double p2_x);
 	void InitializeNeighbors();
 	void FindMeetPoints();
-	realnum UpdateVelo(int i, bool use_correction);
-	void UpdateField(int i, realnum maxv);
+	void UpdateCurvature(int i);
+	realnum GetMinS(int i);
+	realnum UpdateVelo(int i, bool use_correction, double S);
+	void UpdateField(int i, double maxv);
 	void UpdateDistance(int i, realnum current_distance);
 	bool IsDone();
 	// Calculate fundamental quantities, like distance gradient, sum curvature and thick state(?)

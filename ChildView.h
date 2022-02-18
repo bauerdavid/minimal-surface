@@ -37,7 +37,6 @@ public:
 
 	void DispImage(CPaintDC &dc, SDisImg &disp, int offx, int offy);
 
-	void InitTransport();
 	void InitThread();
 	void PauseThread(int threadstat);
 	void StopThread();

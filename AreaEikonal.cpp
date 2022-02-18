@@ -19,13 +19,32 @@
 #define REFRESH_ITERS 50
 #define MAX_DIST_FROM_PLANE 10
 #define MAX_FIELD_VAL 0.95
+#define M -1
 
 inline unsigned int connectivity_bit(bool val, int x, int y, int z) {
 
 	return (unsigned int)val << (x + 1) + 3 * ((y + 1) + 3 * (z + 1));
 }
 
-
+inline double calculate_speed(double curv, double phi, double S = 1) {
+	if (curv < -phi / (4 * S))
+		//return 1 / phi;
+		return M * (curv + phi / (4 * S)) + 2*S / phi;
+	if (abs(curv) < 1e-7)
+		return S / phi;
+	return (1 - sqrt(1 + (4 * curv * S) / phi)) / (-2 * curv);
+}
+inline bool is_outlier(double curv, double s = 2) {
+	return curv < -1 / (2 * s);
+}
+inline double calculate_S(double curv, double phi, double s=2) {
+	if (curv < -1 / (2 * s)) {
+		double smc = s - M * curv;
+		return phi / 4 * (smc + sqrt(smc * smc - 2 * M));
+		//return (M * phi) / (4 * (s - M * curv - 2 / phi));
+	}
+	return (curv*s*s + s) * phi;
+}
 
 template<typename T>
 inline T squared_sum(T x, T y, T z) {
@@ -46,40 +65,23 @@ CCurvEikonal::~CCurvEikonal(void)
 {
 }
 
-void CPhaseContainer::ExtractMeetingPlane() {
-	_PROFILING;
-	vector<unsigned> size= meeting_plane_positions.GetSize();
+void CPhaseContainer::CombineDistance() {
+	vector<unsigned> size = meeting_plane_positions.GetSize();
+	int xs(size[0]), ys(size[1]), zs(size[2]);
 	double* distance0_buffer = m_distance[0].GetBufferAsDouble();
 	double* distance1_buffer = m_distance[1].GetBufferAsDouble();
 	double* combined_buffer = m_combined_distance.GetBufferAsDouble();
-	int* meeting_plane_buffer = meeting_plane_positions.GetBufferAsInt32();
-	int xs(size[0]), ys(size[1]), zs(size[2]);
-	for (int zz = 0; zz < zs; ++zz) {
-		for (int yy = 0; yy < ys; ++yy) {
-			for (int xx = 0; xx < xs; ++xx) {
-				if (xx == 0 || xx == xs - 1 || yy == 0 || yy == ys - 1 || zz == 0 || zz == zs - 1) {
-					int sample_x(xx), sample_y(yy), sample_z(zz);
-					if (xx == 0)
-						sample_x = 1;
-					else if (xx == xs - 1)
-						sample_x = xs - 2;
-					if (yy == 0)
-						sample_y = 1;
-					else if (yy == ys - 1)
-						sample_y = ys - 2;
-					if (zz == 0)
-						sample_z = 1;
-					else if (zz == zs - 1)
-						sample_z = zs - 2;
-					distance0_buffer[xx + xs * (yy + ys * zz)] = distance0_buffer[sample_x + xs * (sample_y + ys * sample_z)];
-					distance1_buffer[xx + xs * (yy + ys * zz)] = distance1_buffer[sample_x + xs * (sample_y + ys * sample_z)];
-				}
-				if (meeting_plane_buffer[xx + xs * (yy + ys * zz)] > 0)
-				meeting_plane.insert(point_to_representation(xx, yy, zz));
-
-				double newval;
+#pragma omp parallel for FIND_MEET_POINTS_SCHEDULE
+	for (int zyx = 0; zyx < zs * ys * xs; zyx++)
+	{
+		int zz = zyx / (ys * xs);
+		{
+			int yy = (zyx / xs) % ys;
+			{
+				int xx = zyx % xs;
 				double d0 = distance0_buffer[xx + xs * (yy + ys * zz)];
 				double d1 = distance1_buffer[xx + xs * (yy + ys * zz)];
+				double newval;
 				if (d1 < 0 || d0 < d1 && d0 >= -1e-5)
 					newval = d0;
 				else
@@ -88,10 +90,57 @@ void CPhaseContainer::ExtractMeetingPlane() {
 			}
 		}
 	}
+}
+
+void CPhaseContainer::ExtractMeetingPlane() {
+	_PROFILING;
+	vector<unsigned> size= meeting_plane_positions.GetSize();
+	double* distance0_buffer = m_distance[0].GetBufferAsDouble();
+	double* distance1_buffer = m_distance[1].GetBufferAsDouble();
+	int* meeting_plane_buffer = meeting_plane_positions.GetBufferAsInt32();
+	int xs(size[0]), ys(size[1]), zs(size[2]);
+#pragma omp parallel
+	{
+		vector<POINT3D> temp;
+#pragma omp for
+		for (int zyx = 0; zyx < zs * ys * xs; zyx++)
+		{
+			int zz = zyx / (ys * xs);
+			{
+				int yy = (zyx / xs) % ys;
+				{
+					int xx = zyx % xs;
+					if (xx == 0 || xx == xs - 1 || yy == 0 || yy == ys - 1 || zz == 0 || zz == zs - 1) {
+						int sample_x(xx), sample_y(yy), sample_z(zz);
+						if (xx == 0)
+							sample_x = 1;
+						else if (xx == xs - 1)
+							sample_x = xs - 2;
+						if (yy == 0)
+							sample_y = 1;
+						else if (yy == ys - 1)
+							sample_y = ys - 2;
+						if (zz == 0)
+							sample_z = 1;
+						else if (zz == zs - 1)
+							sample_z = zs - 2;
+						distance0_buffer[xx + xs * (yy + ys * zz)] = distance0_buffer[sample_x + xs * (sample_y + ys * sample_z)];
+						distance1_buffer[xx + xs * (yy + ys * zz)] = distance1_buffer[sample_x + xs * (sample_y + ys * sample_z)];
+					}
+					if (meeting_plane_buffer[xx + xs * (yy + ys * zz)] > 0)
+						temp.push_back(point_to_representation(xx, yy, zz));
+
+
+				}
+			}
+		}
+#pragma omp critical (fill_meeting_plane)
+		meeting_plane.insert(temp.begin(), temp.end());
+	}
 	vector<vector<double>> meeting_plane_vec;
 	meeting_plane_vec.reserve(meeting_plane.size());
 
-	transform(meeting_plane.begin(), meeting_plane.end(), back_inserter(meeting_plane_vec),
+	std::transform(meeting_plane.begin(), meeting_plane.end(), back_inserter(meeting_plane_vec),
 #ifdef STORE_POINT_AS_INTEGER
 		[](unsigned long long val) {
 			
@@ -166,20 +215,6 @@ void CPhaseContainer::FindMeetPoints() {
 
 
 						if (counterd_buffer[xx + xs * (yy + ys * zz)] >= 0 && !BUF_IDX(meeting_plane_buffer, xs, ys, zs, xx, yy, zz)) {
-							// meeting_plane.insert(IPoi3<int>(xx, yy, zz));
-							/*if (!meeting_plane_positions[zz][yy][xx] &&
-								((distance[zz][yp][xx] >= 0 && !meeting_plane_positions[zz][yp][xx])
-								|| (distance[zz][ym][xx] >= 0 && !meeting_plane_positions[zz][ym][xx])
-								|| (distance[zz][yy][xp] >= 0 && !meeting_plane_positions[zz][yy][xp])
-								|| (distance[zz][yy][xm] >= 0 && !meeting_plane_positions[zz][yy][xm])
-								|| (distance[zp][yy][xx] >= 0 && !meeting_plane_positions[zp][yy][xx])
-								|| (distance[zm][yy][xx] >= 0 && !meeting_plane_positions[zm][yy][xx]))
-								&& xm > 2 && xp < xs - 2 && ym > 2 && yp < ys - 2 && zm > 2 && zp < zs - 2) {
-								meeting_plane_positions[zz][yy][xx] = 1;
-							}*/
-							/*if (distance[zz][yy][xx] == counterd[zz][yy][xx]) {
-								meeting_plane_positions[zz][yy][xx] = 1;
-							}*/
 							if (distance_buffer[xx + xs * (yy + ys * zz)] - counterd_buffer[xx + xs * (yy + ys * zz)] >= 0 &&
 								((distance_buffer[xx + xs * (yp + ys * zz)] > 0 && distance_buffer[xx + xs * (yp + ys * zz)] - counterd_buffer[xx + xs * (yp + ys * zz)] < 0) ||
 									(distance_buffer[xx + xs * (ym + ys * zz)] > 0 && distance_buffer[xx + xs * (ym + ys * zz)] - counterd_buffer[xx + xs * (ym + ys * zz)] < 0) ||
@@ -192,12 +227,6 @@ void CPhaseContainer::FindMeetPoints() {
 								n_meet_points++;
 							}
 						}
-		/*for (int zz = 1; zz < zs - 1; ++zz) {
-			for (int yy = 1; yy < ys - 1; ++yy) {
-				for (int xx = 1; xx < xs - 1; ++xx) {*/
-					
-
-						//continue;
 					}
 				}
 			}
@@ -205,31 +234,6 @@ void CPhaseContainer::FindMeetPoints() {
 	}
 }
 
-void CPhaseContainer::InitializeNeighbors() {
-	_PROFILING;
-	return;
-	vector<unsigned> size = m_distance[0].GetSize();
-	m_distance_connectivity = sitk::Image(size, sitk::sitkUInt32);
-	unsigned int* connectivity_buffer = m_distance_connectivity.GetBufferAsUInt32();
-	sitk::Image& pos_distance = sitk::GreaterEqual(sitk::Maximum(m_distance[0], m_distance[1]), 0);
-	unsigned char* pos_dist_buffer = pos_distance.GetBufferAsUInt8();
-	int xs(size[0]), ys(size[1]), zs(size[2]);
-	for (int zz = 1; zz < zs - 1; zz++) {
-		for (int yy = 1; yy < ys - 1; yy++) {
-			for (int xx = 1; xx < xs - 1; xx++) {
-				for (int k = -1; k <= 1; k++) {
-					for (int j = -1; j <= 1; j++) {
-						for (int i = -1; i <= 1; i++) {
-							if (BUF_IDX(pos_dist_buffer, xs, ys, zs, xx + i, yy + j, zz + k)) {
-								BUF_IDX(connectivity_buffer, xs, ys, zs, xx, yy, zz) |= connectivity_bit(BUF_IDX(pos_dist_buffer, xs, ys, zs, xx + i, yy + j, zz + k), i, j, k);
-							}
-						}
-					}
-				}
-			}
-		}
-	}
-}
 
 //-------------------------------------------------------------------------------------------------
 
@@ -242,9 +246,6 @@ void CPhaseContainer::Initialize(SVoxImg<SWorkImg<realnum>>& data, CVec3& start_
 	m_Sumcurvature = sitk::Image({ spacex, spacey, spacez }, sitk::sitkFloat64);
 	meeting_plane_positions = sitk::Image({ spacex, spacey, spacez }, sitk::sitkInt32);
 	// expansion
-	unx = sitk::Image({ spacex, spacey, spacez }, sitk::sitkFloat64);
-	uny = sitk::Image({ spacex, spacey, spacez }, sitk::sitkFloat64);
-	unz = sitk::Image({ spacex, spacey, spacez }, sitk::sitkFloat64);
 
 	m_temp_sdist[0] = sitk::Image({spacex, spacey, spacez}, sitk::sitkFloat64);
 	m_temp_sdist[1] = sitk::Image({ spacex, spacey, spacez }, sitk::sitkFloat64);
@@ -271,6 +272,14 @@ void CPhaseContainer::Initialize(SVoxImg<SWorkImg<realnum>>& data, CVec3& start_
 	m_sample_image = sitk::Image({ spacex, spacey, spacez }, sitk::sitkFloat64);
 	m_start_point = start_point;
 	m_end_point = end_point;
+
+	m_curvature[0] = sitk::Image({ spacex, spacey, spacez }, sitk::sitkFloat64);
+	m_curvature[1] = sitk::Image({ spacex, spacey, spacez }, sitk::sitkFloat64);
+#ifdef DEBUG_CURVATURE
+	
+	m_new_update[0] = sitk::Image({ spacex, spacey, spacez }, sitk::sitkUInt8);
+	m_new_update[1] = sitk::Image({ spacex, spacey, spacez }, sitk::sitkUInt8);
+#endif
 
 	int hs = 12 - 0;//5 (int)(1.5f*g_w/2);
 	m_currentdistance = 0;
@@ -324,7 +333,6 @@ void CPhaseContainer::Initialize(SVoxImg<SWorkImg<realnum>>& data, CVec3& start_
 	n_min_meet_points = spacex * spacey < spacex* spacez ? spacex * spacey :
 		spacex * spacez < spacey* spacez ? spacex * spacez : spacey * spacez;
 	n_min_meet_points /= 4;
-	InitializeNeighbors();
 
 	m_bdone = false;
 }
@@ -339,14 +347,8 @@ void CPhaseContainer::Initialize(CPhaseContainer& phasefield, vector<double>& ro
 	resample_img<sitk::sitkNearestNeighbor>(phasefield.meeting_plane_positions, meeting_plane_positions, rotation_matrix, sample_size, inverse);
 	// expansion
 
-	resample_img(phasefield.unx, unx, rotation_matrix, sample_size, inverse);
-	neg_to_minus1(unx);
-	resample_img(phasefield.uny, uny, rotation_matrix, sample_size, inverse);
-	neg_to_minus1(uny);
-	resample_img(phasefield.unz, unz, rotation_matrix, sample_size, inverse);
-	neg_to_minus1(unz);
-	m_temp_sdist[0] = sitk::Image(unx.GetSize(), sitk::sitkFloat64);
-	m_temp_sdist[1] = sitk::Image(unx.GetSize(), sitk::sitkFloat64);
+	m_temp_sdist[0] = sitk::Image(m_thickstate.GetSize(), sitk::sitkFloat64);
+	m_temp_sdist[1] = sitk::Image(m_thickstate.GetSize(), sitk::sitkFloat64);
 	resample_img<sitk::sitkNearestNeighbor>(phasefield.m_smoothstate, m_smoothstate, rotation_matrix, sample_size, inverse);
 	// expansion
 
@@ -375,237 +377,200 @@ void CPhaseContainer::Initialize(CPhaseContainer& phasefield, vector<double>& ro
 
 	m_currentdistance = phasefield.m_currentdistance;
 
+	m_curvature[0] = sitk::Image(m_thickstate.GetSize(), sitk::sitkFloat64);
+	m_curvature[1] = sitk::Image(m_thickstate.GetSize(), sitk::sitkFloat64);
+#ifdef DEBUG_CURVATURE
 	
+	m_new_update[0] = sitk::Image(m_thickstate.GetSize(), sitk::sitkUInt8);
+	m_new_update[1] = sitk::Image(m_thickstate.GetSize(), sitk::sitkUInt8);
+#endif
 	m_bdone = phasefield.m_bdone;
-	InitializeNeighbors();
 	vector<unsigned> new_size = m_sample_image.GetSize();
 	n_min_meet_points = new_size[0] * new_size[1] < new_size[0] * new_size[2] ? new_size[0] * new_size[1] :
 		new_size[0] * new_size[2] < new_size[1] * new_size[2] ? new_size[0] * new_size[2] : new_size[1] * new_size[2];
 	n_min_meet_points /= 4;
-}
 
-void CPhaseContainer::SmoothMap(sitk::Image &src1, sitk::Image& src2, sitk::Image &out)
-{
-	_PROFILING;
-	int j = 0;
-	// int j = i;
-	//SVoxImg<SWorkImg<realnum>> &src1 = m_phasefield.m_distance[i]; // source
-	//SVoxImg<SWorkImg<realnum>>& src2 = m_phasefield.m_distance[(i+1)%2]; // source
-	double* aux2_buffer = m_smoothaux2.GetBufferAsDouble();
-	double* aux_buffer = m_smoothaux.GetBufferAsDouble();
-	//SVoxImg<SWorkImg<realnum>> &out = m_phasefield.m_smoothdist[j]; // output
-	
-	int* smstat_buffer = m_smoothstate.GetBufferAsInt32();
-
-	vector<unsigned> size = src1.GetSize();
-	int xs = size[0], ys = size[1], zs = size[2];
-
-	double* src1_buffer = src1.GetBufferAsDouble();
-	double* src2_buffer = src2.GetBufferAsDouble();
-	double* out_buffer = out.GetBufferAsDouble();
-
-	#pragma omp parallel for SMOOTH_MAP_SCHEDULE
-	/*for (int zz = 0; zz < zs; ++zz) {
-		for (int yy = 0; yy < ys; ++yy) {
-			for (int xx = 0; xx < xs; ++xx) {*/
-	for (int zyx = 0; zyx < zs * ys * xs; zyx++) {
-		int zz = zyx / (ys * xs);
-		{
-			int yy = (zyx / xs) % ys;
-			{
-				int xx = zyx % xs;
-				int smst = smstat_buffer[xx+xs*(yy+ys*zz)];
-				if (smst > 0) continue;
-				smstat_buffer[xx + xs * (yy + ys * zz)] = -2;
-				if (src1_buffer[xx + xs * (yy + ys * zz)] < 0 && src2_buffer[xx + xs * (yy + ys * zz)] < 0) {
-					aux_buffer[xx + xs * (yy + ys * zz)] = src1_buffer[xx + xs * (yy + ys * zz)];
-					continue;
-				}
-				int xm(xx-1); if (xm == -1) xm = 1;
-				int xp(xx+1); if (xp == xs) xp = xs-2;
-				realnum s  = src1_buffer[xx + xs * (yy + ys * zz)] >= 0 ? src1_buffer[xx + xs * (yy + ys * zz)] : src2_buffer[xx + xs * (yy + ys * zz)];
-				int w = 0;
-				realnum comp = src1_buffer[xp + xs * (yy + ys * zz)] >= 0 ? src1_buffer[xp + xs * (yy + ys * zz)] : src2_buffer[xp + xs * (yy + ys * zz)];
-				if (comp >= 0) { s += comp; ++w; }
-				comp = src1_buffer[xm + xs * (yy + ys * zz)] >= 0 ? src1_buffer[xm + xs * (yy + ys * zz)] : src2_buffer[xm + xs * (yy + ys * zz)];
-				if (comp >= 0) { s += comp; ++w; }
-				if (!w) aux_buffer[xx + xs * (yy + ys * zz)] = s;
-				else {
-					s += src1_buffer[xx + xs * (yy + ys * zz)] >= 0 ? src1_buffer[xx + xs * (yy + ys * zz)] : src2_buffer[xx + xs * (yy + ys * zz)];
-					if (w == 1) aux_buffer[xx + xs * (yy + ys * zz)] = (1.0/3.0)*s;
-					else {
-						aux_buffer[xx + xs * (yy + ys * zz)] = 0.25*s;
-						++smstat_buffer[xx + xs * (yy + ys * zz)]; //
-					}
-				}
-			}
-		}
-	}
-	#pragma omp parallel for SMOOTH_MAP_SCHEDULE
-	/*for (int zz = 0; zz < zs; ++zz) {
-		for (int yy = 0; yy < ys; ++yy) {
-			for (int xx = 0; xx < xs; ++xx) {*/
-	for (int zyx = 0; zyx < zs * ys * xs; zyx++) {
-		int zz = zyx / (ys * xs);
-		{
-			int yy = (zyx / xs) % ys;
-			{
-				int xx = zyx % xs;
-				int ym(yy - 1); if (ym == -1) ym = 1;
-				int yp(yy + 1); if (yp == ys) yp = ys - 2;
-				int smst = smstat_buffer[xx + xs * (yy + ys * zz)];
-				if (smst > 0) continue; 
-				if (aux_buffer[xx + xs * (yy + ys * zz)] < 0) {
-					aux2_buffer[xx + xs * (yy + ys * zz)] = aux_buffer[xx + xs * (yy + ys * zz)];
-					continue;
-				}
-				realnum s  = aux_buffer[xx + xs * (yy + ys * zz)]; int w = 0;
-				realnum comp = aux_buffer[xx + xs * (yp + ys * zz)];
-				if (comp >= 0) { s += comp; ++w; }
-				comp = aux_buffer[xx + xs * (ym + ys * zz)];
-				if (comp >= 0) { s += comp; ++w; }
-				if (!w) aux2_buffer[xx + xs * (yy + ys * zz)] = s;
-				else {
-					s += aux_buffer[xx + xs * (yy + ys * zz)];
-					if (w == 1) aux2_buffer[xx + xs * (yy + ys * zz)] = (1.0/3.0)*s;
-					else {
-						aux2_buffer[xx + xs * (yy + ys * zz)] = 0.25*s;
-						++smstat_buffer[xx + xs * (yy + ys * zz)]; //
-					}
-				}
-			}
-		}
-	}
-	#pragma omp parallel for SMOOTH_MAP_SCHEDULE
-	/*for (int zz = 0; zz < zs; ++zz) {
-		for (int yy = 0; yy < ys; ++yy) {
-			for (int xx = 0; xx < xs; ++xx) {*/
-	for (int zyx = 0; zyx < zs * ys * xs; zyx++) {
-		int zz = zyx / (ys * xs);
-		{
-			int yy = (zyx / xs) % ys;
-			{
-				int xx = zyx % xs;
-				int zm(zz - 1); if (zm == -1) zm = 1;
-				int zp(zz + 1); if (zp == zs) zp = zs - 2;
-				int smst = smstat_buffer[xx + xs * (yy + ys * zz)];
-				if (smst > 0) continue; 
-				if (aux2_buffer[xx + xs * (yy + ys * zz)] < 0) {
-					out_buffer[xx + xs * (yy + ys * zz)] = aux2_buffer[xx + xs * (yy + ys * zz)];
-					continue;
-				}
-				realnum s  = aux2_buffer[xx + xs * (yy + ys * zz)]; int w = 0;
-				realnum comp = aux2_buffer[xx + xs * (yy + ys * zp)];
-				if (comp >= 0) { s += comp; ++w; }
-				comp = aux2_buffer[xx + xs * (yy + ys * zm)];
-				if (comp >= 0) { s += comp; ++w; }
-				if (!w) out_buffer[xx + xs * (yy + ys * zz)] = s;
-				else {
-					s += aux2_buffer[xx + xs * (yy + ys * zz)];
-					if (w == 1) out_buffer[xx + xs * (yy + ys * zz)] = (1.0/3.0)*s;
-					else {
-						out_buffer[xx + xs * (yy + ys * zz)] = 0.25*s;
-						++smstat_buffer[xx + xs * (yy + ys * zz)]; //
-					}
-				}
-			}
+	for (int ii = 0; ii < 2; ii++) {
+		for (auto it = phasefield.active_set[ii].begin(); it != phasefield.active_set[ii].end(); it++) {
+			auto [xx, yy, zz] = representation_to_point<double>(*it);
+			vector<double> pos({ xx, yy, zz });
+			pos = phasefield.m_data.TransformContinuousIndexToPhysicalPoint(pos);
+			pos = m_sample_image.TransformPhysicalPointToContinuousIndex(pos);
+#ifdef USE_VECTOR_AS_SET
+			active_set[ii].push_back(point_to_representation(pos[0], pos[1], pos[2]));
+#else
+			active_set[ii].insert(point_to_representation(pos[0], pos[1], pos[2]));
+#endif
 		}
 	}
 }
 
-//-------------------------------------------------------------------------------------------------
-
-void CPhaseContainer::CalculateFundQuant(int i, int test)
-{
-	_PROFILING;
-	int j = 0;
-	// int j = i;
-	int* thstat_buffer = m_thickstate.GetBufferAsInt32();
-	double* Sum_buffer = m_Sumcurvature.GetBufferAsDouble();
-	sitk::Image& distance = m_distance[i];
-	double* distance_buffer = distance.GetBufferAsDouble(); // STAYS
-	//unsigned int* connectivity_buffer = m_distance_connectivity.GetBufferAsUInt32();
-	double* unx_buffer = unx.GetBufferAsDouble();
-	double* uny_buffer = uny.GetBufferAsDouble();
-	double* unz_buffer = unz.GetBufferAsDouble();
-	//SmoothMap(m_distance[i], m_distance[(i + 1) % 2], distance); // m_distance[i];
-	int* smstat_buffer = m_smoothstate.GetBufferAsInt32();
-	vector<unsigned> size = m_smoothdist.GetSize();
-	int xs = size[0], ys = size[1], zs = size[2];
-
-	////////////////////////////////////////////////////////////////////////////////
-	// curvature update
-	////////////////////////////////////////////////////////////////////////////////
-	static int nsh; nsh = 0;
-	//int ign(0), ian(0);
-
-	#pragma omp parallel for CALCULATE_FUND_QUANT_SCHEDULE
-	/*for (int zz = 0; zz < zs; ++zz) {
-		for (int yy = 0; yy < ys; ++yy) {
-			for (int xx = 0; xx < xs; ++xx) {*/
-	for (int zyx = 0; zyx < zs * ys * xs; zyx++) {
-		int zz = zyx / (ys * xs);
-		{
-			int yy = (zyx / xs) % ys;
-			{
-				int xx = zyx % xs;
-				int zm(zz - 1); if (zm == -1) zm = 1;
-				int zp(zz + 1); if (zp == zs) zp = zs - 2;
-				int yp(yy + 1); if (yp == ys) yp = ys - 2;
-				int ym(yy - 1); if (ym == -1) ym = 1; 
-				int xp(xx+1); if (xp == xs) xp = xs-2;
-				int xm(xx-1); if (xm == -1) xm = 1;
-
-				if (thstat_buffer[xx + xs * (yy + ys * zz)] == 2) continue;
-
-				if (distance_buffer[xx + xs * (yy + ys * zz)] >= 0
-				 &&	distance_buffer[xx + xs * (yp + ys * zz)] >= 0 && distance_buffer[xx + xs * (ym + ys * zz)] >= 0
-				 && distance_buffer[xp + xs * (yy + ys * zz)] >= 0 && distance_buffer[xm + xs * (yy + ys * zz)] >= 0
-				 && distance_buffer[xx + xs * (yy + ys * zp)] >= 0 && distance_buffer[xx + xs * (yy + ys * zm)] >= 0 
-
-				 ) {
-					// calculating the gradients
-					realnum&& gxp = (distance_buffer[xp + xs * (yy + ys * zz)] -distance_buffer[xx + xs * (yy + ys * zz)]);
-					realnum&& gyp = (distance_buffer[xx + xs * (yp + ys * zz)] -distance_buffer[xx + xs * (yy + ys * zz)]);
-					realnum&& gzp = (distance_buffer[xx + xs * (yy + ys * zp)] -distance_buffer[xx + xs * (yy + ys * zz)]);
-					realnum&& gxm = (distance_buffer[xx + xs * (yy + ys * zz)] -distance_buffer[xm + xs * (yy + ys * zz)]);
-					realnum&& gym = (distance_buffer[xx + xs * (yy + ys * zz)] -distance_buffer[xx + xs * (ym + ys * zz)]);
-					realnum&& gzm = (distance_buffer[xx + xs * (yy + ys * zz)] -distance_buffer[xx + xs * (yy + ys * zm)]);
-
-					realnum gx = 0.5*(gxp+gxm);
-					realnum gy = 0.5*(gyp+gym);
-					realnum gz = 0.5*(gzp+gzm);
-					
-					
-					realnum&& ig2 = 1.0/(gx*gx+gy*gy+gz*gz+1e-99);
-					realnum&& ig = sqrt(ig2);
-					gx *= ig; gy *= ig; gz *= ig; // unit here
-					unx_buffer[xx + xs * (yy + ys * zz)] = gx;
-					uny_buffer[xx + xs * (yy + ys * zz)] = gy;
-					unz_buffer[xx + xs * (yy + ys * zz)] = gz;
-
-					thstat_buffer[xx + xs * (yy + ys * zz)] = 2; // calculated
-
-
-				}
-
-			}
-		}
-	}
-
-
-
-	//SmoothMap(Gau,i); // Gauss
-	//SmoothMap(Sum,i); // Sum
-
-	//SmoothMap(thick,i); // thickness
-
-
-}
 
 bool g_modeswitch = false;
+int current_iteration = 0;
 
-realnum CPhaseContainer::UpdateVelo(int i, bool use_correction) {
+void CPhaseContainer::UpdateCurvature(int i) {
+	static int n_threads = omp_get_max_threads();
+	sitk::Image& field = m_field[i];
+	auto& act_set = active_set[i];
+	const vector<unsigned>& size = m_field[i].GetSize();
+	int xs = size[0], ys = size[1], zs = size[2]; 
+	sitk::Image& temp_sdist = FMSigned::build_for_neighbors(i, field, 2, 1, act_set);
+	double* sdist_buffer = temp_sdist.GetBufferAsDouble();
+	double* curvature_buffer = m_curvature[i].GetBufferAsDouble();
+	memset(curvature_buffer, 0, xs * ys * zs * sizeof(double));
+#pragma omp parallel for num_threads(n_threads/2)
+#ifdef USE_VECTOR_AS_SET
+	for (int i = 0; i < act_set.size(); i++)
+	{
+		{
+			POINT3D pn = act_set[i];
+#else
+	for (int b = 0; b < act_set.bucket_count(); b++)
+	{
+		for (auto bi = act_set.begin(b); bi != act_set.end(b); bi++) {
+			POINT3D pn = *bi;
+#endif
+			{
+
+				auto [xx, yy, zz] = representation_to_point<int>(pn);
+				if (zz > 0 && zz < zs - 1)
+				{
+					if (yy > 0 && yy < ys - 1)
+					{
+						if (xx > 0 && xx < xs - 1)
+							//for (int zz = 1; zz < zs - 1; ++zz) {
+							//	for (int yy = 1; yy < ys - 1; ++yy) {
+							//		for (int xx = 1; xx < xs - 1; ++xx) {
+						{
+							int zp = zz + 1, zm = zz - 1;
+							int yp = yy + 1, ym = yy - 1;
+							int xp = xx + 1, xm = xx - 1;
+
+
+							realnum sumcur =
+								BUF_IDX(sdist_buffer, xs, ys, zs, xp, yy, zz) +
+								BUF_IDX(sdist_buffer, xs, ys, zs, xm, yy, zz) +
+								BUF_IDX(sdist_buffer, xs, ys, zs, xx, yp, zz) +
+								BUF_IDX(sdist_buffer, xs, ys, zs, xx, ym, zz) +
+								BUF_IDX(sdist_buffer, xs, ys, zs, xx, yy, zp) +
+								BUF_IDX(sdist_buffer, xs, ys, zs, xx, yy, zm) -
+								6 * BUF_IDX(sdist_buffer, xs, ys, zs, xx, yy, zz);
+							//if (sumcur < -2) sumcur == -2;
+							BUF_IDX(curvature_buffer, xs, ys, zs, xx, yy, zz) = sumcur;
+						}
+					} 
+				} 
+			}
+		} 
+	}
+}
+
+realnum CPhaseContainer::GetMinS(int i) {
+
+	static int n_threads = omp_get_max_threads();
+	sitk::Image& field = m_field[i];
+	auto& act_set = active_set[i];
+	//int n_top = 100;
+	int n_top = act_set.size();
+	vector<double> topSs;
+	topSs.reserve(n_top + 1);
+	double* field_buffer = field.GetBufferAsDouble();
+	double* data_buffer = m_data.GetBufferAsDouble();
+	double* curvature_buffer = m_curvature[i].GetBufferAsDouble();
+	const vector<unsigned>& size = m_field[i].GetSize();
+	int xs = size[0], ys = size[1], zs = size[2];
+	int n_outliers(0);
+	realnum minS(DBL_MAX);
+	if (act_set.size() == 0)
+		return minS;
+	vector<vector<double>> heaps(n_threads / 2);
+
+#pragma omp parallel num_threads(n_threads/2)
+	{
+		//double temp_minS(DBL_MAX);
+		vector<double>& temp = heaps[omp_get_thread_num()];
+		temp.reserve(act_set.size()/(n_threads/2));
+#pragma omp for reduction(+: n_outliers)
+#ifdef USE_VECTOR_AS_SET
+		for (int i = 0; i < act_set.size(); i++)
+		{
+			{
+				POINT3D pn = act_set[i];
+#else
+		for (int b = 0; b < act_set.bucket_count(); b++)
+		{
+			for (auto bi = act_set.begin(b); bi != act_set.end(b); bi++) {
+				POINT3D pn = *bi;
+#endif
+				{
+
+					auto [xx, yy, zz] = representation_to_point<int>(pn);
+					if (zz > 0 && zz < zs - 1)
+					{
+						if (yy > 0 && yy < ys - 1)
+						{
+							if (xx > 0 && xx < xs - 1)
+								//for (int zz = 1; zz < zs - 1; ++zz) {
+								//	for (int yy = 1; yy < ys - 1; ++yy) {
+								//		for (int xx = 1; xx < xs - 1; ++xx) {
+							{
+								int zp = zz + 1, zm = zz - 1;
+								int yp = yy + 1, ym = yy - 1;
+								int xp = xx + 1, xm = xx - 1;
+
+								realnum d0 = data_buffer[xx + xs * (yy + ys * zz)];
+								if (d0 < 1e-33) d0 = 1e-33;
+								double sumcur = BUF_IDX(curvature_buffer, xs, ys, zs, xx, yy, zz);
+								realnum&& xn = field_buffer[xp + xs * (yy + ys * zz)] - field_buffer[xm + xs * (yy + ys * zz)];
+								realnum&& yn = field_buffer[xx + xs * (yp + ys * zz)] - field_buffer[xx + xs * (ym + ys * zz)];
+								realnum&& zn = field_buffer[xx + xs * (yy + ys * zp)] - field_buffer[xx + xs * (yy + ys * zm)];
+								realnum gradlen = sqrt(xn * xn + yn * yn + zn * zn + 1e-99);
+
+								if (is_outlier(sumcur, 2/gradlen))
+								{
+									n_outliers++;
+								}
+								realnum S = calculate_S(sumcur, 1 / d0, 2/gradlen);
+								temp.push_back(S);
+								//loop body
+							}
+						} //for xx
+					} // for yy
+				}
+			} // for zz
+		}
+		std::sort(temp.begin(), temp.end());
+	}
+	vector<int> indices(heaps.size());
+	for (int i = 0; i < n_top; i++) {
+		double next_elem(DBL_MAX);
+		int heap_idx;
+		for (int h = 0; h < heaps.size(); h++) {
+			int idx = indices[h];
+			if (idx >= heaps[h].size()) continue;
+			double top = heaps[h][idx];
+			if (top < next_elem) {
+				heap_idx = h;
+				next_elem = top;
+			}
+		}
+		if (next_elem == DBL_MAX) break;
+		topSs.push_back(next_elem);
+		indices[heap_idx]++;
+	}
+	/*minS = 0;
+	std::for_each(topSs.begin(), topSs.end(), [&minS](double val) {minS += val; });
+	minS /= topSs.size();*/
+	/*if (n_outliers == 0)
+		minS = topSs[0];
+	else
+		minS = topSs[n_outliers*2];*/
+	size_t idx = min((size_t)100, topSs.size()-1);
+	minS = topSs[idx];
+	return minS;
+}
+realnum CPhaseContainer::UpdateVelo(int i, bool use_correction, double S) {
 	static int n_threads = omp_get_max_threads();
 	//_PROFILING;
 	sitk::Image& field = m_field[i];
@@ -621,9 +586,9 @@ realnum CPhaseContainer::UpdateVelo(int i, bool use_correction) {
 	// evolution logic
 	////////////////////////////////////////////////////////////////////
 	auto& act_set = active_set[i];
-	sitk::Image& temp_sdist = FMSigned::build_for_neighbors(i, field, 2, 1, act_set);
-	double* sdist_buffer = temp_sdist.GetBufferAsDouble();
-	realnum maxv(0);
+	
+	//realnum maxv(0);
+	double* curvature_buffer = m_curvature[i].GetBufferAsDouble();
 
 	// Inhomogeneous
 	// Calculate the velocity at every point (velo[zz][yy][xx]), and the maximum velocity (maxv)
@@ -635,136 +600,145 @@ realnum CPhaseContainer::UpdateVelo(int i, bool use_correction) {
 #endif
 	int c = 0;
 
-#pragma omp parallel for num_threads(n_threads/2)
-#ifdef USE_VECTOR_AS_SET
-	for(int i=0; i<act_set.size(); i++)
+	double maxv(0);
+
+#pragma omp parallel num_threads(n_threads/2)
 	{
+		double temp_maxv(0);
+#pragma omp for
+#ifdef USE_VECTOR_AS_SET
+		for (int i = 0; i < act_set.size(); i++)
 		{
-			POINT3D pn = act_set[i];
-#else
-	for(int b=0; b<act_set.bucket_count(); b++)
-	{
-		for (auto bi = act_set.begin(b); bi != act_set.end(b); bi++) {
-			POINT3D pn = *bi;
-#endif
 			{
-				
-				auto [xx, yy, zz] = representation_to_point<int>(pn);
-				if (zz > 0 && zz < zs - 1)
+				POINT3D pn = act_set[i];
+#else
+		for (int b = 0; b < act_set.bucket_count(); b++)
+		{
+			for (auto bi = act_set.begin(b); bi != act_set.end(b); bi++) {
+				POINT3D pn = *bi;
+#endif
 				{
-					if (yy > 0 && yy < ys - 1)
+
+					auto [xx, yy, zz] = representation_to_point<int>(pn);
+					if (zz > 0 && zz < zs - 1)
 					{
-						if (xx > 0 && xx < xs - 1)
-							//for (int zz = 1; zz < zs - 1; ++zz) {
-							//	for (int yy = 1; yy < ys - 1; ++yy) {
-							//		for (int xx = 1; xx < xs - 1; ++xx) {
+						if (yy > 0 && yy < ys - 1)
 						{
-							int zp = zz + 1, zm = zz - 1;
-							int yp = yy + 1, ym = yy - 1;
-							int xp = xx + 1, xm = xx - 1;
+							if (xx > 0 && xx < xs - 1)
+								//for (int zz = 1; zz < zs - 1; ++zz) {
+								//	for (int yy = 1; yy < ys - 1; ++yy) {
+								//		for (int xx = 1; xx < xs - 1; ++xx) {
+							{
+								int zp = zz + 1, zm = zz - 1;
+								int yp = yy + 1, ym = yy - 1;
+								int xp = xx + 1, xm = xx - 1;
 
-							realnum &&xn = field_buffer[xp + xs * (yy + ys * zz)] - field_buffer[xm + xs * (yy + ys * zz)];
-							realnum &&yn = field_buffer[xx + xs * (yp + ys * zz)] - field_buffer[xx + xs * (ym + ys * zz)];
-							realnum &&zn = field_buffer[xx + xs * (yy + ys * zp)] - field_buffer[xx + xs * (yy + ys * zm)];
-							realnum gradlen = sqrt(xn * xn + yn * yn + zn * zn + 1e-99);
+								realnum&& xn = field_buffer[xp + xs * (yy + ys * zz)] - field_buffer[xm + xs * (yy + ys * zz)];
+								realnum&& yn = field_buffer[xx + xs * (yp + ys * zz)] - field_buffer[xx + xs * (ym + ys * zz)];
+								realnum&& zn = field_buffer[xx + xs * (yy + ys * zp)] - field_buffer[xx + xs * (yy + ys * zm)];
+								realnum gradlen = sqrt(xn * xn + yn * yn + zn * zn + 1e-99);
 
-							realnum sumcur = 
-								BUF_IDX(sdist_buffer, xs, ys, zs, xp, yy, zz) +
-								BUF_IDX(sdist_buffer, xs, ys, zs, xm, yy, zz) +
-								BUF_IDX(sdist_buffer, xs, ys, zs, xx, yp, zz) +
-								BUF_IDX(sdist_buffer, xs, ys, zs, xx, ym, zz) +
-								BUF_IDX(sdist_buffer, xs, ys, zs, xx, yy, zp) +
-								BUF_IDX(sdist_buffer, xs, ys, zs, xx, yy, zm) -
-								6 * BUF_IDX(sdist_buffer, xs, ys, zs, xx, yy, zz);
+								realnum sumcur = BUF_IDX(curvature_buffer, xs, ys, zs, xx, yy, zz);
 
+								realnum eikon;
 
-							realnum eikon;
+								realnum d0 = data_buffer[xx + xs * (yy + ys * zz)];
+								if (d0 < 1e-33) d0 = 1e-33;
 
-							realnum d0 = data_buffer[xx + xs * (yy + ys * zz)];
-							if (d0 < 1e-33) d0 = 1e-33;
-
-							realnum squar = -1.0;
-							realnum discr = 1 + 4 * sumcur * d0 * 1;// *gradlen;
-
-							if (abs(sumcur) > 1e-33) {
-								squar = -1.0 + sqrt(discr);
-								squar /= 2 * sumcur;
-							}
-							else {
-								squar = d0;
-							}
-
-							if (use_correction && squar > 0)
-								eikon = squar;
-
-							else
-								eikon = data_buffer[xx + xs * (yy + ys * zz)];
-
-							eikon *= gradlen; // normalize
-							if (eikon < 1e-11) eikon = 1e-11;
+								eikon = calculate_speed(sumcur, 1 / d0, S);
+								eikon *= gradlen; // normalize
+								if (eikon < 1e-11) eikon = 1e-11;
 
 #ifdef USE_VECTOR_AS_SET
-							changed_velo[i] = make_pair(pn, eikon);
+								changed_velo[i] = make_pair(pn, eikon);
 #else
 #pragma omp critical
-							changed_velo[pn] = eikon;
+								changed_velo[pn] = eikon;
 #endif
-
-							if (eikon > maxv) maxv = eikon;
-							//loop body
-						}
-					} //for xx
-				} // for yy
-			}
-		} // for zz
+								if (eikon > temp_maxv) temp_maxv = eikon;
+								//loop body
+							}
+						} //for xx
+					} // for yy
+				}
+			} // for zz
+		}
+#pragma omp critical (maxS_selection)
+		{
+			if (temp_maxv > maxv) maxv = temp_maxv;
+		}
 	}
-
-
-
-	////////////////////////////////////////////////////////////////////
-	// conditioning (speed limitation)
-	////////////////////////////////////////////////////////////////////
+#ifdef DEBUG_CURVATURE
+	{
+		if (current_iteration % 50 == 0) {
+			save_image("Y:/BIOMAG/shortest path/curv_debug/dbg_" + std::to_string(i) + "_" + std::to_string(current_iteration) + "_curv.tif", m_curvature[i]);
+			save_image("Y:/BIOMAG/shortest path/curv_debug/dbg_" + std::to_string(i) + "_" + std::to_string(current_iteration) + "_dist.tif", m_distance[i]);
+			save_image("Y:/BIOMAG/shortest path/curv_debug/dbg_" + std::to_string(i) + "_" + std::to_string(current_iteration) + "_field.tif", field);
+			//save_image("Y:/BIOMAG/shortest path/curv_debug/dbg_" + std::to_string(i) + "_" + std::to_string(current_iteration) + "_sdist.tif", temp_sdist);
+		}
+	}
+#endif
 	return maxv;
 }
-void CPhaseContainer::UpdateField(int idx, realnum maxv) {
+void CPhaseContainer::UpdateField(int idx, double maxv) {
 	static int n_threads = omp_get_max_threads();
 	_PROFILING;
-	//m_field[i] = sitk::Minimum(m_field[i] + m_velo[i] * maxv, 1.25);
 	double* field_buffer = m_field[idx].GetBufferAsDouble();
 	vector<unsigned> size = m_field[idx].GetSize();
 	int xs = size[0], ys = size[1], zs = size[2]; 
 	auto& changed_velo = m_changed_velo[idx];
 	auto& act_set = active_set[idx];
-#pragma omp parallel for default(none) shared(changed_velo, act_set) num_threads(n_threads/2)
+#ifdef DEBUG_CURVATURE
+	uint8_t* new_update_buffer = m_new_update[idx].GetBufferAsUInt8();
+	memset(new_update_buffer, 0, xs * ys * zs);
+	double* distance_buffer = m_distance[idx].GetBufferAsDouble();
+#endif
+#pragma omp parallel num_threads(n_threads/2)
+	{
+#pragma omp for
 #ifdef USE_VECTOR_AS_SET
-	for (int i = 0; i < changed_velo.size(); i++) {
-		
+		for (int i = 0; i < changed_velo.size(); i++) {
+
 			POINT3D pn = changed_velo[i].first;
 			double velo = changed_velo[i].second;
 #else
-	for (int b = 0; b < changed_velo.bucket_count(); b++)
-		for (auto bi = changed_velo.begin(b); bi != changed_velo.end(b); bi++) {
-			POINT3D pn = bi->first;
-			double velo = bi->second;
+		for (int b = 0; b < changed_velo.bucket_count(); b++)
+			for (auto bi = changed_velo.begin(b); bi != changed_velo.end(b); bi++) {
+				POINT3D pn = bi->first;
+				double velo = bi->second;
 #endif
-			
-			auto [xx, yy, zz] = representation_to_point<int>(pn);
-			BUF_IDX(field_buffer, xs, ys, zs, xx, yy, zz) += velo*maxv;
-			if (BUF_IDX(field_buffer, xs, ys, zs, xx, yy, zz) >= MAX_FIELD_VAL) {
+
+				auto [xx, yy, zz] = representation_to_point<int>(pn);
+#ifdef DEBUG_CURVATURE
+				if (BUF_IDX(distance_buffer, xs, ys, zs, xx, yy, zz) < -0.5)
+					BUF_IDX(new_update_buffer, xs, ys, zs, xx, yy, zz) = 1;
+#endif
+				BUF_IDX(field_buffer, xs, ys, zs, xx, yy, zz) += velo;
+				if (BUF_IDX(field_buffer, xs, ys, zs, xx, yy, zz) >= MAX_FIELD_VAL) {
 
 #ifdef USE_VECTOR_AS_SET
-				act_set[i] = REMOVABLE_POINT;
+					act_set[i] = REMOVABLE_POINT;
 #else
 #pragma omp critical
-				act_set.erase(pn);
+					act_set.erase(pn);
 #endif
-				if (BUF_IDX(field_buffer, xs, ys, zs, xx, yy, zz) >= 1.25)
-					BUF_IDX(field_buffer, xs, ys, zs, xx, yy, zz) = 1.25;
-			}
+					if (BUF_IDX(field_buffer, xs, ys, zs, xx, yy, zz) >= 1.25)
+						BUF_IDX(field_buffer, xs, ys, zs, xx, yy, zz) = 1.25;
+				}
 		}
-	return;
+	}
+#ifdef DEBUG_CURVATURE
+#pragma omp critical
+	{
+		if (current_iteration % 50 == 0)
+			save_image("Y:/BIOMAG/shortest path/curv_debug/dbg_" + std::to_string(idx) + "_" + std::to_string(current_iteration) + "_updated_pos.tif", m_new_update[idx]);
+		if (idx)
+			current_iteration++;
+	}
+#endif
 }
 void CPhaseContainer::UpdateDistance(int idx, realnum current_distance) {
+
 	static int n_threads = omp_get_max_threads();
 	_PROFILING;
 	CVec3 origin_point = !idx ? m_start_point : m_end_point;
@@ -814,7 +788,9 @@ void CPhaseContainer::UpdateDistance(int idx, realnum current_distance) {
 									for (int i = -1; i <= 1; i++) {
 										if ((i + 1) % 2 + (j + 1) % 2 + (k + 1) % 2 == 2) {
 											if (BUF_IDX(field_buffer, xs, ys, zs, xx + i, yy + j, zz + k) < MAX_FIELD_VAL
-												&& (plane_center.x < -0.5 || sgn(plane_normal.x * origin_point.x + plane_normal.y * origin_point.y + plane_normal.z * origin_point.z + plane_offset) * (plane_normal.x * xx + i + plane_normal.y * yy + j + plane_normal.z * zz + k + plane_offset) + MAX_DIST_FROM_PLANE > 0)) {
+												&& (plane_center.x < -0.5 || sgn(plane_normal.x * origin_point.x + plane_normal.y * origin_point.y + plane_normal.z * origin_point.z + plane_offset) * (plane_normal.x * xx + i + plane_normal.y * yy + j + plane_normal.z * zz + k + plane_offset) + MAX_DIST_FROM_PLANE > 0)
+												&& xx+i > 0 && xx+i < xs-1 && yy + j > 0 && yy + j < ys - 1 && zz + k > 0 && zz + k < zs - 1
+												) {
 
 #ifdef USE_VECTOR_AS_SET
 												temp.push_back(point_to_representation(xx + i, yy + j, zz + k));
@@ -840,17 +816,20 @@ void CPhaseContainer::UpdateDistance(int idx, realnum current_distance) {
 		}
 	}
 
+
 	changed_velo.clear();
 #ifdef USE_VECTOR_AS_SET
 	sort(act_set.begin(), act_set.end());
 	act_set.erase(unique(act_set.begin(), act_set.end()), act_set.end());
-	if (act_set.back() == REMOVABLE_POINT)
+	if (!act_set.empty() && act_set.back() == REMOVABLE_POINT)
 		act_set.pop_back();
 #endif
 }
 
 bool CPhaseContainer::IsDone() {
 	_PROFILING;
+	if (active_set[0].empty() && active_set[1].empty())
+		return true;
 	vector<unsigned> size = m_field[0].GetSize();
 	int xs = size[0], ys = size[1], zs = size[2];
 	double* dist0_buffer = m_distance[0].GetBufferAsDouble();
@@ -881,17 +860,25 @@ void CPhaseContainer::Iterate(bool use_correction)
 			
 		}
 	vector<double> maxvs(2);
+	vector<double> minSs(2);
 	_BLOCK_PROFILING;
 #pragma omp parallel for num_threads(2)
 	for (int i = 0; i < 2; i++) {
-		maxvs[i] = UpdateVelo(i, use_correction);
+		UpdateCurvature(i);
+		minSs[i] = GetMinS(i);
 	}
 	_UNBLOCK_PROFILING;
-	realnum maxv = maxvs[0] > maxvs[1]? maxvs[0] : maxvs[1];
-	if (maxv < 1e-11) maxv = 1e-11;
-
-	realnum mdatspedmax = 0.5 * 4; //*2 set max speed
-	maxv = mdatspedmax / maxv;
+	realnum minS = minSs[0] < minSs[1] ? minSs[0] : minSs[1];
+	if (minS < 1e-11) minS = 1e-11;
+	_BLOCK_PROFILING;
+#pragma omp parallel for num_threads(2)
+	for (int i = 0; i < 2; i++) {
+		maxvs[i] = UpdateVelo(i, use_correction, minS);
+	}
+	_UNBLOCK_PROFILING;
+	double maxv = maxvs[0] > maxvs[1] ? maxvs[0] : maxvs[1];
+	realnum mdatspedmax = 2; //*2 set max speed
+	maxv = mdatspedmax/maxv;
 	m_currentdistance += maxv;
 	//m_currentdistance += 1;
 
@@ -952,7 +939,7 @@ void CPlanePhaseField::GetDistancemean(SVoxImg<SWorkImg<realnum>>& distance1, SV
 	_PROFILING;
 	//TODO: instead of searching for the selected x slice, locate the meeting surface of the two processes, and use that
 	int xs = distance1.xs, ys = distance1.ys, zs = distance1.zs;
-	m_nall = m_npos = 0;
+	m_nall = m_npos = m_since_last_update = 0;
 	m_bInited = false;
 	if (!xslice) return;
 
@@ -981,7 +968,7 @@ void CPlanePhaseField::GetDistancemean(SVoxImg<SWorkImg<realnum>>& distance1, SV
 	}
 
 	m_nect = 100;
-	m_nfct = 2000;
+	m_nfct = 20000;
 	m_bInited = true;
 
 }
@@ -991,7 +978,7 @@ void CPlanePhaseField::GetDistancemean(sitk::Image& distance, int xslice)
 	vector<unsigned> size = distance.GetSize();
 	int xs = size[0], ys = size[1], zs = size[2];
 	double* distance_buffer = distance.GetBufferAsDouble();
-	m_nall = m_npos = 0;
+	m_nall = m_npos = m_since_last_update = 0;
 	m_bInited = false;
 	if (!xslice) return;
 
@@ -1026,7 +1013,7 @@ void CPlanePhaseField::GetDistancemean(sitk::Image& distance, int xslice)
 	}
 
 	m_nect = 100;
-	m_nfct = 2000;
+	m_nfct = 20000;
 	m_bInited = true;
 
 }
@@ -1042,34 +1029,52 @@ void CPlanePhaseField::Iterate()
 
 	realnum fac = 1.0f;
 	realnum maxv(0.0f);
-	#pragma omp parallel for
-	for (int yy = 1; yy < ys - 1; ++yy) {
-		for (int xx = 1; xx < xs - 1; ++xx) {
-				realnum fmm = m_field2D[yy][xx];
-				m_velo2D[yy][xx] -= fac * fmm * fmm * fmm;
-				m_velo2D[yy][xx] += fac * fmm;
-				realnum gfx = 0.5f * (m_field2D[yy][xx + 1]- m_field2D[yy][xx - 1]);
-				realnum gfy = 0.5f * (m_field2D[yy + 1][xx] - m_field2D[yy - 1][xx]);
+	#pragma omp parallel
+	{
+		double temp_maxv(0);
+#pragma omp for
+		for (int yx = 0; yx < xs * ys; yx++) {
+			int yy = yx / xs;
+			if (yy > 0 && yy < ys - 1) {
+				int xx = yx % xs;
+				if (xx > 0 && xx < xs - 1) {
+					realnum fmm = m_field2D[yy][xx];
+					m_velo2D[yy][xx] -= fac * fmm * fmm * fmm;
+					m_velo2D[yy][xx] += fac * fmm;
+					realnum gfx = 0.5f * (m_field2D[yy][xx + 1] - m_field2D[yy][xx - 1]);
+					realnum gfy = 0.5f * (m_field2D[yy + 1][xx] - m_field2D[yy - 1][xx]);
 
-				m_velo2D[yy][xx] += 10.0f * (gfx * m_gx2D[yy][xx] + gfy * m_gy2D[yy][xx]);
-				realnum cv = m_velo2D[yy][xx];
-				if (cv < 0) cv *= -1;
-				if (cv > maxv) maxv = cv;
+					m_velo2D[yy][xx] += 10.0f * (gfx * m_gx2D[yy][xx] + gfy * m_gy2D[yy][xx]);
+					realnum cv = m_velo2D[yy][xx];
+					if (cv < 0)
+						cv *= -1;
+					if (cv > temp_maxv)
+						temp_maxv = cv;
+				}
+			}
 		}
+#pragma omp critical
+		if (temp_maxv > maxv)
+			maxv = temp_maxv;
 	}
 
-	if (maxv > 1e-11f)
-		maxv = 0.025f/maxv;
+	if (maxv > 1e-5f)
+		maxv = 0.025f / maxv;
 	int npos(0);
 
-	#pragma omp parallel for
+	#pragma omp parallel for reduction(+: npos)
 	for (int yy = 1; yy < ys - 1; ++yy) {
 		for (int xx = 1; xx < xs - 1; ++xx) {
 			m_field2D[yy][xx] += m_velo2D[yy][xx]*maxv;
 			if (m_field2D[yy][xx] > 0) ++npos;
 		}
 	}
+	if (npos > m_npos) 
+		m_since_last_update = 0;
+	else if (++m_since_last_update >= 200)
+		m_nect = 0;
 	
+	m_npos = npos;
 	/*--m_nect;
 	if (!m_nect) {
 		realnum relpos = ((realnum)abs(npos - m_npos)) / ((realnum)m_nall);

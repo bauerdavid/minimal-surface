@@ -147,7 +147,7 @@ void FMSigned::iterate() {
 		const vector<int> &offset = NEIGH6_OFFSET[i];
 		int xn = x + offset[0], yn = y + offset[1], zn = z + offset[2];
 		if (xn < 0 || xn >= xs || yn < 0 || yn >= ys || zn < 0 || zn >= zs
-			|| BUF_IDX(m_frozen_buffer, xs, ys, zs, xn, yn, zn) < INF) continue;
+			|| BUF_IDX(m_frozen_buffer, xs, ys, zs, xn, yn, zn)) continue;
 		double dist_n;
 		bool solved = compute_distance({ xn, yn, zn }, dist_n);
 		if (solved)
@@ -159,26 +159,58 @@ void FMSigned::iterate() {
 void FMSigned::calculateForNeighbors() {
 	_PROFILING;
 	auto& v = m_narrow_band_v;
-#pragma omp parallel for
-	for (int i = 0; i < v.size(); i++) {
+	int n = v.size();
+#pragma omp parallel
+	{
+		vector< std::pair<POINT3D, double>> temp;
+#pragma omp for
+		for (int i = 0; i < n; i++) {
+			POINT3D p;
+			double dist;
+			tie(p, dist) = v[i];
+			auto [x, y, z] = representation_to_point<int>(p);
+			//#pragma omp parallel for
+			for (int i = 0; i < 6; i++) {
+				const vector<int>& offset = NEIGH6_OFFSET[i];
+				int xn = x + offset[0], yn = y + offset[1], zn = z + offset[2];
+				if (xn < 0 || xn >= xs || yn < 0 || yn >= ys || zn < 0 || zn >= zs
+					|| BUF_IDX(m_distance_buffer, xs, ys, zs, xn, yn, zn) < INF) continue;
+				double dist_n;
+				bool solved = compute_distance({ xn, yn, zn }, dist_n);
+				if (solved) {
+					BUF_IDX(m_distance_buffer, xs, ys, zs, xn, yn, zn) = dist_n;
+					temp.push_back(make_pair(point_to_representation(xn, yn, zn), dist_n));
+				}
+
+			}
+		}
+#pragma omp critical
+		m_narrow_band_v.insert(m_narrow_band_v.end(), temp.begin(), temp.end());
+	}
+	/*sort(m_narrow_band_v.begin() + n, m_narrow_band_v.end());
+	m_narrow_band_v.erase(unique(m_narrow_band_v.begin()+n, m_narrow_band_v.end()), m_narrow_band_v.end());
+	m_narrow_band = IndexedPriorityQueue<POINT3D_MAP(double), std::greater<double>>(m_narrow_band_v.begin() + n, m_narrow_band_v.end());
+	while (!finished()) {
 		POINT3D p;
 		double dist;
-		tie(p, dist) = v[i];
+		tie(p, dist) = m_narrow_band.top();
 		auto [x, y, z] = representation_to_point<int>(p);
-		//#pragma omp parallel for
+		m_narrow_band.pop();
+		BUF_IDX(m_frozen_buffer, xs, ys, zs, x, y, z) = 1;
+		BUF_IDX(m_distance_buffer, xs, ys, zs, x, y, z) = dist;
 		for (int i = 0; i < 6; i++) {
 			const vector<int>& offset = NEIGH6_OFFSET[i];
 			int xn = x + offset[0], yn = y + offset[1], zn = z + offset[2];
+			POINT3D neighb = point_to_representation(xn, yn, zn);
 			if (xn < 0 || xn >= xs || yn < 0 || yn >= ys || zn < 0 || zn >= zs
-				|| BUF_IDX(m_distance_buffer, xs, ys, zs, xn, yn, zn) < INF) continue;
+				|| BUF_IDX(m_frozen_buffer, xs, ys, zs, xn, yn, zn) || !m_narrow_band.contains(neighb)) continue;
 			double dist_n;
 			bool solved = compute_distance({ xn, yn, zn }, dist_n);
-			if (solved) 
-				BUF_IDX(m_distance_buffer, xs, ys, zs, xn, yn, zn) = dist_n;
-			
+			if (solved && abs(m_narrow_band[neighb]) > abs(dist_n)) {
+				m_narrow_band.changeAtKey(neighb, dist_n);
+			}
 		}
-	}
-	//m_narrow_band_v.clear();
+	}*/
 }
 
 
@@ -193,3 +225,30 @@ void FMSigned::build(int id, sitk::Image& input_map, sitk::Image& output, double
 	output = signedDistMap.m_distance_map * signs;
 }
 
+void FMSigned::smooth_distances() {
+	if(temp.GetSize() != m_distance_map.GetSize())
+		temp = sitk::Image(m_distance_map.GetSize(), m_distance_map.GetPixelID());
+	double* temp_buffer = temp.GetBufferAsDouble();
+	memcpy(temp_buffer, m_distance_buffer, xs * ys * zs * sizeof(double));
+	auto& v = m_narrow_band_v;
+#pragma omp parallel for
+	for (int i = 0; i < v.size(); i++) {
+		POINT3D p;
+		double dist, mean_dist, sum_dist = 0;
+		tie(p, dist) = v[i];
+		int n_neighbors = 0;
+		auto [x, y, z] = representation_to_point<int>(p);
+		for (int i = 0; i < 6; i++) {
+			const vector<int>& offset = NEIGH6_OFFSET[i];
+			int xn = x + offset[0], yn = y + offset[1], zn = z + offset[2];
+			double dist_n;
+			if (xn < 0 || xn >= xs || yn < 0 || yn >= ys || zn < 0 || zn >= zs || (dist_n = BUF_IDX(m_distance_buffer, xs, ys, zs, xn, yn, zn)) >= INF) continue;
+			n_neighbors++;
+			sum_dist += dist_n;
+		}
+		mean_dist = dist*0.5+sum_dist/(2*n_neighbors);
+		BUF_IDX(temp_buffer, xs, ys, zs, x, y, z) = mean_dist;
+	}
+	m_distance_map = temp;
+	m_distance_buffer = m_distance_map.GetBufferAsDouble();
+}

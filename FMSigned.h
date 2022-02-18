@@ -39,6 +39,7 @@ class FMSigned
 	void operator=(FMSigned const&) = delete;
 	FMSigned();
 	sitk::Image m_distance_map;
+	sitk::Image temp;
 	IndexedPriorityQueue<POINT3D_MAP(double), std::greater<double>> m_narrow_band;
 	std::vector<std::pair<POINT3D, double>> m_narrow_band_v;
 	sitk::Image m_frozen;
@@ -169,6 +170,7 @@ class FMSigned
 	bool compute_distance(std::vector<int> p, double& out);
 	void iterate();
 	void calculateForNeighbors();
+	void smooth_distances();
 public:
 	static void build(int id, sitk::Image& input_map, sitk::Image& output, double max_distance=DBL_MAX, double velo=1);
 	template<class RandIt>
@@ -186,12 +188,21 @@ public:
 		output = signedDistMap.m_distance_map * signs;
 	}
 	template <class RandIt>
-	static sitk::Image& build_for_neighbors(int id, sitk::Image& input_map, double max_distance, double velo, RandIt& bound_points) {
+	static sitk::Image& build_for_neighbors(int id, sitk::Image& input_map, double max_distance, double velo, RandIt& bound_points, bool smooth=false) {
 		_PROFILING;
 		FMSigned& signedDistMap = getInstance(id);
 		signedDistMap.initialize_for_neighbors(input_map, bound_points, max_distance, velo);
+#ifdef DEBUG_CURVATURE
+		extern int current_iteration;
+		if (current_iteration % 50 == 0) {
+			save_image("Y:/BIOMAG/shortest path/curv_debug/dbg_" + std::to_string(id) + "_" + std::to_string(current_iteration) + "_init_sdist.tif", signedDistMap.m_distance_map);
+		}
+#endif
 		//save_image("Y:/BIOMAG/shortest path/init_dist.tif", signedDistMap.m_distance_map);
 		signedDistMap.calculateForNeighbors();
+		if (smooth) {
+			signedDistMap.smooth_distances();
+		}
 		//save_image("Y:/BIOMAG/shortest path/out_dist.tif", signedDistMap.m_distance_map);
 		//sitk::Image&& signs = sitk::Cast(sitk::GreaterEqual(input_map, 0), signedDistMap.m_distance_map.GetPixelID()) * (-2) + 1;
 

@@ -15,7 +15,7 @@
 #include <regex>
 #include <unordered_set>
 
-#define PROFILE_FUNCTIONS
+//#define PROFILE_FUNCTIONS
 #ifdef PROFILE_FUNCTIONS
 class profiler {
 	std::chrono::steady_clock::time_point start_time;
@@ -364,7 +364,7 @@ std::pair<IPoi3<double>, IPoi3<double>> best_plane_from_points(const std::vector
 	return std::make_pair(centroid, plane_normal);
 }
 
-void rotate(const std::vector<double> rotation_matrix, const std::vector<double> value, std::vector<double>& dest);
+void rotate(const std::vector<double>& rotation_matrix, const std::vector<double> value, std::vector<double>& dest);
 
 template <typename T> int sgn(T val) {
 	return (int)(T(0) < val) - (int)(val < T(0));

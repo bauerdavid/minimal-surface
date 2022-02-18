@@ -39,7 +39,7 @@ double profiler::get_execution_time() {
 }
 #endif
 
-void rotate(const std::vector<double> rotation_matrix, const std::vector<double> value, std::vector<double>& dest) {
+void rotate(const std::vector<double>& rotation_matrix, const std::vector<double> value, std::vector<double>& dest) {
 	dest.clear();
 	for (int i = 0; i < 3; i++) {
 		double val(0.0);

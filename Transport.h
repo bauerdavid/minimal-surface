@@ -27,11 +27,12 @@ public:
 	*/
 	//SVoxImg<SWorkImg<int>> m_isboundary;
 	sitk::Image m_isboundary;
-private:
-	void TrIterate(int bev);
 	sitk::Image m_gx;
 	sitk::Image m_gy;
 	sitk::Image m_gz;
+private:
+	bool TrIterate(int bev);
+	
 
 
 

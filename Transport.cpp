@@ -69,9 +69,9 @@ void CTransport::TrInit(sitk::Image &distmap, SVoxImg<SWorkImg<realnum>>& inimap
 	m_active = 1;
 }
 
-void CTransport::TrIterate(int bev)
+bool CTransport::TrIterate(int bev)
 {
-
+	bool updated = false;
 	_PROFILING;
 	int targi = bev ? 0 : 1;
 	sitk::Image& trf = m_transportfunction[bev];// m_transportfunction[bev];
@@ -114,12 +114,14 @@ void CTransport::TrIterate(int bev)
 					if (gz < 0) gz *= -1;
 					val = gx * BUF_IDX(trf_buffer, xs, ys, zs, x, yy, zz) + gy * BUF_IDX(trf_buffer, xs, ys, zs, xx, y, zz) + gz * BUF_IDX(trf_buffer, xs, ys, zs, xx, yy, z);
 					val /= gx + gy + gz + alpha;// zero: at points where calculation is needed, 1 read only boundary points
+					if (abs(val - BUF_IDX(trft_buffer, xs, ys, zs, xx, yy, zz)) > 1e-5)
+						updated = true;
 					BUF_IDX(trft_buffer, xs, ys, zs, xx, yy, zz) = val;  // update wherever calculation is needed
 				}
 			}
 		}
 	}
-
+	return updated;
 }
 
 void CTransport::TrControl(int nIter)
@@ -127,8 +129,11 @@ void CTransport::TrControl(int nIter)
 	_PROFILING;
 	if (!m_active) return;
 
-	for (int ii = 0; ii < nIter; ++ii)
-		TrIterate(ii&1);
+	for (int ii = 0; ii < nIter; ++ii) {
+		bool updated = TrIterate(ii & 1);
+		if (!updated)
+			break;
+	}
 }
 
 void CTransport::GetDispSlice(int along, int at, SDisImg& r) // better colorization!
