@@ -3,6 +3,10 @@
 #include "math.h"
 #include <queue>
 #include "Utils.h"
+#include <sitkImageOperators.h>
+
+using namespace std;
+
 CImageOp::CImageOp(void)
 {
 }
@@ -20,43 +24,48 @@ CImageOp::~CImageOp(void)
 
 void CImageOp::GauTest(bool bodd)
 {
-	int xs(m_testimage.xs), ys(m_testimage.ys), zs(m_testimage.zs);
+	vector<unsigned> size = m_testimage.GetSize();
+	int xs(size[0]), ys(size[1]), zs(size[2]);
 
-	SVoxImg<SWorkImg<realnum>> &sou = !bodd ? m_testimage:m_testinput;
-	SVoxImg<SWorkImg<realnum>> &des = !bodd ? m_testinput:m_testimage;
+	sitk::Image &sou = !bodd ? m_testimage:m_testinput;
+	sitk::Image &des = !bodd ? m_testinput:m_testimage;
+	des = sitk::Image(sou.GetSize(), sou.GetPixelID());
+	double* sou_buffer = sou.GetBufferAsDouble();
+	double* des_buffer = des.GetBufferAsDouble();
 #pragma omp parallel for
 	for (int zz = 1; zz < zs-1; ++zz) {
 		for (int yy = 1; yy < ys-1; ++yy) {
 			for (int xx = 1; xx < xs-1; ++xx) {
-				des[zz][yy][xx] = 0.25f*sou[zz][yy][xx];
-				des[zz][yy][xx] += 0.125f*sou[zz+1][yy][xx];
-				des[zz][yy][xx] += 0.125f*sou[zz-1][yy][xx];
-				des[zz][yy][xx] += 0.125f*sou[zz][yy+1][xx];
-				des[zz][yy][xx] += 0.125f*sou[zz][yy-1][xx];
-				des[zz][yy][xx] += 0.125f*sou[zz][yy][xx+1];
-				des[zz][yy][xx] += 0.125f*sou[zz][yy][xx-1];
+				BUF_IDX(des_buffer, xs, ys, zs, xx, yy, zz) = 0.25f * BUF_IDX(sou_buffer, xs, ys, zs, xx, yy, zz);
+				BUF_IDX(des_buffer, xs, ys, zs, xx, yy, zz) += 0.125f* BUF_IDX(sou_buffer, xs, ys, zs, xx, yy, zz+1);
+				BUF_IDX(des_buffer, xs, ys, zs, xx, yy, zz) += 0.125f* BUF_IDX(sou_buffer, xs, ys, zs, xx, yy, zz-1);
+				BUF_IDX(des_buffer, xs, ys, zs, xx, yy, zz) += 0.125f* BUF_IDX(sou_buffer, xs, ys, zs, xx, yy+1, zz);
+				BUF_IDX(des_buffer, xs, ys, zs, xx, yy, zz) += 0.125f* BUF_IDX(sou_buffer, xs, ys, zs, xx, yy-1, zz);
+				BUF_IDX(des_buffer, xs, ys, zs, xx, yy, zz) += 0.125f* BUF_IDX(sou_buffer, xs, ys, zs, xx+1, yy, zz);
+				BUF_IDX(des_buffer, xs, ys, zs, xx, yy, zz) += 0.125f* BUF_IDX(sou_buffer, xs, ys, zs, xx-1, yy, zz);
 			}
 		}
 		for (int yy = 1; yy < ys-1; ++yy) {
-			des[zz][yy][0] = des[zz][yy][1];
-			des[zz][yy][xs-1] = des[zz][yy][xs-2];
+			BUF_IDX(des_buffer, xs, ys, zs, 0, yy, zz) = BUF_IDX(des_buffer, xs, ys, zs, 1, yy, zz);
+			BUF_IDX(des_buffer, xs, ys, zs, xs-1, yy, zz) = BUF_IDX(des_buffer, xs, ys, zs, xs-2, yy, zz);
 		}
 		for (int xx = 1; xx < xs-1; ++xx) {
-			des[zz][0][xx] = des[zz][1][xx];
-			des[zz][ys-1][xx] = des[zz][ys-2][xx];
+			BUF_IDX(des_buffer, xs, ys, zs, xx, 0, zz) = BUF_IDX(des_buffer, xs, ys, zs, xx, 1, zz);
+			BUF_IDX(des_buffer, xs, ys, zs, xx, ys-1, zz) = BUF_IDX(des_buffer, xs, ys, zs, xx, ys-2, zz);
 		}
 	}
-	des[0] = des[1];
-	des[zs-1] = des[zs-2];
+	memcpy(des_buffer, &BUF_IDX(des_buffer, xs, ys, zs, 0, 0, 1), xs * ys * sizeof(double));
+	memcpy(&BUF_IDX(des_buffer, xs, ys, zs, 0, 0, zs-1), &BUF_IDX(des_buffer, xs, ys, zs, 0, 0, zs - 2), xs * ys * sizeof(double));
+
 }
 
-SVoxImg<SWorkImg<realnum>>& CImageOp::CreateTestImage(int xs, int ys, int zs, int expcoef)
+sitk::Image& CImageOp::CreateTestImage(int xs, int ys, int zs, int expcoef)
 {
-	m_testimage.Set0(xs,ys,zs);
-	m_testinput.Set0(xs,ys,zs);
+	m_testimage = sitk::Image({ (unsigned)xs,(unsigned)ys, (unsigned)zs }, sitk::sitkFloat64);
+	m_testinput = sitk::Image({ (unsigned)xs,(unsigned)ys, (unsigned)zs }, sitk::sitkFloat64);
+	double* testimage_buffer = m_testimage.GetBufferAsDouble();
 
 	realnum s2 = (realnum) 1;
-	realnum cf = (realnum) expcoef;
 
 
 	int cx(xs/2+10), cy(ys/2+10), cz(zs/2);
@@ -74,26 +83,41 @@ SVoxImg<SWorkImg<realnum>>& CImageOp::CreateTestImage(int xs, int ys, int zs, in
 				realnum r2 = dx2/(80*80) + dy2/(50*40) + dz2/(30*30);
 				realnum R2 = dx2/(30*30) + dy2/(30*30) + dz2/(50*50);
 				if (r2 < s2) {
-					m_testimage[zz][yy][xx] = 0.9f;
-					if (zz > cz) m_testimage[zz][yy][xx] -= (dz2)/(Dz*Dz);
+					BUF_IDX(testimage_buffer, xs, ys ,zs, xx, yy, zz) = 0.9f;
+					if (zz > cz) BUF_IDX(testimage_buffer, xs, ys, zs, xx, yy, zz) -= (dz2)/(Dz*Dz);
 				}
 				else if (R2 < s2) {
-					m_testimage[zz][yy][xx] = 0.9f;
-					if (zz < cz) m_testimage[zz][yy][xx] -= 0.25f*(dz2)/(Dz*Dz);
+					BUF_IDX(testimage_buffer, xs, ys, zs, xx, yy, zz) = 0.9f;
+					if (zz < cz) BUF_IDX(testimage_buffer, xs, ys, zs, xx, yy, zz) -= 0.25f*(dz2)/(Dz*Dz);
 				}
-				else m_testimage[zz][yy][xx] = 0.3f;
+				else BUF_IDX(testimage_buffer, xs, ys, zs, xx, yy, zz) = 0.3f;
 				//m_testimage[zz][yy][xx] += 0.0001f*((rand()&0xfff)-0x7ff);
 			}
 		}
 	}
+	sitk::Image kernel = sitk::Image({ 3, 3, 3 }, sitk::sitkFloat64);
+	double* kernel_buffer = kernel.GetBufferAsDouble();
+	double kernel_values[] = { 0,     0, 0,     0, 0.125,     0, 0,     0, 0,
+							  0, 0.125, 0, 0.125,  0.25, 0.125, 0, 0.125, 0,
+							  0,     0, 0,     0, 0.125,     0, 0,     0, 0 };
+	memcpy(kernel_buffer, kernel_values, 3 * 3 * 3 * sizeof(double));
+	m_testimage = sitk::Convolution(m_testimage, kernel);
+	m_testimage = sitk::Convolution(m_testimage, kernel);
+	m_testimage = sitk::Convolution(m_testimage, kernel);
+	m_testimage = sitk::Convolution(m_testimage, kernel);
 
-	GauTest(false);
-	GauTest(true);
-	GauTest(false);
-	GauTest(true);
+	CreateTestInput(expcoef);
 
+	return m_testimage;
+}
 
-	m_testimage.GetGradLen(m_testinput);
+sitk::Image& CImageOp::CreateTestInput(double expcoef) {
+	realnum cf = (realnum)expcoef;
+	m_testinput = sitk::Cast(sitk::GradientMagnitude(m_testimage, false), sitk::sitkFloat64);
+	vector<unsigned> size = m_testinput.GetSize();
+	int xs(size[0]), ys(size[1]), zs(size[2]);
+	double* testinput_buffer = m_testinput.GetBufferAsDouble();
+	//m_testimage.GetGradLen(m_testinput);
 	//m_imagegrad = m_testinput;
 
 #pragma omp parallel for
@@ -102,13 +126,10 @@ SVoxImg<SWorkImg<realnum>>& CImageOp::CreateTestImage(int xs, int ys, int zs, in
 			for (int xx = 0; xx < xs; ++xx) {
 				////m_testinput[zz][yy][xx] = (0.01+m_testinput[zz][yy][xx]); //1.0/(0.000001+m_testinput[zz][yy][xx])
 				//m_testinput[zz][yy][xx] = 1.0/(0.000001+0.999999*exp(-cf*m_testinput[zz][yy][xx]));
-				m_testinput[zz][yy][xx] = 1.0/(0.01+0.99*exp(-cf*m_testinput[zz][yy][xx]));
+				BUF_IDX(testinput_buffer, xs, ys, zs, xx, yy, zz) = 1.0 / (0.01 + 0.99 * exp(-cf * BUF_IDX(testinput_buffer, xs, ys, zs, xx, yy, zz)));
 			}
 		}
 	}
-	//m_testimage = m_testinput;
-
-	return m_testimage;
 }
 
 
@@ -191,15 +212,17 @@ void CImageOp::XTestfill(short x, short y)
 
 void CImageOp::GetXTestBound(int ix, std::vector<CVec3>& out) // contour on plane MAIN 1
 {
-	int xs(m_testimage.xs), ys(m_testimage.ys), zs(m_testimage.zs);
+	vector<unsigned> size = m_testimage.GetSize();
+	double* image_buffer = m_testimage.GetBufferAsDouble();
+	int xs(size[0]), ys(size[1]), zs(size[2]);
 	out.clear();
 	m_bound.clear();
 	for (int zz = 0; zz < zs; ++zz) {
 		for (int yy = 0; yy < ys; ++yy) {
 			int xx = ix;
-			if (m_testimage[zz][yy][xx] >= 0.5f) {
-				if (m_testimage[zz+1][yy][xx] < 0.5f || m_testimage[zz-1][yy][xx] < 0.5f
-				 || m_testimage[zz][yy+1][xx] < 0.5f || m_testimage[zz][yy-1][xx] < 0.5f) {
+			if (BUF_IDX(image_buffer, xs, ys, zs, xx, yy, zz) >= 0.5f) {
+				if (BUF_IDX(image_buffer, xs, ys, zs, xx, yy, zz+1) < 0.5f || BUF_IDX(image_buffer, xs, ys, zs, xx, yy, zz-1) < 0.5f
+				 || BUF_IDX(image_buffer, xs, ys, zs, xx, yy+1, zz) < 0.5f || BUF_IDX(image_buffer, xs, ys, zs, xx, yy-1, zz) < 0.5f) {
 					 CVec3 in((realnum)xx,(realnum)yy,(realnum)zz);
 					 out.push_back(in); // to show paths
 					 m_bound.emplace((zz<<16)+yy);
@@ -223,16 +246,14 @@ void CImageOp::GetPlaneDistMap(int distmap_ys, int distmap_zs, std::unordered_se
 }
 
 
-SVoxImg<SWorkImg<realnum>>& CImageOp::CImageOp::GetIniMap(int xs, int ys, int zs, int ix) // initial map MAIN 2
+sitk::Image& CImageOp::CImageOp::GetIniMap(int xs, int ys, int zs, int ix) // initial map MAIN 2
 {
 	_PROFILING;
-	m_inimap.Set(xs, ys, zs);
-	for (int zz = 0; zz < zs; ++zz) {
-		m_inimap[zz] = _NO_BOU_;
-	}
+	m_inimap = sitk::Image({ (unsigned int)xs, (unsigned int)ys, (unsigned int)zs }, sitk::sitkFloat64) + _NO_BOU_;
+	double* inimap_buffer = m_inimap.GetBufferAsDouble();
 	for (int zz = 0; zz < zs; ++zz) {
 		for (int yy = 0; yy < ys; ++yy) {
-			m_inimap[zz][yy][ix] = m_loc[zz][yy];
+			BUF_IDX(inimap_buffer, xs, ys, zs, ix, yy, zz) = m_loc[zz][yy];
 		}
 	}
 
@@ -242,10 +263,12 @@ SVoxImg<SWorkImg<realnum>>& CImageOp::CImageOp::GetIniMap(int xs, int ys, int zs
 //-----------------------------------------------------------------------------------------
 
 
-SVoxImg<SWorkImg<realnum>>& CImageOp::CreateTestImage2(int xs, int ys, int zs, int expcoef)
+sitk::Image& CImageOp::CreateTestImage2(int xs, int ys, int zs, int expcoef)
 {
-	m_testimage.Set0(xs,ys,zs);
-	m_testinput.Set0(xs,ys,zs);
+	m_testimage = sitk::Image({ (unsigned)xs, (unsigned)ys , (unsigned)zs }, sitk::sitkFloat64);
+	m_testinput = sitk::Image({ (unsigned)xs, (unsigned)ys , (unsigned)zs }, sitk::sitkFloat64);
+	double* image_buffer = m_testimage.GetBufferAsDouble();
+	double* input_buffer = m_testinput.GetBufferAsDouble();
 
 	realnum s2 = (realnum) 1;
 	realnum cf = (realnum) expcoef;
@@ -266,12 +289,12 @@ SVoxImg<SWorkImg<realnum>>& CImageOp::CreateTestImage2(int xs, int ys, int zs, i
 
 				realnum r2 = dx2/(80*80) + dy2/(60*60) + dz2/(25*25);
 				if (r2 < s2) {
-					m_testimage[zz][yy][xx] = 0.9f;
+					BUF_IDX(image_buffer, xs, ys, zs, xx, yy, zz) = 0.9f;
 					//if (zz > cz) m_testimage[zz][yy][xx] -= (dz2)/(Dz*Dz);
 				}
-				else m_testimage[zz][yy][xx] = 0.3f;
+				else BUF_IDX(image_buffer, xs, ys, zs, xx, yy, zz) = 0.3f;
 				
-				m_testimage[zz][yy][xx] += 0.0001f*((rand()&0xfff)-0x7ff);
+				BUF_IDX(image_buffer, xs, ys, zs, xx, yy, zz) += 0.0001f*((rand()&0xfff)-0x7ff);
 			}
 		}
 	}
@@ -281,8 +304,9 @@ SVoxImg<SWorkImg<realnum>>& CImageOp::CreateTestImage2(int xs, int ys, int zs, i
 	GauTest(false);
 	GauTest(true);
 
+	m_testinput = sitk::GradientMagnitude(m_testimage, false);
 
-	m_testimage.GetGradLen(m_testinput);
+	//m_testimage.GetGradLen(m_testinput);
 	//m_imagegrad = m_testinput;
 
 #pragma omp parallel for
@@ -291,7 +315,7 @@ SVoxImg<SWorkImg<realnum>>& CImageOp::CreateTestImage2(int xs, int ys, int zs, i
 			for (int xx = 0; xx < xs; ++xx) {
 				////m_testinput[zz][yy][xx] = (0.01+m_testinput[zz][yy][xx]); //1.0/(0.000001+m_testinput[zz][yy][xx])
 				//m_testinput[zz][yy][xx] = 1.0/(0.000001+0.999999*exp(-cf*m_testinput[zz][yy][xx]));
-				m_testinput[zz][yy][xx] = 1.0/(0.01+0.99*exp(-cf*m_testinput[zz][yy][xx]));
+				BUF_IDX(input_buffer, xs, ys, zs, xx, yy, zz) = 1.0/(0.01+0.99*exp(-cf* BUF_IDX(input_buffer, xs, ys, zs, xx, yy, zz)));
 			}
 		}
 	}

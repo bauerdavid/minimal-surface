@@ -15,7 +15,7 @@
 #include <regex>
 #include <unordered_set>
 
-//#define PROFILE_FUNCTIONS
+#define PROFILE_FUNCTIONS
 #ifdef PROFILE_FUNCTIONS
 class profiler {
 	std::chrono::steady_clock::time_point start_time;

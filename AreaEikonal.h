@@ -55,12 +55,13 @@
 #define TOSTRING(x) STRINGIFY(x)
 
 //#define DEBUG_CURVATURE
-#define DEBUG_STATES
+//#define DEBUG_STATES
 #define ITERATE_ROTATED
 
 namespace sitk = itk::simple;
 
 #define MAXMINPATH 222 
+#define INIT_DIST init_dist
 
 #define XS_ 220 
 #define YS_ 155 
@@ -210,7 +211,7 @@ public:
 #ifdef DEBUG_CURVATURE
 	sitk::Image m_new_update[2];
 #endif
-	void Initialize(SVoxImg<SWorkImg<realnum>>& data, CVec3& start_point, CVec3& end_point);
+	void Initialize(sitk::Image data, CVec3& start_point, CVec3& end_point);
 	void Initialize(CPhaseContainer& phasefield, std::vector<double>& rotation_matrix, bool inverse=false);
 	void CombineDistance();
 	void CalculateAlignedCombinedDistance(double p1_x, double p2_x);

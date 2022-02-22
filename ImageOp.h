@@ -22,7 +22,7 @@ public:
 	Create data, where every values is _NO_BOU_, except for the selected x slice, where it will be the same as m_loc
 	Should be initialized based on the meeting of the two flow
 	*/
-	SVoxImg<SWorkImg<realnum>>& CImageOp::GetIniMap(int xs, int ys, int zs, int ix);
+	sitk::Image& CImageOp::GetIniMap(int xs, int ys, int zs, int ix);
 	void GetXTestBound(int ix, std::vector<CVec3>& out);
 	// Calculate the distance from the bounds. Distances will be positive inside the object, and negative outside of it.
 	void GetPlaneDistMap(int distmap_ys, int distmap_zs, std::unordered_set<unsigned long> &boundset);
@@ -30,20 +30,21 @@ public:
 	{
 		return m_loc;
 	}
-	SVoxImg<SWorkImg<realnum>>& GetTestImage() {
+	sitk::Image& GetTestImage() {
 		return m_testimage;
 	}
-	SVoxImg<SWorkImg<realnum>>& GetTestInput() {
+	sitk::Image& GetTestInput() {
 		return m_testinput;
 	}
-	SVoxImg<SWorkImg<realnum>>& CreateTestImage(int xs, int ys, int zs, int expcoef = 9+5); // 9,19
-	SVoxImg<SWorkImg<realnum>>& CreateTestImage2(int xs, int ys, int zs, int expcoef = 9); // 9,19
-	SVoxImg<SWorkImg<realnum>> m_testimage;
-	SVoxImg<SWorkImg<realnum>> m_testinput;
-	SVoxImg<SWorkImg<realnum>> m_inimap;
+	sitk::Image& CreateTestImage(int xs, int ys, int zs, int expcoef = 9+5); // 9,19
+	sitk::Image& CreateTestImage2(int xs, int ys, int zs, int expcoef = 9); // 9,19
+	sitk::Image& CreateTestInput(double expcoef=14);
+	sitk::Image m_testimage;
+	sitk::Image m_testinput;
+	sitk::Image m_inimap;
 	SWorkImg<realnum>& GetXImageSlice(int ix);
-private:
 	void GauTest(bool bodd);
+private:
 
 	bool m_bOk;
 };

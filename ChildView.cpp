@@ -21,6 +21,8 @@
 #define PLANE_PHASEFIELD_ITERATION 3
 #define TRANSPORT_FUNCTION_ITERATION 4
 #define DONE_ITERATION 5
+
+#define EXPCOEF_RANGE 100
 using namespace std;
 namespace sitk = itk::simple;
 // CChildView
@@ -39,7 +41,7 @@ CChildView::CChildView()
 	m_btransportview = false;
 
 	m_valid = 0;
-	m_expfac = 9;//+10
+	m_expfac = EXP_COEF_DEF;//+10
 }
 
 CChildView::~CChildView()
@@ -49,6 +51,7 @@ CChildView::~CChildView()
 
 BEGIN_MESSAGE_MAP(CChildView, CWnd)
 	ON_WM_PAINT()
+	ON_WM_LBUTTONDOWN()
 	ON_WM_LBUTTONUP()
 	ON_WM_RBUTTONUP()
 END_MESSAGE_MAP()
@@ -315,6 +318,7 @@ UINT BackgroundThread(LPVOID params)
 	f_stream.open("Y:/BIOMAG/shortest path/" INFO_FILENAME);
 #ifdef DEBUG_STATES
 	save_image("Y:/BIOMAG/shortest path/interm_imgs/ph0_data.tif", view->m_liftedEikonal.m_phasefield.m_data);
+	save_image("Y:/BIOMAG/shortest path/interm_imgs/ph0_testimage.tif", view->m_imageOp.GetTestImage());
 	save_image("Y:/BIOMAG/shortest path/interm_imgs/ph0_dist0.tif", view->m_liftedEikonal.m_phasefield.m_distance[0]);
 	save_image("Y:/BIOMAG/shortest path/interm_imgs/ph0_dist1.tif", view->m_liftedEikonal.m_phasefield.m_distance[1]);
 	save_image("Y:/BIOMAG/shortest path/interm_imgs/ph0_field0.tif", view->m_liftedEikonal.m_phasefield.m_field[0]);
@@ -434,7 +438,7 @@ UINT BackgroundThread(LPVOID params)
 				int xs(size[0]), ys(size[1]), zs(size[2]);
 				view->m_imageOp.GetPlaneDistMap(ys, zs, view->m_liftedEikonal.m_inicountourCalculator.RetrieveBound());
 				if (xs > 0) {
-					SVoxImg<SWorkImg<realnum>>& passi = view->m_imageOp.GetIniMap(xs, ys, zs, view->m_liftedEikonal.m_rotated_phasefield.m_plane_slice);
+					sitk::Image& passi = view->m_imageOp.GetIniMap(xs, ys, zs, view->m_liftedEikonal.m_rotated_phasefield.m_plane_slice);
 					realnum maxdist = view->m_liftedEikonal.m_rotated_phasefield.m_currentdistance;
 					view->m_transport.TrInit(view->m_liftedEikonal.m_rotated_phasefield.m_combined_distance, passi, maxdist);
 #ifdef DEBUG_STATES
@@ -463,7 +467,7 @@ UINT BackgroundThread(LPVOID params)
 			save_image("Y:/BIOMAG/shortest path/interm_imgs/ph4_transport0.tif", view->m_transport.m_transportfunction[0]);
 			save_image("Y:/BIOMAG/shortest path/interm_imgs/ph4_bound.tif", view->m_transport.m_isboundary);
 #endif
-			resample_img<sitk::sitkNearestNeighbor>(view->m_transport.m_transportfunction[0], view->m_transport.m_transportfunction[0], view->m_liftedEikonal.m_phasefield.rotation_matrix, sample_size, true);
+			resample_img(view->m_transport.m_transportfunction[0], view->m_transport.m_transportfunction[0], view->m_liftedEikonal.m_phasefield.rotation_matrix, sample_size, true);
 			//neg_to_minus1(view->m_transport.m_transportfunction[0]);
 			resample_img<sitk::sitkNearestNeighbor>(view->m_transport.m_isboundary, view->m_transport.m_isboundary, view->m_liftedEikonal.m_phasefield.rotation_matrix, sample_size, true);
 #ifdef DEBUG_STATES
@@ -510,10 +514,13 @@ void CChildView::InitThread()
 		m_end_point.x = -100;
 		m_end_point.y = -100;
 	}
-	SVoxImg<SWorkImg<realnum>>& data = m_imageOp.GetTestInput();
+	m_imageOp.CreateTestInput(m_expfac);
+	sitk::Image& data = m_imageOp.GetTestInput();
+	vector<uint32_t> size = data.GetSize();
 	if (m_bispoint == 1) {
 		m_end_point.z = m_xsee;
 	}
+	//sitk::Image data_im = vox_img_2_sitk(data);
 	m_liftedEikonal.m_phasefield.Initialize(data, m_start_point, m_end_point);
 
 
@@ -547,13 +554,20 @@ void CChildView::StopThread()
 	Invalidate();
 }
 
+void CChildView::OnLButtonDown(UINT nFlags, CPoint point) {
+	pressed = true;
+	CWnd::OnLButtonDown(nFlags, point);
+}
+
 
 void CChildView::OnLButtonUp(UINT nFlags, CPoint point)
 {
 	// TODO: Add your message handler code here and/or call default
-
+	if (!pressed) return;
 	if (!m_threadactivated) {
-		if (m_disp.xs) {
+		vector<uint32_t> size = m_imageOp.m_testimage.GetSize();
+		int xs(size[0]), ys(size[1]);
+		if (m_disp.xs && point.x < xs && point.y < ys) {
 			if (!m_bispoint) {
 				m_start_point = CVec3(point.x, point.y, m_zsee);
 				++m_bispoint;
@@ -567,6 +581,7 @@ void CChildView::OnLButtonUp(UINT nFlags, CPoint point)
 	}
 
 	CWnd::OnLButtonUp(nFlags, point);
+	pressed = false;
 }
 
 void CChildView::OnRButtonUp(UINT nFlags, CPoint point)
@@ -669,27 +684,27 @@ void CControlDlg::OnBnClickedOpen()
 			sitk::Image ci = sitk::ReadImage(string((LPCTSTR)cfn), sitk::sitkUnknown);
 			auto type = ci.GetPixelID();
 			ci = sitk::Cast(ci, sitk::sitkFloat64);
-			ci = sitk::RescaleIntensity(ci, 0, 1);
-			vector<uint32_t> size = ci.GetSize();
+			m_pView->m_imageOp.m_testimage = sitk::RescaleIntensity(ci, 0, 1);
+			vector<uint32_t> size = m_pView->m_imageOp.m_testimage.GetSize();
 			int xs = size[0], ys = size[1], zs = size[2];
-			sitk_2_vox_img(ci, m_pView->m_imageOp.m_testimage);
-			m_pView->m_imageOp.m_testimage.GetGradLen(m_pView->m_imageOp.m_testinput);
-#pragma omp parallel for
-			for (int zz = 0; zz < zs; ++zz) {
-				for (int yy = 0; yy < ys; ++yy) {
-					for (int xx = 0; xx < xs; ++xx) {
-						////m_testinput[zz][yy][xx] = (0.01+m_testinput[zz][yy][xx]); //1.0/(0.000001+m_testinput[zz][yy][xx])
-						//m_testinput[zz][yy][xx] = 1.0/(0.000001+0.999999*exp(-cf*m_testinput[zz][yy][xx]));
-						m_pView->m_imageOp.m_testinput[zz][yy][xx] = 1.0 / (0.01 + 0.99 * exp(-14 * m_pView->m_imageOp.m_testinput[zz][yy][xx]));
-					}
-				}
-			}
+			//sitk_2_vox_img(ci, m_pView->m_imageOp.m_testimage);
+			m_pView->m_imageOp.GauTest(false);
+			m_pView->m_imageOp.GauTest(true);
+			m_pView->m_imageOp.GauTest(false);
+			m_pView->m_imageOp.GauTest(true);
+			m_pView->m_imageOp.CreateTestInput(m_pView->m_expfac);
 
 			//CImage ci; ci.Load(LPCTSTR(cfn));
 
 			if (!xs || !ys || !zs) return;
-			double* im_buffer = ci.GetBufferAsDouble();
-			m_pView->m_work = m_pView->m_imageOp.m_testimage[m_pView->m_zsee];
+			double* im_buffer = m_pView->m_imageOp.m_testimage.GetBufferAsDouble();
+			m_pView->m_work.Set(xs, ys);
+			for (int yy = 0; yy < ys; yy++) {
+				for (int xx = 0; xx < xs; xx++) {
+					m_pView->m_work[yy][xx] = BUF_IDX(im_buffer, xs, ys, zs, xx, yy, m_pView->m_zsee);
+				}
+			}
+			//m_pView->m_work = m_pView->m_imageOp.m_testimage[m_pView->m_zsee];
 			m_pView->m_valid = 1;
 			m_pView->m_grays = true;
 			m_pView->m_color = false;
@@ -698,8 +713,8 @@ void CControlDlg::OnBnClickedOpen()
 			m_cstopdir.SetRange(0, xs - 1, 1);
 			m_bini = true;
 
-			m_cdatafac.SetRange(1, 10, 1);
-			m_cdatafac.SetPos(m_pView->m_expfac);
+			m_cdatafac.SetRange(1, EXPCOEF_RANGE, 1);
+			m_cdatafac.SetPos(EXP_COEF_DEF);
 			char txt[22];
 			sprintf_s(txt, 20, "%d", m_flowray);
 			m_cflowray.SetWindowTextA(txt);
@@ -722,7 +737,15 @@ void CControlDlg::OnBnClickedIntImage1() // synth. image 1
 	if (m_bini) return;
 	m_pView->m_imageOp.CreateTestImage(XS_,YS_,ZS_);
 	{
-		m_pView->m_work = m_pView->m_imageOp.m_testimage[m_pView->m_zsee];
+		vector<uint32_t> size = m_pView->m_imageOp.m_testimage.GetSize();
+		int xs = size[0], ys = size[1], zs = size[2]; 
+		double* im_buffer = m_pView->m_imageOp.m_testimage.GetBufferAsDouble();
+		m_pView->m_work.Set(xs, ys);
+		for (int yy = 0; yy < ys; yy++) {
+			for (int xx = 0; xx < xs; xx++) {
+				m_pView->m_work[yy][xx] = BUF_IDX(im_buffer, xs, ys, zs, xx, yy, m_pView->m_zsee);
+			}
+		}
 		m_pView->m_valid = 1;
 		m_pView->m_grays = true;
 		m_pView->m_color = false;
@@ -733,7 +756,7 @@ void CControlDlg::OnBnClickedIntImage1() // synth. image 1
 		m_cstopdir.SetRange(0,XS_-1,1); // from x
 		m_bini = true;
 
-		m_cdatafac.SetRange(1,10,1); m_cdatafac.SetPos(m_pView->m_expfac);
+		m_cdatafac.SetRange(1, EXPCOEF_RANGE,1); m_cdatafac.SetPos(EXP_COEF_DEF);
 		char txt[22]; sprintf_s(txt,20,"%d",m_flowray);	m_cflowray.SetWindowTextA(txt);
 	}
 	m_pView->m_work.GetDispImg(m_pView->m_disp);
@@ -803,13 +826,21 @@ void CControlDlg::OnNMCustomdrawSlider1(NMHDR *pNMHDR, LRESULT *pResult)
 {
 	LPNMCUSTOMDRAW pNMCD = reinterpret_cast<LPNMCUSTOMDRAW>(pNMHDR);
 	// TODO: Add your control notification handler code here
+	vector<uint32_t> size = m_pView->m_imageOp.m_testimage.GetSize();
 	if (!m_bini) goto ret;
 		m_pView->m_zsee = m_zlevel.GetPos();
 		char txt[22];
 		sprintf_s(txt,20,"%d",m_pView->m_zsee);
 		m_ezlevel.SetWindowTextA(txt);
 
-	m_pView->m_work = m_pView->m_imageOp.m_testimage[m_pView->m_zsee];
+		int xs = size[0], ys = size[1], zs = size[2];
+		double* im_buffer = m_pView->m_imageOp.m_testimage.GetBufferAsDouble();
+		m_pView->m_work.Set(xs, ys);
+		for (int yy = 0; yy < ys; yy++) {
+			for (int xx = 0; xx < xs; xx++) {
+				m_pView->m_work[yy][xx] = BUF_IDX(im_buffer, xs, ys, zs, xx, yy, m_pView->m_zsee);
+			}
+		}
 
 	if (!m_pView->m_btransportview) {
 		m_pView->m_work.GetDispImg(m_pView->m_disp);
@@ -829,17 +860,19 @@ void CControlDlg::OnNMCustomdrawSlider2(NMHDR *pNMHDR, LRESULT *pResult)
 	LPNMCUSTOMDRAW pNMCD = reinterpret_cast<LPNMCUSTOMDRAW>(pNMHDR);
 	// TODO: Add your control notification handler code here
 	if (!m_bini) goto ret;
-	SVoxImg<SWorkImg<realnum>> &testimg = m_pView->m_imageOp.m_testimage;
+	sitk::Image &testimg = m_pView->m_imageOp.m_testimage;
+	double* testimg_buffer = testimg.GetBufferAsDouble();
 
 	if (!m_pView->m_btransportview) {
-		int xs = testimg.xs, zs = testimg.zs;
+		vector<uint32_t> size = m_pView->m_imageOp.m_testimage.GetSize();
+		int xs = size[0], ys = size[1], zs = size[2];
 		SWorkImg<realnum>& yslice = m_pView->m_intey;
 		yslice.Set(xs, zs);
 		int ylev = m_cstartdir.GetPos();
 
 		for (int zz = 0; zz < zs; ++zz) {
 			for (int xx = 0; xx < xs; ++xx) {
-				yslice[zz][xx] = testimg[zz][ylev][xx];
+				yslice[zz][xx] = BUF_IDX(testimg_buffer, xs, ys, zs, xx, ylev, zz);
 			}
 		}
 
@@ -863,17 +896,18 @@ void CControlDlg::OnNMCustomdrawSlider3(NMHDR *pNMHDR, LRESULT *pResult)
 	if (!m_bini) goto ret;
 
 
-	SVoxImg<SWorkImg<realnum>> &testimg = m_pView->m_imageOp.m_testimage;
-
+	sitk::Image &testimg = m_pView->m_imageOp.m_testimage;
+	double* testimg_buffer = testimg.GetBufferAsDouble();
 	if (!m_pView->m_btransportview) {
-		int ys = testimg.ys, zs = testimg.zs;
+		vector<uint32_t> size = m_pView->m_imageOp.m_testimage.GetSize();
+		int xs = size[0], ys = size[1], zs = size[2]; 
 		SWorkImg<realnum>& xslice = m_pView->m_intex;
 		xslice.Set(ys, zs);
 		int xlev = m_cstopdir.GetPos();
 
 		for (int zz = 0; zz < zs; ++zz) {
 			for (int yy = 0; yy < ys; ++yy) {
-				xslice[zz][yy] = testimg[zz][yy][xlev];
+				xslice[zz][yy] = BUF_IDX(testimg_buffer, xs, ys, zs, xlev, yy, zz);
 			}
 		}
 
@@ -968,7 +1002,15 @@ void CControlDlg::OnBnClickedIntImage2() // synth. image 2
 	if (m_bini) return;
 	m_pView->m_imageOp.CreateTestImage2(XS_,YS_,ZS_);
 	{
-		m_pView->m_work = m_pView->m_imageOp.m_testimage[m_pView->m_zsee];
+		vector<uint32_t> size = m_pView->m_imageOp.m_testimage.GetSize();
+		int xs = size[0], ys = size[1], zs = size[2];
+		double* im_buffer = m_pView->m_imageOp.m_testimage.GetBufferAsDouble();
+		m_pView->m_work.Set(xs, ys);
+		for (int yy = 0; yy < ys; yy++) {
+			for (int xx = 0; xx < xs; xx++) {
+				m_pView->m_work[yy][xx] = BUF_IDX(im_buffer, xs, ys, zs, xx, yy, m_pView->m_zsee);
+			}
+		}
 		m_pView->m_valid = 1;
 		m_pView->m_grays = true;
 		m_pView->m_color = false;
@@ -979,7 +1021,7 @@ void CControlDlg::OnBnClickedIntImage2() // synth. image 2
 		m_cstopdir.SetRange(0,XS_-1,1); // from x
 		m_bini = true;
 
-		m_cdatafac.SetRange(1,10,1); m_cdatafac.SetPos(m_pView->m_expfac);
+		m_cdatafac.SetRange(1, EXPCOEF_RANGE,1); m_cdatafac.SetPos(EXP_COEF_DEF);
 		char txt[22]; sprintf_s(txt,20,"%d",m_flowray);	m_cflowray.SetWindowTextA(txt);
 	}
 	m_pView->m_work.GetDispImg(m_pView->m_disp);

@@ -14,7 +14,7 @@ public:
 	int m_active;
 	realnum m_min;
 	// Initialize gradients fro, distance map, transform function from inimap, and boundaries (considering inimap, and setting data edges as boundaries)
-	void TrInit(sitk::Image& distmap, SVoxImg<SWorkImg<realnum>>& inimap, realnum maxdistance);
+	void TrInit(sitk::Image& distmap, sitk::Image& inimap, realnum maxdistance);
 	void TrControl(int nIter);
 	void GetDispSlice(int along, int at, SDisImg& r);
 	sitk::Image m_transportfunction[2];

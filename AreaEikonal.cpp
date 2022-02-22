@@ -238,50 +238,55 @@ void CPhaseContainer::FindMeetPoints() {
 //-------------------------------------------------------------------------------------------------
 
 
-void CPhaseContainer::Initialize(SVoxImg<SWorkImg<realnum>>& data, CVec3& start_point, CVec3& end_point) {
+void CPhaseContainer::Initialize(sitk::Image data, CVec3& start_point, CVec3& end_point) {
 	_PROFILING;
-	unsigned int spacex(data.xs), spacey(data.ys), spacez(data.zs);
+	vector<uint32_t> size = data.GetSize();
+	unsigned int spacex(size[0]), spacey(size[1]), spacez(size[2]);
 	//g_cyc = 0;
-	m_thickstate = sitk::Image({ spacex, spacey, spacez }, sitk::sitkInt32) - 1;
-	m_Sumcurvature = sitk::Image({ spacex, spacey, spacez }, sitk::sitkFloat64);
-	meeting_plane_positions = sitk::Image({ spacex, spacey, spacez }, sitk::sitkInt32);
+	m_thickstate = sitk::Image(size, sitk::sitkInt32) - 1;
+	m_Sumcurvature = sitk::Image(size, sitk::sitkFloat64);
+	meeting_plane_positions = sitk::Image(size, sitk::sitkInt32);
 	// expansion
 
-	m_temp_sdist[0] = sitk::Image({spacex, spacey, spacez}, sitk::sitkFloat64);
-	m_temp_sdist[1] = sitk::Image({ spacex, spacey, spacez }, sitk::sitkFloat64);
-	m_smoothstate = sitk::Image({ spacex, spacey, spacez }, sitk::sitkInt32) - 1;
+	m_temp_sdist[0] = sitk::Image(size, sitk::sitkFloat64);
+	m_temp_sdist[1] = sitk::Image(size, sitk::sitkFloat64);
+	m_smoothstate = sitk::Image(size, sitk::sitkInt32) - 1;
 	// expansion
 
 
-	m_field[0] = sitk::Image({ spacex, spacey, spacez }, sitk::sitkFloat64) - 1;
-	m_field[1] = sitk::Image({ spacex, spacey, spacez }, sitk::sitkFloat64) - 1;
-	m_distance[0] = sitk::Image({ spacex, spacey, spacez }, sitk::sitkFloat64) - 1;
-	m_distance[1] = sitk::Image({ spacex, spacey, spacez }, sitk::sitkFloat64) - 1;
-	m_combined_distance = sitk::Image({ spacex, spacey, spacez }, sitk::sitkFloat64) - 1;
-	m_flow_idx = sitk::Image({ spacex, spacey, spacez }, sitk::sitkInt32) - 1;
+	m_field[0] = sitk::Image(size, sitk::sitkFloat64) - 1;
+	m_field[1] = sitk::Image(size, sitk::sitkFloat64) - 1;
+	m_distance[0] = sitk::Image(size, sitk::sitkFloat64) - 1;
+	m_distance[1] = sitk::Image(size, sitk::sitkFloat64) - 1;
+	m_combined_distance = sitk::Image(size, sitk::sitkFloat64) - 1;
+	m_flow_idx = sitk::Image(size, sitk::sitkInt32) - 1;
 
 
-	m_velo[0] = sitk::Image({ spacex, spacey, spacez }, sitk::sitkFloat64);
-	m_velo[1] = sitk::Image({ spacex, spacey, spacez }, sitk::sitkFloat64);
-	m_aux = sitk::Image({ spacex, spacey, spacez }, sitk::sitkFloat64);
-	m_smoothdist = sitk::Image({ spacex, spacey, spacez }, sitk::sitkFloat64) - 1;
-	m_smoothaux = sitk::Image({ spacex, spacey, spacez }, sitk::sitkFloat64);
-	m_smoothaux2 = sitk::Image({ spacex, spacey, spacez }, sitk::sitkFloat64);
+	m_velo[0] = sitk::Image(size, sitk::sitkFloat64);
+	m_velo[1] = sitk::Image(size, sitk::sitkFloat64);
+	m_aux = sitk::Image(size, sitk::sitkFloat64);
+	m_smoothdist = sitk::Image(size, sitk::sitkFloat64) - 1;
+	m_smoothaux = sitk::Image(size, sitk::sitkFloat64);
+	m_smoothaux2 = sitk::Image(size, sitk::sitkFloat64);
 
-	m_data = vox_img_2_sitk(data);
-	m_sample_image = sitk::Image({ spacex, spacey, spacez }, sitk::sitkFloat64);
+	m_data = data;
+	m_sample_image = sitk::Image(size, sitk::sitkFloat64);
 	m_start_point = start_point;
 	m_end_point = end_point;
 
-	m_curvature[0] = sitk::Image({ spacex, spacey, spacez }, sitk::sitkFloat64);
-	m_curvature[1] = sitk::Image({ spacex, spacey, spacez }, sitk::sitkFloat64);
+	m_curvature[0] = sitk::Image(size, sitk::sitkFloat64);
+	m_curvature[1] = sitk::Image(size, sitk::sitkFloat64);
 #ifdef DEBUG_CURVATURE
 	
-	m_new_update[0] = sitk::Image({ spacex, spacey, spacez }, sitk::sitkUInt8);
-	m_new_update[1] = sitk::Image({ spacex, spacey, spacez }, sitk::sitkUInt8);
+	m_new_update[0] = sitk::Image(size, sitk::sitkUInt8);
+	m_new_update[1] = sitk::Image(size, sitk::sitkUInt8);
 #endif
-
-	int hs = 12 - 0;//5 (int)(1.5f*g_w/2);
+	double xdist = start_point.x - end_point.x;
+	double ydist = start_point.y - end_point.y;
+	double zdist = start_point.z - end_point.z;
+	double point_dist = sqrt(xdist*xdist + ydist*ydist + zdist*zdist);
+	double init_dist = sqrt(point_dist);
+	int hs = INIT_DIST+2;//5 (int)(1.5f*g_w/2);
 	m_currentdistance = 0;
 	for (int ii = 0; ii < 2; ++ii) {
 		CVec3 point = !ii ? start_point : end_point;
@@ -296,10 +301,10 @@ void CPhaseContainer::Initialize(SVoxImg<SWorkImg<realnum>>& data, CVec3& start_
 					int dx = xx - point.x, dy = yy - point.y;
 					int dz = zz - point.z;
 					int dd = dx * dx + dy * dy + dz * dz;
-					if ((int)dd <= 10 * 10 / 1) {
+					if ((int)dd <= INIT_DIST * INIT_DIST) {
 						double dd_sqrt = sqrt(dd);
-						if (dd > 9*9) {
-							field_buffer[xx + spacex * (yy + spacey * zz)] = 10-dd_sqrt;
+						if (dd > (INIT_DIST-1)*(INIT_DIST-1)) {
+							field_buffer[xx + spacex * (yy + spacey * zz)] = INIT_DIST-dd_sqrt;
 #ifdef USE_VECTOR_AS_SET
 							active_set[ii].push_back(point_to_representation(xx, yy, zz));
 #else
@@ -317,13 +322,13 @@ void CPhaseContainer::Initialize(SVoxImg<SWorkImg<realnum>>& data, CVec3& start_
 						//m_phasefield.m_thickstate[ii][zz][yy][xx] = 2;
 						//m_phasefield.m_Sumcurvature[ii][zz][yy][xx] = dd+dd;
 					}
-					else if (dd < 11*11) {
+					else if (dd < (INIT_DIST+1)*(INIT_DIST+1)) {
 #ifdef USE_VECTOR_AS_SET
 						active_set[ii].push_back(point_to_representation(xx, yy, zz));
 #else
 						active_set[ii].insert(point_to_representation(xx, yy, zz));
 #endif
-						BUF_IDX(field_buffer, spacex, spacey, spacez, xx, yy, zz) = 10-sqrt(dd);
+						BUF_IDX(field_buffer, spacex, spacey, spacez, xx, yy, zz) = INIT_DIST-sqrt(dd);
 					}
 				}
 			}
