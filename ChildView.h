@@ -10,6 +10,9 @@
 
 #include "afxwin.h"
 #include "afxcmn.h"
+#include "SimpleITK.h"
+
+namespace sitk = itk::simple;
 
 #define EXP_COEF_DEF 9
 
@@ -34,6 +37,9 @@ public:
 	SDisImg m_dispd2;
 	SDisImg m_dispd3;
 	SDisImg m_dislic;
+	sitk::Image m_path_image_x;
+	sitk::Image m_path_image_y;
+	sitk::Image m_path_image_z;
 
 	CTransport m_transport;
 	CImageOp m_imageOp;
@@ -43,6 +49,7 @@ public:
 	void InitThread();
 	void PauseThread(int threadstat);
 	void StopThread();
+	void GetAllPathX();
 	int m_prevthreadactivated;
 	int m_threadactivated;
 
@@ -148,7 +155,7 @@ public:
 	afx_msg void OnEnChangeEdit2();
 	afx_msg void OnBnClickedCheckSee();
 	afx_msg void OnEnChangeEdit1();
-	afx_msg void OnBnClickedButton6();
+	afx_msg void OnBnClickedMinPath();
 	afx_msg void OnBnClickedCSee();
 	CButton m_ccursee;
 	afx_msg void OnBnClickedIntImage2();

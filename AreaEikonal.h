@@ -55,12 +55,12 @@
 #define TOSTRING(x) STRINGIFY(x)
 
 //#define DEBUG_CURVATURE
-//#define DEBUG_STATES
+#define DEBUG_STATES
 #define ITERATE_ROTATED
 
 namespace sitk = itk::simple;
 
-#define MAXMINPATH 222 
+#define MAXMINPATH 500 
 #define INIT_DIST init_dist
 
 #define XS_ 220 
@@ -213,6 +213,7 @@ public:
 #endif
 	void Initialize(sitk::Image data, CVec3& start_point, CVec3& end_point);
 	void Initialize(CPhaseContainer& phasefield, std::vector<double>& rotation_matrix, bool inverse=false);
+	void SmoothDistances();
 	void CombineDistance();
 	void CalculateAlignedCombinedDistance(double p1_x, double p2_x);
 	void InitializeNeighbors();
@@ -230,6 +231,7 @@ public:
 	// Update velocity, then phase field based on velocity, and distance map, where phase field passes threshold value
 	void Iterate(bool use_correction);
 	void ExtractMeetingPlane();
+
 };
 
 class CCurvEikonal
@@ -245,7 +247,15 @@ public:
 	CPhaseContainer m_rotated_phasefield;
 
 
-	std::vector<CVec3> m_boundcontour;
-
+	std::vector<POINT3D> m_boundcontour;
+	CVec3 m_reference[2];
+	int m_resolvready;
+	int m_inittype;
+	IPoi3<double> m_distanceto;
+	int m_j[2];
+	std::vector<CVec3> m_minpath[2][MAXMINPATH];
+	void ResolvePath(realnum x, realnum y, realnum z, bool bClear = true, int i = 0, int j = 0);
+	void ResolvePath(int i = 0);
 	// not used
 };
+

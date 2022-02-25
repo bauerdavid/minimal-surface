@@ -57,12 +57,17 @@ using namespace std;
 int a = 0;
 CCurvEikonal::CCurvEikonal(void)
 {
-	
+	m_j[0] = m_j[1] = 0;
 
 }
 
 CCurvEikonal::~CCurvEikonal(void)
 {
+}
+
+void CPhaseContainer::SmoothDistances() {
+	m_distance[0] = sitk::DiscreteGaussian(m_distance[0]);
+	m_distance[1] = sitk::DiscreteGaussian(m_distance[0]);
 }
 
 void CPhaseContainer::CombineDistance() {
@@ -476,8 +481,8 @@ realnum CPhaseContainer::GetMinS(int i) {
 	static int n_threads = omp_get_max_threads();
 	sitk::Image& field = m_field[i];
 	auto& act_set = active_set[i];
-	//int n_top = 100;
-	int n_top = act_set.size();
+	int n_top = 5000;
+	//int n_top = act_set.size();
 	vector<double> topSs;
 	topSs.reserve(n_top + 1);
 	double* field_buffer = field.GetBufferAsDouble();
@@ -564,6 +569,10 @@ realnum CPhaseContainer::GetMinS(int i) {
 		topSs.push_back(next_elem);
 		indices[heap_idx]++;
 	}
+	if (topSs.empty()) {
+		m_bdone = true;
+		return DBL_MAX;
+	}
 	/*minS = 0;
 	std::for_each(topSs.begin(), topSs.end(), [&minS](double val) {minS += val; });
 	minS /= topSs.size();*/
@@ -571,7 +580,7 @@ realnum CPhaseContainer::GetMinS(int i) {
 		minS = topSs[0];
 	else
 		minS = topSs[n_outliers*2];*/
-	size_t idx = min((size_t)100, topSs.size()-1);
+	size_t idx = min((size_t)max(200, n_outliers/20), topSs.size()-1);
 	minS = topSs[idx];
 	return minS;
 }
@@ -973,7 +982,7 @@ void CPlanePhaseField::GetDistancemean(SVoxImg<SWorkImg<realnum>>& distance1, SV
 	}
 
 	m_nect = 100;
-	m_nfct = 20000;
+	m_nfct = 5000;
 	m_bInited = true;
 
 }
@@ -1074,7 +1083,7 @@ void CPlanePhaseField::Iterate()
 			if (m_field2D[yy][xx] > 0) ++npos;
 		}
 	}
-	if (npos > m_npos) 
+	if (npos > m_npos)
 		m_since_last_update = 0;
 	else if (++m_since_last_update >= 200)
 		m_nect = 0;
@@ -1123,4 +1132,82 @@ CVec3 operator *(double f, CVec3 &v)
 CVec3 operator +(CVec3 &v, CVec3 &w)
 {
 	return CVec3(v.x+w.x,v.y+w.y,v.z+w.z);
+}
+
+void CCurvEikonal::ResolvePath(realnum x, realnum y, realnum z, bool bClear, int i, int j)
+{
+	sitk::Image& distance = m_phasefield.m_distance[i]; // m_smoothdist 
+	vector<uint32_t> size = distance.GetSize();
+	int xs = size[0], ys = size[1], zs = size[2];
+	double* distance_buffer = distance.GetBufferAsDouble();
+	if (bClear && m_minpath[i]) m_minpath[i][j].clear();
+
+	int ix((int)x), iy((int)y), iz((int)z);
+	if (iz < 2 || iz >= zs - 2) return;
+	if (ix < 2 || ix >= xs - 2) return;
+	if (iy < 2 || iy >= ys - 2) return;
+
+	if (BUF_IDX(distance_buffer, xs, ys, zs, ix, iy, iz) < 0) return;
+
+	CVec3 path(ix, iy, iz);
+	m_minpath[i][j].push_back(path);
+	static vector<double> sqrts = { 0, 1, sqrt(2), sqrt(3) };
+
+	for (int ii = 0; ii < 11111; ++ii) {
+		ix = (int)path.x; iy = (int)path.y; iz = (int)path.z;
+
+		if (iz < 2) iz = 2; if (iz >= zs - 2) iz = zs - 3;
+		if (ix < 2) ix = 2; if (ix >= xs - 2) ix = xs - 3;
+		if (iy < 2) iy = 2; if (iy >= ys - 2) iy = ys - 3;
+
+		{
+			realnum mmin(0);
+			int pz(0), py(0), px(0);
+			for (int zo = -1; zo <= 1; ++zo) {
+				int zz = iz + zo;
+				for (int yo = -1; yo <= 1; ++yo) {
+					int yy = iy + yo;
+					for (int xo = -1; xo <= 1; ++xo) {
+						int xx = ix + xo;
+						if (!zo && !yo && !xo) continue;
+						double dist = sqrts[abs(xo) + abs(yo) + abs(zo)];
+
+						CVec3 dir(xo, yo, zo);
+
+						realnum d1 = BUF_IDX(distance_buffer, xs, ys, zs, xx, yy, zz), d0 = BUF_IDX(distance_buffer, xs, ys, zs, ix, iy, iz);
+						double val = (d1 - d0) / dist;
+						if (val < mmin) {
+							mmin = val;
+							pz = zo; py = yo; px = xo;
+						}
+
+
+					}
+				}
+			}
+
+			path.x = ix + px; path.y = iy + py; path.z = iz + pz;
+
+		}
+
+		m_minpath[i][j].push_back(path);
+
+
+
+		CVec3 dir = path; dir -= m_reference[i];
+		if (dir.x * dir.x + dir.y * dir.y + dir.z * dir.z < 1.75f) {
+			m_minpath[i][j].push_back(m_reference[i]);
+			break;
+		}
+
+	}
+
+}
+
+void CCurvEikonal::ResolvePath(int i)
+{
+	m_inittype = 0;
+	m_resolvready = 0;
+	ResolvePath(m_distanceto.x, m_distanceto.y, m_distanceto.z, true, i, m_j[i]);
+	if (m_minpath[i][m_j[i]].size()) ++m_j[i];
 }

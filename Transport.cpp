@@ -114,7 +114,10 @@ bool CTransport::TrIterate(int bev)
 					if (gz < 0) gz *= -1;
 					val = gx * BUF_IDX(trf_buffer, xs, ys, zs, x, yy, zz) + gy * BUF_IDX(trf_buffer, xs, ys, zs, xx, y, zz) + gz * BUF_IDX(trf_buffer, xs, ys, zs, xx, yy, z);
 					val /= gx + gy + gz + alpha;// zero: at points where calculation is needed, 1 read only boundary points
-					if (abs(val - BUF_IDX(trft_buffer, xs, ys, zs, xx, yy, zz)) > 1e-5)
+					if (val > DBL_MAX) {
+						val = val;
+					}
+					if (abs(val - BUF_IDX(trft_buffer, xs, ys, zs, xx, yy, zz)) > 1e-10)
 						updated = true;
 					BUF_IDX(trft_buffer, xs, ys, zs, xx, yy, zz) = val;  // update wherever calculation is needed
 				}

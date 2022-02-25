@@ -163,11 +163,13 @@ void CChildView::OnPaint()
 		offx += m_dispd1.xs+1;
 		if (m_dispd2.xs) {
 			DispImage(dc,m_dispd2,offx,offy);
-			std::vector<CVec3> &bound = m_liftedEikonal.m_boundcontour;
+			std::vector<POINT3D> &bound = m_liftedEikonal.m_boundcontour;
 			int si = bound.size();
 			if (si) {
 				for (int ii = 0; ii < si; ++ii) {
-					dc.SetPixelV(offx+(int)bound[ii].y,(int)bound[ii].z,0xffff);
+					auto [x, y, z] = representation_to_point<int>(bound[ii]);
+					//if(m_xsee == x)
+						dc.SetPixelV(offx+y,z,0xffff);
 				}
 			}
 		}
@@ -202,6 +204,8 @@ void CChildView::OnPaint()
 			if (m_pControl) {
 				zsee = m_zsee;
 			}
+
+			int pasi = m_liftedEikonal.m_minpath[ii][00].size();
 
 			if (m_threadactivated != PLANE_PHASEFIELD_ITERATION) {
 				if (m_disp.xs && !m_btransportview) {
@@ -268,6 +272,105 @@ void CChildView::OnPaint()
 						}*/
 					}
 				}
+			}
+			if (pasi) {
+				CPen* oldpen = dc.SelectObject(&g_yellowpen);
+
+				int8_t* path_x_buffer = m_path_image_x.GetBufferAsInt8();
+				int8_t* path_y_buffer = m_path_image_y.GetBufferAsInt8();
+				int8_t* path_z_buffer = m_path_image_z.GetBufferAsInt8();
+				if (BUF_IDX(path_z_buffer, xs, ys, zs, 0, 0, m_zsee) == -100) {
+					for (int yy = 0; yy < ys; yy++) {
+						for (int xx = 0; xx < xs; xx++) {
+							BUF_IDX(path_z_buffer, xs, ys, zs, xx, yy, m_zsee) = 0;
+						}
+					}
+					for (int jj = 0; jj < MAXMINPATH; ++jj) {
+						//CPen *oldpen = dc.SelectObject(&g_yellowpen);
+						std::vector<CVec3>& minpath = m_liftedEikonal.m_minpath[ii][jj];
+						pasi = minpath.size();
+						if (!pasi) break;
+						for (int ii = 0; ii < pasi; ++ii) {
+							if(BUF_IDX(path_z_buffer, xs, ys, zs, (int)minpath[ii].x, (int)minpath[ii].y, m_zsee) < 1)
+								BUF_IDX(path_z_buffer, xs, ys, zs, (int)minpath[ii].x, (int)minpath[ii].y, m_zsee) = minpath[ii].z < m_zsee ? -1 : 1;
+						}
+					}
+				}
+				for (int yy = 0; yy < ys; yy++) {
+					for (int xx = 0; xx < xs; xx++) {
+						int8_t val = BUF_IDX(path_z_buffer, xs, ys, zs, xx, yy, m_zsee);
+						if (val) {
+							int color = val < 0 ? 0x7fff : 0xffff;
+							dc.SetPixelV(xx, yy, color);
+						}
+					}
+				}
+
+				if (BUF_IDX(path_y_buffer, xs, ys, zs, 0, m_ysee, 0) == -100) {
+					for (int zz = 0; zz < zs; zz++) {
+						for (int xx = 0; xx < xs; xx++) {
+							BUF_IDX(path_y_buffer, xs, ys, zs, xx, m_ysee, zz) = 0;
+						}
+					}
+					for (int jj = 0; jj < MAXMINPATH; ++jj) {
+						//CPen *oldpen = dc.SelectObject(&g_yellowpen);
+						std::vector<CVec3>& minpath = m_liftedEikonal.m_minpath[ii][jj];
+						pasi = minpath.size();
+						if (!pasi) break;
+						for (int ii = 0; ii < pasi; ++ii) {
+							if (BUF_IDX(path_y_buffer, xs, ys, zs, (int)minpath[ii].x, m_ysee, (int)minpath[ii].z) < 1)
+								BUF_IDX(path_y_buffer, xs, ys, zs, (int)minpath[ii].x, m_ysee, (int)minpath[ii].z) = minpath[ii].y < m_ysee ? -1 : 1;
+						}
+					}
+				}
+				for (int zz = 0; zz < zs; zz++) {
+					for (int xx = 0; xx < xs; xx++) {
+						int8_t val = BUF_IDX(path_y_buffer, xs, ys, zs, xx, m_ysee, zz);
+						if (val) {
+							int color = val < 0 ? 0x7fff : 0xffff;
+							dc.SetPixelV(xx + m_disp.xs + 1, zz, color);
+						}
+					}
+				}
+
+				if (BUF_IDX(path_x_buffer, xs, ys, zs, m_xsee, 0, 0) == -100) {
+					for (int zz = 0; zz < zs; zz++) {
+						for (int yy = 0; yy < ys; yy++) {
+							BUF_IDX(path_x_buffer, xs, ys, zs, m_xsee, yy, zz) = 0;
+						}
+					}
+					for (int jj = 0; jj < MAXMINPATH; ++jj) {
+						//CPen *oldpen = dc.SelectObject(&g_yellowpen);
+						std::vector<CVec3>& minpath = m_liftedEikonal.m_minpath[ii][jj];
+						pasi = minpath.size();
+						if (!pasi) break;
+						for (int ii = 0; ii < pasi; ++ii) {
+							if (BUF_IDX(path_x_buffer, xs, ys, zs, m_xsee, (int)minpath[ii].y, (int)minpath[ii].z) < 1)
+								BUF_IDX(path_x_buffer, xs, ys, zs, m_xsee, (int)minpath[ii].y, (int)minpath[ii].z) = minpath[ii].x < m_xsee ? -1 : 1;
+						}
+					}
+				}
+				for (int zz = 0; zz < zs; zz++) {
+					for (int yy = 0; yy < ys; yy++) {
+						int8_t val = BUF_IDX(path_x_buffer, xs, ys, zs, m_xsee, yy, zz);
+						if (val) {
+							int color = val < 0 ? 0x7fff : 0xffff;
+							dc.SetPixelV(yy + 2 * (m_disp.xs + 1), zz, color);
+						}
+					}
+				}
+				
+				
+				
+
+					//dc.MoveTo((int)minpath[0].x, (int)minpath[0].y);
+					
+
+					//dc.MoveTo((int)minpath[0].x + m_disp.xs + 1, (int)minpath[0].z);
+					
+					//dc.MoveTo((int)minpath[0].y + 2 * (m_disp.xs + 1), (int)minpath[0].z);
+
+				dc.SelectObject(oldpen);
 			}
 		}
 
@@ -339,12 +442,15 @@ UINT BackgroundThread(LPVOID params)
 					view->m_liftedEikonal.m_phasefield.CombineDistance();
 					//view->m_liftedEikonal.rotation_matrix = { 1, 0, 0, 0, 1, 0, 0, 0, 1 };
 					view->m_liftedEikonal.m_rotated_phasefield.Initialize(view->m_liftedEikonal.m_phasefield, view->m_liftedEikonal.m_phasefield.rotation_matrix);
+					view->m_liftedEikonal.m_phasefield.SmoothDistances();
+
 					vector<double> plane_center_physical = { (view->m_liftedEikonal.m_phasefield.plane_center.x), (view->m_liftedEikonal.m_phasefield.plane_center.y), (view->m_liftedEikonal.m_phasefield.plane_center.z) };
 					vector<double> plane_center_transformed;
 					plane_center_transformed = view->m_liftedEikonal.m_rotated_phasefield.m_sample_image.TransformPhysicalPointToContinuousIndex(plane_center_physical);
 					view->m_liftedEikonal.m_rotated_phasefield.m_plane_slice = plane_center_transformed[0];
 #ifndef ITERATE_ROTATED
 					view->m_liftedEikonal.m_rotated_phasefield.CalculateAlignedCombinedDistance(view->m_start_point.x, view->m_end_point.x);
+					view->m_liftedEikonal.m_rotated_phasefield.SmoothDistances();
 #endif
 					view->m_liftedEikonal.m_rotated_phasefield.m_bdone = false;
 					
@@ -388,6 +494,7 @@ UINT BackgroundThread(LPVOID params)
 					end_point = view->m_liftedEikonal.m_phasefield.m_sample_image.TransformContinuousIndexToPhysicalPoint(end_point);
 					end_point = view->m_liftedEikonal.m_rotated_phasefield.m_sample_image.TransformPhysicalPointToContinuousIndex(end_point);
 					view->m_liftedEikonal.m_rotated_phasefield.CalculateAlignedCombinedDistance(start_point[0], end_point[0]);
+					view->m_liftedEikonal.m_rotated_phasefield.SmoothDistances();
 					/*sitk::MinimumMaximumImageFilter minmax;
 					minmax.Execute(view->m_liftedEikonal.m_rotated_phasefield.m_distance[0]);
 					double maxval = minmax.GetMaximum();
@@ -434,9 +541,21 @@ UINT BackgroundThread(LPVOID params)
 				
 			}
 			else {
+				//view->m_imageOp.GetXTestBound(view->m_xsee, view->m_liftedEikonal.m_boundcontour);
 				vector<unsigned> size = view->m_liftedEikonal.m_rotated_phasefield.m_distance[0].GetSize();
 				int xs(size[0]), ys(size[1]), zs(size[2]);
-				view->m_imageOp.GetPlaneDistMap(ys, zs, view->m_liftedEikonal.m_inicountourCalculator.RetrieveBound());
+				unordered_set<unsigned long>& bound = view->m_liftedEikonal.m_inicountourCalculator.RetrieveBound();
+				view->m_liftedEikonal.m_boundcontour.clear();
+				for (auto& it = bound.begin(); it != bound.end(); it++) {
+					int z = *it >> 16;
+					int y = *it & 0b1111111111111111;
+					vector<double> rotated;
+					rotated = view->m_liftedEikonal.m_rotated_phasefield.m_sample_image.TransformContinuousIndexToPhysicalPoint({ view->m_liftedEikonal.m_rotated_phasefield.m_plane_slice, (double)y, (double)z });
+					rotated = view->m_liftedEikonal.m_phasefield.m_sample_image.TransformPhysicalPointToContinuousIndex(rotated);
+					//rotate(view->m_liftedEikonal.m_phasefield.rotation_matrix, { view->m_liftedEikonal.m_rotated_phasefield.m_plane_slice, (double)y, (double)z }, rotated);
+					view->m_liftedEikonal.m_boundcontour.push_back(point_to_representation(round(rotated[0]), round(rotated[1]), round(rotated[2])));
+				}
+				view->m_imageOp.GetPlaneDistMap(ys, zs, bound);
 				if (xs > 0) {
 					sitk::Image& passi = view->m_imageOp.GetIniMap(xs, ys, zs, view->m_liftedEikonal.m_rotated_phasefield.m_plane_slice);
 					realnum maxdist = view->m_liftedEikonal.m_rotated_phasefield.m_currentdistance;
@@ -554,6 +673,29 @@ void CChildView::StopThread()
 	Invalidate();
 }
 
+void CChildView::GetAllPathX()
+{
+	std::vector<POINT3D>& bound = m_liftedEikonal.m_boundcontour;
+	int si = bound.size();
+	if (si > MAXMINPATH) si = MAXMINPATH;
+	for (int jj = 0; jj < MAXMINPATH; ++jj) {
+		m_liftedEikonal.m_minpath[0][jj].clear();
+		//m_liftedEikonal.m_minpath[1][jj].clear();
+	}
+	int& mj = m_liftedEikonal.m_j[0];
+	mj = 0;
+	for (int jj = 0; jj < si; ++jj) {
+		auto [x, y, z] = representation_to_point<int>(bound[jj]);
+		m_liftedEikonal.ResolvePath(x + 1, y, z, true, 0, mj);
+		m_liftedEikonal.ResolvePath(x - 1, y, z, true, 0, mj);
+		if (m_liftedEikonal.m_minpath[0][mj].size()) ++mj;
+
+		Invalidate();
+	}
+
+
+}
+
 void CChildView::OnLButtonDown(UINT nFlags, CPoint point) {
 	pressed = true;
 	CWnd::OnLButtonDown(nFlags, point);
@@ -564,7 +706,37 @@ void CChildView::OnLButtonUp(UINT nFlags, CPoint point)
 {
 	// TODO: Add your message handler code here and/or call default
 	if (!pressed) return;
-	if (!m_threadactivated) {
+
+		int8_t* x_path_buffer = m_path_image_x.GetBufferAsInt8();
+		int8_t* y_path_buffer = m_path_image_y.GetBufferAsInt8();
+		int8_t* z_path_buffer = m_path_image_z.GetBufferAsInt8();
+		vector<unsigned> size = m_path_image_x.GetSize();
+		memset(x_path_buffer, -100, size[0] * size[1] * size[2]);
+		memset(y_path_buffer, -100, size[0] * size[1] * size[2]);
+		memset(z_path_buffer, -100, size[0] * size[1] * size[2]);
+	
+	if (m_threadactivated == DONE_ITERATION) {
+		if (point.x < m_disp.xs) {
+			m_liftedEikonal.ResolvePath(point.x, point.y, m_zsee, true, 0, m_liftedEikonal.m_j[0]);
+			if (m_liftedEikonal.m_minpath[0][m_liftedEikonal.m_j[0]].size()) ++m_liftedEikonal.m_j[0];
+			m_liftedEikonal.ResolvePath(point.x, point.y, m_zsee, true, 1, m_liftedEikonal.m_j[1]);
+			if (m_liftedEikonal.m_minpath[1][m_liftedEikonal.m_j[1]].size()) ++m_liftedEikonal.m_j[1];
+		}
+		else if (point.x < 2 * m_disp.xs + 1) {
+			m_liftedEikonal.ResolvePath(point.x - m_disp.xs - 1, m_ysee, point.y, true, 0, m_liftedEikonal.m_j[0]);
+			if (m_liftedEikonal.m_minpath[0][m_liftedEikonal.m_j[0]].size()) ++m_liftedEikonal.m_j[0];
+			m_liftedEikonal.ResolvePath(point.x - m_disp.xs - 1, m_ysee, point.y, true, 1, m_liftedEikonal.m_j[1]);
+			if (m_liftedEikonal.m_minpath[1][m_liftedEikonal.m_j[1]].size()) ++m_liftedEikonal.m_j[1];
+		}
+		else if(point.x < m_disp.xs+m_dispd1.xs+m_dispd2.xs) {
+			m_liftedEikonal.ResolvePath(m_xsee, point.x - 2 * (m_disp.xs + 1), point.y, true, 0, m_liftedEikonal.m_j[0]);
+			if (m_liftedEikonal.m_minpath[0][m_liftedEikonal.m_j[0]].size()) ++m_liftedEikonal.m_j[0];
+			m_liftedEikonal.ResolvePath(m_xsee, point.x - 2 * (m_disp.xs + 1), point.y, true, 1, m_liftedEikonal.m_j[1]);
+			if (m_liftedEikonal.m_minpath[1][m_liftedEikonal.m_j[1]].size()) ++m_liftedEikonal.m_j[1];
+		}
+		Invalidate();
+	}
+	else if (!m_threadactivated) {
 		vector<uint32_t> size = m_imageOp.m_testimage.GetSize();
 		int xs(size[0]), ys(size[1]);
 		if (m_disp.xs && point.x < xs && point.y < ys) {
@@ -651,7 +823,7 @@ BEGIN_MESSAGE_MAP(CControlDlg, CDialog)
 	ON_EN_CHANGE(IDC_EDIT2, &CControlDlg::OnEnChangeEdit2)
 	ON_BN_CLICKED(IDC_CHECK1, &CControlDlg::OnBnClickedCheckSee)
 	ON_EN_CHANGE(IDC_EDIT1, &CControlDlg::OnEnChangeEdit1)
-	ON_BN_CLICKED(IDC_BUTTON6, &CControlDlg::OnBnClickedButton6)
+	ON_BN_CLICKED(IDC_BUTTON6, &CControlDlg::OnBnClickedMinPath)
 	ON_BN_CLICKED(IDC_CHECK2, &CControlDlg::OnBnClickedCSee)
 	ON_BN_CLICKED(IDC_BUTTON7, &CControlDlg::OnBnClickedIntImage2)
 	ON_BN_CLICKED(IDC_BUTTON8, &CControlDlg::OnBnClickedWWOCorr)
@@ -693,7 +865,9 @@ void CControlDlg::OnBnClickedOpen()
 			m_pView->m_imageOp.GauTest(false);
 			m_pView->m_imageOp.GauTest(true);
 			m_pView->m_imageOp.CreateTestInput(m_pView->m_expfac);
-
+			m_pView->m_path_image_x = sitk::Image(size, sitk::sitkInt8)-100;
+			m_pView->m_path_image_y = sitk::Image(size, sitk::sitkInt8)-100;
+			m_pView->m_path_image_z = sitk::Image(size, sitk::sitkInt8)-100;
 			//CImage ci; ci.Load(LPCTSTR(cfn));
 
 			if (!xs || !ys || !zs) return;
@@ -738,6 +912,9 @@ void CControlDlg::OnBnClickedIntImage1() // synth. image 1
 	m_pView->m_imageOp.CreateTestImage(XS_,YS_,ZS_);
 	{
 		vector<uint32_t> size = m_pView->m_imageOp.m_testimage.GetSize();
+		m_pView->m_path_image_x = sitk::Image(size, sitk::sitkInt8) - 100;
+		m_pView->m_path_image_y = sitk::Image(size, sitk::sitkInt8) - 100;
+		m_pView->m_path_image_z = sitk::Image(size, sitk::sitkInt8) - 100;
 		int xs = size[0], ys = size[1], zs = size[2]; 
 		double* im_buffer = m_pView->m_imageOp.m_testimage.GetBufferAsDouble();
 		m_pView->m_work.Set(xs, ys);
@@ -983,10 +1160,10 @@ void CControlDlg::OnEnChangeEdit1()
 	// TODO:  Add your control notification handler code here
 }
 
-void CControlDlg::OnBnClickedButton6() // get minimal paths
+void CControlDlg::OnBnClickedMinPath() // get minimal paths
 {
 	// TODO: Add your control notification handler code here
-	//m_pView->GetAllPathX();
+	m_pView->GetAllPathX();
 }
 
 void CControlDlg::OnBnClickedCSee()
