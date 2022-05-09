@@ -6,62 +6,45 @@ namespace sitk = itk::simple;
 using namespace std;
 
 
-void CTransport::TrInit(sitk::Image &distmap, sitk::Image& inimap, realnum maxdistance)
+void TransportFunction::Initialize(sitk::Image distanceMap, const sitk::Image& initialSlice, int initialSliceIdx, realnum distanceMax)
 {
-	/*
-		called with:
-			distmap = m_liftedEikonal.m_phasefield.m_distance[0]
-			inimap = passi
-			maxdistance = m_liftedEikonal.currentdistance[0]
-	*/
 	_PROFILING;
-	vector<unsigned> size = distmap.GetSize();
-	vector<unsigned> inimap_size = inimap.GetSize();
-	if (size != inimap_size) return;
-	SVoxImg<SWorkImg<double>> distmap_vox;
-	double* distmap_buffer = distmap.GetBufferAsDouble();
-	double* inimap_buffer = inimap.GetBufferAsDouble();
+	vector<unsigned> size = distanceMap.GetSize();
+	vector<unsigned> inimap_size = initialSlice.GetSize();
+	if (size[1] != inimap_size[0] && size[2] != inimap_size[1]) return;
+	double* distmap_buffer = distanceMap.GetBufferAsDouble();
 	int xs = size[0], ys = size[1], zs = size[2];
 
-	m_isboundary = sitk::Image(size, sitk::sitkInt32);
-	int* isboundary_buffer = m_isboundary.GetBufferAsInt32();
-	m_transportfunction[0] = sitk::Image(size, sitk::sitkFloat64);
-	double* trf0_buffer = m_transportfunction[0].GetBufferAsDouble();
-	m_transportfunction[1] = sitk::Image(size, sitk::sitkFloat64);
-	double* trf1_buffer = m_transportfunction[1].GetBufferAsDouble();
-
-	realnum mmin(_NO_BOU_*2); 
+	mReadOnlyMap = sitk::Image(size, sitk::sitkInt32);
+	mTransportFunctionMap[0] = sitk::Image(size, sitk::sitkFloat64);
+	mTransportFunctionMap[1] = sitk::Image(size, sitk::sitkFloat64);
+	double min_val = GetImageMinimum(initialSlice);
 	for (int zz = 0; zz < zs; ++zz)
 		for (int yy = 0; yy < ys; ++yy)
 			for (int xx = 0; xx < xs; ++xx) {
-				if (BUF_IDX(inimap_buffer, xs, ys, zs, xx, yy, zz) < mmin) mmin = BUF_IDX(inimap_buffer, xs, ys, zs, xx, yy, zz); // minimal value by plane distance function
 				if (distmap_buffer[xx + xs * (yy + ys * zz)] < -0.5) // not calculated
-					distmap_buffer[xx + xs * (yy + ys * zz)] = 1.2 * maxdistance; // new
+					distmap_buffer[xx + xs * (yy + ys * zz)] = 1.2 * distanceMax; // new
 				if (!xx || xx == xs - 1 || !yy || yy == ys - 1 || !zz || zz == zs - 1) // external borders
-					distmap_buffer[xx + xs * (yy + ys * zz)] = 1.2 * maxdistance; // new
+					distmap_buffer[xx + xs * (yy + ys * zz)] = 1.2 * distanceMax; // new
 			}
-	m_gx = sitk::Derivative(distmap, 0, 1, false);
-	m_gy = sitk::Derivative(distmap, 1, 1, false);
-	m_gz = sitk::Derivative(distmap, 2, 1, false);
+	mGradX = sitk::Derivative(distanceMap, 0, 1, false);
+	mGradY = sitk::Derivative(distanceMap, 1, 1, false);
+	mGradZ = sitk::Derivative(distanceMap, 2, 1, false);
 
-	m_min = mmin;
+	const double* inimap_buffer = initialSlice.GetBufferAsDouble();
+	double* trf0_buffer = mTransportFunctionMap[0].GetBufferAsDouble();
+	double* trf1_buffer = mTransportFunctionMap[1].GetBufferAsDouble();
+	int* isboundary_buffer = mReadOnlyMap.GetBufferAsInt32();
 	for (int zz = 0; zz < zs; ++zz) {
 		for (int yy = 0; yy < ys; ++yy) {
 			for (int xx = 0; xx < xs; ++xx) {
-				if (BUF_IDX(inimap_buffer, xs, ys, zs, xx, yy, zz) < _NO_BOU_) { // _NO_BOU_ = not boundary, < _NO_BOU_ = calculated boundary
-					BUF_IDX(trf1_buffer, xs, ys, zs, xx, yy, zz) = BUF_IDX(trf0_buffer, xs, ys, zs, xx, yy, zz) = BUF_IDX(inimap_buffer, xs, ys, zs, xx, yy, zz); // passed arrival plane
-					BUF_IDX(isboundary_buffer, xs, ys, zs, xx, yy, zz) = 1; // 1: read only boundary
+				if (xx == initialSliceIdx) { // _NO_BOU_ = not boundary, < _NO_BOU_ = calculated boundary
+					BUF_IDX3D(trf1_buffer, xs, ys, zs, xx, yy, zz) = BUF_IDX3D(trf0_buffer, xs, ys, zs, xx, yy, zz) = BUF_IDX2D(inimap_buffer, ys, zs, yy, zz); // passed arrival plane
+					BUF_IDX3D(isboundary_buffer, xs, ys, zs, xx, yy, zz) = 1; // 1: read only boundary
 				}
-				else {
-					if (!xx || xx == xs - 1 || !yy || yy == ys - 1 || !zz || zz == zs - 1) { // external borders
-						BUF_IDX(trf1_buffer, xs, ys, zs, xx, yy, zz) = BUF_IDX(trf0_buffer, xs, ys, zs, xx, yy, zz) = mmin;
-						BUF_IDX(isboundary_buffer, xs, ys, zs, xx, yy, zz) = 1; // 1: read only boundary
-					}//TODO asda
-					else {
-						BUF_IDX(trf1_buffer, xs, ys, zs, xx, yy, zz) = BUF_IDX(trf0_buffer, xs, ys, zs, xx, yy, zz) = 0;// -mmin; // initial transport value, is 0 better?
-						BUF_IDX(isboundary_buffer, xs, ys, zs, xx, yy, zz) = 0; // at points where calculation is needed
-
-					}
+				else if (!xx || xx == xs - 1 || !yy || yy == ys - 1 || !zz || zz == zs - 1) { // external borders
+					BUF_IDX3D(trf1_buffer, xs, ys, zs, xx, yy, zz) = BUF_IDX3D(trf0_buffer, xs, ys, zs, xx, yy, zz) = min_val;
+					BUF_IDX3D(isboundary_buffer, xs, ys, zs, xx, yy, zz) = 1; // 1: read only boundary
 				}
 			}
 		}
@@ -69,26 +52,27 @@ void CTransport::TrInit(sitk::Image &distmap, sitk::Image& inimap, realnum maxdi
 	m_active = 1;
 }
 
-bool CTransport::TrIterate(int bev)
+bool TransportFunction::Iterate()
 {
 	bool updated = false;
 	_PROFILING;
-	int targi = bev ? 0 : 1;
-	sitk::Image& trf = m_transportfunction[bev];// m_transportfunction[bev];
-	sitk::Image& trft = m_transportfunction[targi];// m_transportfunction[targi];
-	double* trf_buffer = trf.GetBufferAsDouble();
+	int src_idx = mIterationCount++ % 2;
+	int dst_idx = (src_idx + 1) % 2;
+	const sitk::Image& trf = mTransportFunctionMap[src_idx];// mTransportFunctionMap[bev];
+	sitk::Image& trft = mTransportFunctionMap[dst_idx];// mTransportFunctionMap[targi];
+	const double* trf_buffer = trf.GetBufferAsDouble();
 	double* trft_buffer = trft.GetBufferAsDouble();
-	sitk::Image& bound = m_isboundary;
+	sitk::Image& bound = mReadOnlyMap;
 	int* bound_buffer = bound.GetBufferAsInt32();
 	vector<uint32_t> size = trf.GetSize();
 	int xs(size[0]), ys(size[1]), zs(size[2]);
 	static const realnum alpha = 0.003;// small value
 
-	double* gx_buffer = m_gx.GetBufferAsDouble();
-	double* gy_buffer = m_gy.GetBufferAsDouble();
-	double* gz_buffer = m_gz.GetBufferAsDouble();
+	double* gx_buffer = mGradX.GetBufferAsDouble();
+	double* gy_buffer = mGradY.GetBufferAsDouble();
+	double* gz_buffer = mGradZ.GetBufferAsDouble();
 
-	#pragma omp parallel for
+OMP_PARALLEL_FOR
 	for (int zyx = 0; zyx < zs * ys * xs; zyx++) {
 		int zz = zyx / (ys * xs);
 		if (zz > 0 && zz < zs - 1)
@@ -99,27 +83,24 @@ bool CTransport::TrIterate(int bev)
 				int xx = zyx % xs;
 				if (xx > 0 && xx < xs - 1)
 				{
-					if (BUF_IDX(bound_buffer, xs, ys, zs, xx, yy, zz) != 0) {
+					if (BUF_IDX3D(bound_buffer, xs, ys, zs, xx, yy, zz) != 0) {
 						continue; // boundary to completely omit (no transport from uninitialized distance map)
 					}
 
 					realnum val;
 					int x, y, z;
-					realnum gx(BUF_IDX(gx_buffer, xs, ys, zs, xx, yy, zz)), gy(BUF_IDX(gy_buffer, xs, ys, zs, xx, yy, zz)), gz(BUF_IDX(gz_buffer, xs, ys, zs, xx, yy, zz));
+					realnum gx(BUF_IDX3D(gx_buffer, xs, ys, zs, xx, yy, zz)), gy(BUF_IDX3D(gy_buffer, xs, ys, zs, xx, yy, zz)), gz(BUF_IDX3D(gz_buffer, xs, ys, zs, xx, yy, zz));
 					x = gx > 0 ? xx + 1 : xx - 1;
 					y = gy > 0 ? yy + 1 : yy - 1;
 					z = gz > 0 ? zz + 1 : zz - 1;
 					if (gx < 0) gx *= -1;
 					if (gy < 0) gy *= -1;
 					if (gz < 0) gz *= -1;
-					val = gx * BUF_IDX(trf_buffer, xs, ys, zs, x, yy, zz) + gy * BUF_IDX(trf_buffer, xs, ys, zs, xx, y, zz) + gz * BUF_IDX(trf_buffer, xs, ys, zs, xx, yy, z);
+					val = gx * BUF_IDX3D(trf_buffer, xs, ys, zs, x, yy, zz) + gy * BUF_IDX3D(trf_buffer, xs, ys, zs, xx, y, zz) + gz * BUF_IDX3D(trf_buffer, xs, ys, zs, xx, yy, z);
 					val /= gx + gy + gz + alpha;// zero: at points where calculation is needed, 1 read only boundary points
-					if (val > DBL_MAX) {
-						val = val;
-					}
-					if (abs(val - BUF_IDX(trft_buffer, xs, ys, zs, xx, yy, zz)) > 1e-10)
+					if (abs(val - BUF_IDX3D(trft_buffer, xs, ys, zs, xx, yy, zz)) > abs(BUF_IDX3D(trft_buffer, xs, ys, zs, xx, yy, zz)*0.1))
 						updated = true;
-					BUF_IDX(trft_buffer, xs, ys, zs, xx, yy, zz) = val;  // update wherever calculation is needed
+					BUF_IDX3D(trft_buffer, xs, ys, zs, xx, yy, zz) = val;  // update wherever calculation is needed
 				}
 			}
 		}
@@ -127,106 +108,44 @@ bool CTransport::TrIterate(int bev)
 	return updated;
 }
 
-void CTransport::TrControl(int nIter)
+void TransportFunction::Calculate(sitk::Image distanceMap, const sitk::Image& initialSlice, int initialSliceIdx, realnum distanceMax)
 {
 	_PROFILING;
+	Initialize(distanceMap, initialSlice, initialSliceIdx, distanceMax);
 	if (!m_active) return;
 
-	for (int ii = 0; ii < nIter; ++ii) {
-		bool updated = TrIterate(ii & 1);
+	for (int ii = 0; ii < mIterationsMax; ++ii) {
+		bool updated = Iterate();
 		if (!updated)
 			break;
 	}
 }
 
-void CTransport::GetDispSlice(int along, int at, SDisImg& r) // better colorization!
-{
-	if (!m_active) return;
-	realnum zlim(1e-22);
-	int bcol(0);
-	sitk::Image& trf = m_transportfunction[0];
-	double* trf_buffer = trf.GetBufferAsDouble();
-	int* bound_buffer = m_isboundary.GetBufferAsInt32();
-	vector<uint32_t> size = trf.GetSize();
-	int xs(size[0]), ys(size[1]), zs(size[2]);
-
-	if (along == Talox) {
-		if (ys != r.xs || zs != r.ys) {
-			r.Clean();
-			r.dat = new unsigned long[ys * zs];
-			if (!r.dat) return;
-			r.xs = ys; r.ys = zs;
-		}
-		
-		int xx(at);
-		for (int zz = 0; zz < zs; ++zz) {
-			for (int yy = 0; yy < ys; ++yy) {
-				if (BUF_IDX(bound_buffer, xs, ys, zs, xx, yy, zz) == -1) // not initialized
-					r[zz][yy] = (0xff << 16) + (0xff << 8) + 0xff;
-				else { //if (m_isboundary[zz][yy][xx] == 1) // boundary or internal
-					if (BUF_IDX(trf_buffer, xs, ys, zs, xx, yy, zz) < -zlim) // -m_min: maximal value
-						r[zz][yy] = (bcol << 16) + (bcol << 0) + (int)256*(127 + 0xff * ((0.5* BUF_IDX(trf_buffer, xs, ys, zs, xx, yy, zz) / m_min)));
-					else if (BUF_IDX(trf_buffer, xs, ys, zs, xx, yy, zz) > zlim)
-						r[zz][yy] = ((int)(127 -0xff * (0.5 * BUF_IDX(trf_buffer, xs, ys, zs, xx, yy, zz) / m_min)) << 16) + (bcol << 8) + bcol;
-					else 
-						r[zz][yy] = (0xff << 16) + (0xff << 8) + 0xff;
-				}
-
-			}
-		}
-		
-	}
-	else if (along == Taloy) {
-		if (xs != r.xs || zs != r.ys) {
-			r.Clean();
-			r.dat = new unsigned long[xs * zs];
-			if (!r.dat) return;
-			r.xs = xs; r.ys = zs;
-		}
-
-		int yy(at);
-		for (int zz = 0; zz < zs; ++zz) {
-			for (int xx = 0; xx < xs; ++xx) {
-				if (BUF_IDX(bound_buffer, xs, ys, zs, xx, yy, zz) == -1) // not initialized
-					r[zz][xx] = (0xff << 16) + (0xff << 8) + 0xff;
-				else { //if (m_isboundary[zz][yy][xx] == 1) // boundary or internal
-					if (BUF_IDX(trf_buffer, xs, ys, zs, xx, yy, zz) < -zlim) // -m_min: maximal value
-						r[zz][xx] = (bcol << 16) + (bcol << 0) + (int)256*(127 + 0xff * ((0.5 * BUF_IDX(trf_buffer, xs, ys, zs, xx, yy, zz) / m_min)));
-					else if (BUF_IDX(trf_buffer, xs, ys, zs, xx, yy, zz) > zlim)
-						r[zz][xx] = ((int)(127 -0xff * (0.5 * BUF_IDX(trf_buffer, xs, ys, zs, xx, yy, zz) / m_min)) << 16) + (bcol << 8) + bcol;
-					else
-						r[zz][xx] = (0xff << 16) + (0xff << 8) + 0xff;
-				}
-			}
-		}
-
-	}
-	else if (along == Taloz) {
-		if (xs != r.xs || ys != r.ys) {
-			r.Clean();
-			r.dat = new unsigned long[xs * ys];
-			if (!r.dat) return;
-			r.xs = xs; r.ys = ys;
-		}
-
-		int zz(at);
-		for (int yy = 0; yy < ys; ++yy) {
-			for (int xx = 0; xx < xs; ++xx) {
-				if (BUF_IDX(bound_buffer, xs, ys, zs, xx, yy, zz) == -1) // not initialized
-					r[yy][xx] = (0xff << 16) + (0xff << 8) + 0xff;
-				else { //if (m_isboundary[zz][yy][xx] == 1) // boundary or internal
-					if (BUF_IDX(trf_buffer, xs, ys, zs, xx, yy, zz) < -zlim) // -m_min: maximal value
-						r[yy][xx] = (bcol << 16) + (bcol << 0) + (int)256*(127 + 0xff * ((0.5 * BUF_IDX(trf_buffer, xs, ys, zs, xx, yy, zz) / m_min)));
-					else if (BUF_IDX(trf_buffer, xs, ys, zs, xx, yy, zz) > zlim)
-						r[yy][xx] = ((int)(127 -0xff * (0.5 * BUF_IDX(trf_buffer, xs, ys, zs, xx, yy, zz) / m_min)) << 16) + (bcol << 8) + bcol;
-					else
-						r[yy][xx] = (0xff << 16) + (0xff << 8) + 0xff;
-				}
-			}
-		}
-
-	}
-
-
+void TransportFunction::RotateTransportFunction(const std::vector<double>& rotation_matrix, vector<unsigned> sample_size) {
+	resample_img(mTransportFunctionMap[0], mTransportFunctionMap[0], rotation_matrix, sample_size, true);
+	resample_img(mTransportFunctionMap[1], mTransportFunctionMap[1], rotation_matrix, sample_size, true);
 }
 
+const sitk::Image& TransportFunction::GetTransportFunction() const {
+	return mTransportFunctionMap[mIterationCount % 2];
+}
+
+sitk::Image& TransportFunction::GetTransportFunction() {
+	return mTransportFunctionMap[mIterationCount % 2];
+}
+
+const sitk::Image& TransportFunction::GetReadOnlyMap() const {
+	return mReadOnlyMap;
+}
+
+const sitk::Image& TransportFunction::GetGradX() const {
+	return mGradX;
+}
+
+const sitk::Image& TransportFunction::GetGradY() const {
+	return mGradY;
+}
+
+const sitk::Image& TransportFunction::GetGradZ() const {
+	return mGradZ;
+}

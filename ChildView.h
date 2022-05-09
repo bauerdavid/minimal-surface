@@ -11,6 +11,7 @@
 #include "afxwin.h"
 #include "afxcmn.h"
 #include "SimpleITK.h"
+#include "MinimalSurfaceEstimator.h"
 
 namespace sitk = itk::simple;
 
@@ -22,26 +23,31 @@ class CControlDlg;
 
 class CChildView : public CWnd
 {
+	const sitk::Image* mPhaseFieldMap[2];
+	const sitk::Image* mMeetingPointsMap;
+	const sitk::Image* mPhaseField2DMap;
+	Vec3<double> mPlaneNormal;
+	Vec3<double> mPlaneCenter;
+	double mPlaneOffset = 1e11;
 	bool pressed = false;
-// Construction
+
+	std::vector<POINT3D> mBoundaryContour;
 public:
 	CChildView();
 
 // Attributes
 
-public:
 	CControlDlg *m_pControl;
-	CCurvEikonal m_liftedEikonal;
+	MinimalSurfaceEstimator mEstimator;
 	SDisImg m_disp;
 	SDisImg m_dispd1;
 	SDisImg m_dispd2;
-	SDisImg m_dispd3;
 	SDisImg m_dislic;
-	sitk::Image m_path_image_x;
-	sitk::Image m_path_image_y;
-	sitk::Image m_path_image_z;
+	sitk::Image mPathImageX;
+	sitk::Image mPathImageY;
+	sitk::Image mPathImageZ;
+	sitk::Image mInputImage;
 
-	CTransport m_transport;
 	CImageOp m_imageOp;
 
 	void DispImage(CPaintDC &dc, SDisImg &disp, int offx, int offy);
@@ -50,11 +56,10 @@ public:
 	void PauseThread(int threadstat);
 	void StopThread();
 	void GetAllPathX();
-	int m_prevthreadactivated;
-	int m_threadactivated;
+	int mAlgorithmStage;
 
-	CVec3 m_start_point;
-	CVec3 m_end_point;
+	Vec3<double> mStartPoint;
+	Vec3<double> mEndPoint;
 	
 	int m_bispoint;
 	/*int m_fieldliney;
@@ -164,3 +169,5 @@ public:
 	afx_msg void OnBnClickedSwitchView();
 	afx_msg void OnBnClickedTestBuild();
 };
+
+void GetDispSliceFromTransportFunction(const TransportFunction& transportFunction, int along, int at, SDisImg& r);

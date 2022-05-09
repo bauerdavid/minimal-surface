@@ -45,6 +45,15 @@
     <ClCompile Include="FMSigned.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="MinimalSurfaceEstimator.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="PlanePhaseField.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="pythonmodule.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="AreaEikonal.h">
@@ -89,6 +98,27 @@
     <ClInclude Include="FMSigned.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="MinimalSurfaceEstimator.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="PlanePhaseField.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Vec.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="szevent.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="EventSource.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="pythonmodule.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="EstimatorWrapper.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <Image Include="res\MinArea.ico">
@@ -105,6 +135,7 @@
       <Filter>Resource Files</Filter>
     </None>
     <None Include="packages.config" />
+    <None Include="setup.py" />
   </ItemGroup>
   <ItemGroup>
     <Text Include="ReadMe.txt" />

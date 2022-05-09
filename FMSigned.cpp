@@ -28,7 +28,7 @@ void FMSigned::initialize(sitk::Image& input_map, double max_distance, double ve
 	_PROFILING;
 	double* input_buffer = input_map.GetBufferAsDouble();
 	m_max_dist = max_distance;
-	m_velo = velo;
+	mVelocityMap = velo;
 	vector<uint32_t> init_size = m_distance_map.GetSize();
 	vector<uint32_t> input_size = input_map.GetSize();
 	if (init_size != input_size) {
@@ -45,33 +45,33 @@ void FMSigned::initialize(sitk::Image& input_map, double max_distance, double ve
 	xs = input_size[0];
 	ys = input_size[1];
 	zs = input_size[2];
-#pragma omp parallel for
+OMP_PARALLEL_FOR
 	for (int zyx = 0; zyx < zs * ys * xs; zyx++) {
 		int zz = zyx / (ys * xs);
 		{
 			int yy = (zyx / xs) % ys;
 			{
 				int xx = zyx % xs;
-				bool&& neg = BUF_IDX(input_buffer, xs, ys, zs, xx, yy, zz) < 0;
-				bool&& xp_pos = xx + 1 < xs && BUF_IDX(input_buffer, xs, ys, zs, xx + 1, yy, zz) > 0;
-				bool&& xp_neg = xx + 1 < xs && BUF_IDX(input_buffer, xs, ys, zs, xx + 1, yy, zz) < 0;
-				bool&& yp_pos = yy + 1 < ys && BUF_IDX(input_buffer, xs, ys, zs, xx, yy + 1, zz) > 0;
-				bool&& yp_neg = yy + 1 < ys && BUF_IDX(input_buffer, xs, ys, zs, xx, yy + 1, zz) < 0;
-				bool&& zp_pos = zz + 1 < zs && BUF_IDX(input_buffer, xs, ys, zs, xx, yy, zz + 1) > 0;
-				bool&& zp_neg = zz + 1 < zs && BUF_IDX(input_buffer, xs, ys, zs, xx, yy, zz + 1) < 0;
+				bool&& neg = BUF_IDX3D(input_buffer, xs, ys, zs, xx, yy, zz) < 0;
+				bool&& xp_pos = xx + 1 < xs && BUF_IDX3D(input_buffer, xs, ys, zs, xx + 1, yy, zz) > 0;
+				bool&& xp_neg = xx + 1 < xs && BUF_IDX3D(input_buffer, xs, ys, zs, xx + 1, yy, zz) < 0;
+				bool&& yp_pos = yy + 1 < ys && BUF_IDX3D(input_buffer, xs, ys, zs, xx, yy + 1, zz) > 0;
+				bool&& yp_neg = yy + 1 < ys && BUF_IDX3D(input_buffer, xs, ys, zs, xx, yy + 1, zz) < 0;
+				bool&& zp_pos = zz + 1 < zs && BUF_IDX3D(input_buffer, xs, ys, zs, xx, yy, zz + 1) > 0;
+				bool&& zp_neg = zz + 1 < zs && BUF_IDX3D(input_buffer, xs, ys, zs, xx, yy, zz + 1) < 0;
 
-				bool&& xn_pos = xx - 1 > 0 && BUF_IDX(input_buffer, xs, ys, zs, xx - 1, yy, zz) > 0;
-				bool&& xn_neg = xx - 1 > 0 && BUF_IDX(input_buffer, xs, ys, zs, xx - 1, yy, zz) < 0;
-				bool&& yn_pos = yy - 1 > 0 && BUF_IDX(input_buffer, xs, ys, zs, xx, yy - 1, zz) > 0;
-				bool&& yn_neg = yy - 1 > 0 && BUF_IDX(input_buffer, xs, ys, zs, xx, yy - 1, zz) < 0;
-				bool&& zn_pos = zz - 1 > 0 && BUF_IDX(input_buffer, xs, ys, zs, xx, yy, zz - 1) > 0;
-				bool&& zn_neg = zz - 1 > 0 && BUF_IDX(input_buffer, xs, ys, zs, xx, yy, zz - 1) < 0;
+				bool&& xn_pos = xx - 1 > 0 && BUF_IDX3D(input_buffer, xs, ys, zs, xx - 1, yy, zz) > 0;
+				bool&& xn_neg = xx - 1 > 0 && BUF_IDX3D(input_buffer, xs, ys, zs, xx - 1, yy, zz) < 0;
+				bool&& yn_pos = yy - 1 > 0 && BUF_IDX3D(input_buffer, xs, ys, zs, xx, yy - 1, zz) > 0;
+				bool&& yn_neg = yy - 1 > 0 && BUF_IDX3D(input_buffer, xs, ys, zs, xx, yy - 1, zz) < 0;
+				bool&& zn_pos = zz - 1 > 0 && BUF_IDX3D(input_buffer, xs, ys, zs, xx, yy, zz - 1) > 0;
+				bool&& zn_neg = zz - 1 > 0 && BUF_IDX3D(input_buffer, xs, ys, zs, xx, yy, zz - 1) < 0;
 				if ((xp_pos || xn_pos || yp_pos || yn_pos || zp_pos || zn_pos) && neg
 					&& (xp_neg || xn_neg || yp_neg || yn_neg || zp_neg || zn_neg)) {
-					BUF_IDX(m_distance_buffer, xs, ys, zs, xx, yy, zz) = 0;
-					BUF_IDX(m_frozen_buffer, xs, ys, zs, xx, yy, zz) = 1;
+					BUF_IDX3D(m_distance_buffer, xs, ys, zs, xx, yy, zz) = 0;
+					BUF_IDX3D(m_frozen_buffer, xs, ys, zs, xx, yy, zz) = 1;
 					POINT3D point = point_to_representation(xx, yy, zz);
-#pragma omp critical (build_narrow_band)
+OMP_CRITICAL(build_narrow_band)
 					m_narrow_band.push(point, 0);
 				}
 
@@ -84,7 +84,7 @@ void FMSigned::initialize(sitk::Image& input_map, double max_distance, double ve
 
 bool FMSigned::compute_distance(vector<int> p, double& out) {
 	//_PROFILING;
-	double coeff[] = { -1. / (m_velo * m_velo), 0, 0 };
+	double coeff[] = { -1. / (mVelocityMap * mVelocityMap), 0, 0 };
 	bool neg = false;
 	for (int dim = 0; dim < 3; dim++) {
 		double val1 = INF;
@@ -93,16 +93,16 @@ bool FMSigned::compute_distance(vector<int> p, double& out) {
 			const vector<int>& offset = NEIGH6_OFFSET[2 * dim + i];
 			int xn(p[0] + offset[0]), yn(p[1] + offset[1]), zn(p[2] + offset[2]);
 			if (xn < 0 || xn >=xs || yn < 0 || yn >=ys || zn < 0 || zn >= zs ||
-				!BUF_IDX(m_frozen_buffer, xs, ys, zs, xn, yn, zn)) continue;
-			double _val1 = BUF_IDX(m_distance_buffer, xs, ys, zs, xn, yn, zn);
+				!BUF_IDX3D(m_frozen_buffer, xs, ys, zs, xn, yn, zn)) continue;
+			double _val1 = BUF_IDX3D(m_distance_buffer, xs, ys, zs, xn, yn, zn);
 			if (abs(_val1) < abs(val1)) {
 				val1 = _val1;
 #ifdef HIGH_ACCURACY
 				vector<int> pn2;
 				transform(p.begin(), p.end(), offset.begin(), back_inserter(pn2), [](int p, int o) { return p + 2 * o; });
 
-				double _val2 = BUF_IDX(m_distance_buffer, xs, ys, zs, pn2[0], pn2[1], pn2[2]);
-				if (BUF_IDX(m_frozen_buffer, xs, ys, zs, pn2[0], pn2[1], pn2[2]) && _val2 <= val2)
+				double _val2 = BUF_IDX3D(m_distance_buffer, xs, ys, zs, pn2[0], pn2[1], pn2[2]);
+				if (BUF_IDX3D(m_frozen_buffer, xs, ys, zs, pn2[0], pn2[1], pn2[2]) && _val2 <= val2)
 					val2 = _val2;
 				else
 					val2 = INF;
@@ -140,18 +140,18 @@ void FMSigned::iterate() {
 		return;
 	}
 	m_narrow_band.pop();
-	BUF_IDX(m_frozen_buffer, xs, ys, zs, x, y, z) = 1;
-	BUF_IDX(m_distance_buffer, xs, ys, zs, x, y, z) = dist;
-//#pragma omp parallel for
+	BUF_IDX3D(m_frozen_buffer, xs, ys, zs, x, y, z) = 1;
+	BUF_IDX3D(m_distance_buffer, xs, ys, zs, x, y, z) = dist;
+//OMP_PARALLEL_FOR
 	for (int i = 0; i < 6; i++) {
 		const vector<int> &offset = NEIGH6_OFFSET[i];
 		int xn = x + offset[0], yn = y + offset[1], zn = z + offset[2];
 		if (xn < 0 || xn >= xs || yn < 0 || yn >= ys || zn < 0 || zn >= zs
-			|| BUF_IDX(m_frozen_buffer, xs, ys, zs, xn, yn, zn)) continue;
+			|| BUF_IDX3D(m_frozen_buffer, xs, ys, zs, xn, yn, zn)) continue;
 		double dist_n;
 		bool solved = compute_distance({ xn, yn, zn }, dist_n);
 		if (solved)
-//#pragma omp critical (push_to_narrow_band)
+//OMP_CRITICAL(push_to_narrow_band)
 			m_narrow_band.push_or_promote(point_to_representation(xn, yn, zn), dist_n);
 	}
 }
@@ -160,31 +160,31 @@ void FMSigned::calculateForNeighbors() {
 	_PROFILING;
 	auto& v = m_narrow_band_v;
 	int n = v.size();
-#pragma omp parallel
+OMP_PARALLEL
 	{
 		vector< std::pair<POINT3D, double>> temp;
-#pragma omp for
+OMP_FOR
 		for (int i = 0; i < n; i++) {
 			POINT3D p;
 			double dist;
 			tie(p, dist) = v[i];
 			auto [x, y, z] = representation_to_point<int>(p);
-			//#pragma omp parallel for
+			//OMP_PARALLEL_FOR
 			for (int i = 0; i < 6; i++) {
 				const vector<int>& offset = NEIGH6_OFFSET[i];
 				int xn = x + offset[0], yn = y + offset[1], zn = z + offset[2];
 				if (xn < 0 || xn >= xs || yn < 0 || yn >= ys || zn < 0 || zn >= zs
-					|| BUF_IDX(m_distance_buffer, xs, ys, zs, xn, yn, zn) < INF) continue;
+					|| BUF_IDX3D(m_distance_buffer, xs, ys, zs, xn, yn, zn) < INF) continue;
 				double dist_n;
 				bool solved = compute_distance({ xn, yn, zn }, dist_n);
 				if (solved) {
-					BUF_IDX(m_distance_buffer, xs, ys, zs, xn, yn, zn) = dist_n;
+					BUF_IDX3D(m_distance_buffer, xs, ys, zs, xn, yn, zn) = dist_n;
 					temp.push_back(make_pair(point_to_representation(xn, yn, zn), dist_n));
 				}
 
 			}
 		}
-#pragma omp critical
+OMP_CRITICAL_NO_TAG
 		m_narrow_band_v.insert(m_narrow_band_v.end(), temp.begin(), temp.end());
 	}
 	/*sort(m_narrow_band_v.begin() + n, m_narrow_band_v.end());
@@ -196,14 +196,14 @@ void FMSigned::calculateForNeighbors() {
 		tie(p, dist) = m_narrow_band.top();
 		auto [x, y, z] = representation_to_point<int>(p);
 		m_narrow_band.pop();
-		BUF_IDX(m_frozen_buffer, xs, ys, zs, x, y, z) = 1;
-		BUF_IDX(m_distance_buffer, xs, ys, zs, x, y, z) = dist;
+		BUF_IDX3D(m_frozen_buffer, xs, ys, zs, x, y, z) = 1;
+		BUF_IDX3D(m_distance_buffer, xs, ys, zs, x, y, z) = dist;
 		for (int i = 0; i < 6; i++) {
 			const vector<int>& offset = NEIGH6_OFFSET[i];
 			int xn = x + offset[0], yn = y + offset[1], zn = z + offset[2];
 			POINT3D neighb = point_to_representation(xn, yn, zn);
 			if (xn < 0 || xn >= xs || yn < 0 || yn >= ys || zn < 0 || zn >= zs
-				|| BUF_IDX(m_frozen_buffer, xs, ys, zs, xn, yn, zn) || !m_narrow_band.contains(neighb)) continue;
+				|| BUF_IDX3D(m_frozen_buffer, xs, ys, zs, xn, yn, zn) || !m_narrow_band.contains(neighb)) continue;
 			double dist_n;
 			bool solved = compute_distance({ xn, yn, zn }, dist_n);
 			if (solved && abs(m_narrow_band[neighb]) > abs(dist_n)) {
@@ -231,7 +231,7 @@ void FMSigned::smooth_distances() {
 	double* temp_buffer = temp.GetBufferAsDouble();
 	memcpy(temp_buffer, m_distance_buffer, xs * ys * zs * sizeof(double));
 	auto& v = m_narrow_band_v;
-#pragma omp parallel for
+OMP_PARALLEL_FOR
 	for (int i = 0; i < v.size(); i++) {
 		POINT3D p;
 		double dist, mean_dist, sum_dist = 0;
@@ -242,12 +242,12 @@ void FMSigned::smooth_distances() {
 			const vector<int>& offset = NEIGH6_OFFSET[i];
 			int xn = x + offset[0], yn = y + offset[1], zn = z + offset[2];
 			double dist_n;
-			if (xn < 0 || xn >= xs || yn < 0 || yn >= ys || zn < 0 || zn >= zs || (dist_n = BUF_IDX(m_distance_buffer, xs, ys, zs, xn, yn, zn)) >= INF) continue;
+			if (xn < 0 || xn >= xs || yn < 0 || yn >= ys || zn < 0 || zn >= zs || (dist_n = BUF_IDX3D(m_distance_buffer, xs, ys, zs, xn, yn, zn)) >= INF) continue;
 			n_neighbors++;
 			sum_dist += dist_n;
 		}
 		mean_dist = dist*0.5+sum_dist/(2*n_neighbors);
-		BUF_IDX(temp_buffer, xs, ys, zs, x, y, z) = mean_dist;
+		BUF_IDX3D(temp_buffer, xs, ys, zs, x, y, z) = mean_dist;
 	}
 	m_distance_map = temp;
 	m_distance_buffer = m_distance_map.GetBufferAsDouble();

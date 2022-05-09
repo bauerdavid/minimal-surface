@@ -6,7 +6,7 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">
     <LocalDebuggerEnvironment>
     </LocalDebuggerEnvironment>
-    <DebuggerFlavor>WindowsLocalDebugger</DebuggerFlavor>
+    <DebuggerFlavor>PythonDebugLaunchProvider</DebuggerFlavor>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug2|x64'">
     <LocalDebuggerEnvironment />

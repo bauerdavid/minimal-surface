@@ -1,5 +1,6 @@
 #pragma once
 #include "StdAfx.h"
+#include "Utils.h"
 #include "math.h"
 typedef double realnum;
 #define PI 3.1415926536
@@ -204,194 +205,6 @@ struct SWorkData
 	realnum *data;
 };
 
-class CVec2  
-{
-public:
-	CVec2() {};
-	CVec2(double x, double y) {
-		v[0] = x;
-		v[1] = y;
-	};
-	~CVec2() {};
-	
-	union {
-		double v[2];
-		struct {
-			double x,y;
-		};
-	};
-	
-	double &operator[](int i) {
-		return v[i];
-	}
-	CVec2 &operator*=(double s) {
-		v[0] *= s;
-		v[1] *= s;
-		return *this;
-	}
-	CVec2 &operator+=(CVec2 &w) {
-		v[0] += w[0];
-		v[1] += w[1];
-		return *this;
-	}
-	CVec2 &operator-=(CVec2 &w) {
-		v[0] -= w[0];
-		v[1] -= w[1];
-		return *this;
-	}
-	
-	CVec2 &Norm() {
-		double l = 1.0/sqrt(v[0]*v[0]+v[1]*v[1]);
-		v[0] *= l;
-		v[1] *= l;
-		return *this;
-	}
-
-	double Len() {
-		return sqrt(v[0]*v[0]+v[1]*v[1]);
-	}
-
-};
-CVec2 operator *(double f, CVec2 &s);
-CVec2 operator *(int f, CVec2 &s);
-realnum operator *(CVec2 &s1, CVec2 &s2);
-
-class CVec3  
-{
-public:
-	CVec3() {
-		v[0] = v[1] = v[2] = 0;
-	};
-	CVec3(double x, double y, double z) {
-		v[0] = x;
-		v[1] = y;
-		v[2] = z;
-	};
-	~CVec3() {};
-	
-	union {
-		double v[3];
-		struct {
-			double x,y,z;
-		};
-	};
-	
-	double &operator[](int i) {
-		return v[i];
-	}
-	CVec3 &operator*=(double s) {
-		v[0] *= s;
-		v[1] *= s;
-		v[2] *= s;
-		return *this;
-	}
-	CVec3 &operator+=(CVec3 &w) {
-		v[0] += w[0];
-		v[1] += w[1];
-		v[2] += w[2];
-		return *this;
-	}
-	CVec3 &operator-=(CVec3 &w) {
-		v[0] -= w[0];
-		v[1] -= w[1];
-		v[2] -= w[2];
-		return *this;
-	}
-	
-	CVec3 &Norm() {
-		double l = 1.0/sqrt(v[0]*v[0]+v[1]*v[1]+v[2]*v[3]);
-		v[0] *= l;
-		v[1] *= l;
-		v[2] *= l;
-		return *this;
-	}
-
-	double Len() {
-		return sqrt(v[0]*v[0]+v[1]*v[1]+v[2]*v[3]);
-	}
-
-};
-
-CVec3 operator *(double f, CVec3 &v);
-
-class CMat3  
-{
-public:
-	CMat3() {
-		for (int i = 0; i < 3; ++i)
-			for (int j = 0; j < 3; ++j)
-				m[i][j] = 0;
-	};
-
-	~CMat3() {};
-	
-	union {
-		double m[3][3];
-		struct {
-			CVec3 r[3];
-		};
-	};
-
-	void SetId() {
-		m[0][0] = 1; m[0][1] = 0; m[0][2] = 0;
-		m[1][0] = 0; m[1][1] = 1; m[1][2] = 0;
-		m[2][0] = 0; m[2][1] = 0; m[2][2] = 1;
-	}
-	
-	CVec3 &operator[](int i) {
-		return r[i];
-	}
-	CMat3 &operator=(const CMat3 &s) {
-		m[0][0] = s.m[0][0]; m[0][1] = s.m[0][1]; m[0][2] = s.m[0][2];
-		m[1][0] = s.m[1][0]; m[1][1] = s.m[1][1]; m[1][2] = s.m[1][2];
-		m[2][0] = s.m[2][0]; m[2][1] = s.m[2][1]; m[2][2] = s.m[2][2];
-		return *this;
-	}
-	CMat3 &operator*=(double s) {
-		r[0] *= s;
-		r[1] *= s;
-		r[2] *= s;
-		return *this;
-	}
-	CMat3 &operator+=(CMat3 &w) {
-		r[0] += w[0];
-		r[1] += w[1];
-		r[2] += w[2];
-		return *this;
-	}
-	CMat3 &operator-=(CMat3 &w) {
-		r[0] -= w[0];
-		r[1] -= w[1];
-		r[2] -= w[2];
-		return *this;
-	}
-	
-	CMat3 &operator*=(CMat3 &w)  {
-		CMat3 tm;
-		for (int i = 0; i < 3; ++i)
-			for (int j = 0; j < 3; ++j)
-				for (int k = 0; k < 3; ++k)
-					tm[i][j] += m[i][k]*w[k][j];
-		/*for (int i = 0; i < 3; ++i)
-			for (int j = 0; j < 3; ++j)
-				m[i][j] = tm[i][j];*/
-		*this = tm;
-		return *this;
-	}
-	CMat3 &Transpose()  {
-		double a;
-		a = m[0][1]; m[0][1] = m[1][0]; m[1][0] = a;
-		a = m[0][2]; m[0][2] = m[2][0]; m[2][0] = a;
-		a = m[1][2]; m[1][2] = m[2][1]; m[2][1] = a;
-		return *this;
-	}
-
-};
-
-/*CMat3 operator *(double f, CMat3 &m);
-CMat3 operator *(CMat3 &m1, CMat3 &m2);
-CVec3 operator *(CMat3 &m, CVec3 &v);
-CVec3 operator *(CVec3 &v, CMat3 &m);*/
 
 ///////////////////////////////////////////////////////////////////////////////
 #define HFRAME 8
@@ -627,7 +440,7 @@ template <class T> struct SWorkImg {
 			}
 		}
 		maxval = minval = avgval = 0;
-#pragma omp parallel for schedule(static)
+OMP_PARALLEL_FOR
 		for (int qp = 0; qp < xs * ys; qp++) {
 			int q = (qp / xs);
 			{
@@ -651,7 +464,7 @@ template <class T> struct SWorkImg {
 			}
 		}
 		maxval = minval = avgval = 0;
-#pragma omp parallel for schedule(static)
+OMP_PARALLEL_FOR
 		for (int qp = 0; qp < xs * ys; qp++) {
 			int q = (qp / xs); 
 			{
@@ -677,7 +490,7 @@ template <class T> struct SWorkImg {
 		maxval = 0;
 		minval = (T)10000;
 		avgval = 0;
-#pragma omp parallel for schedule(static)
+OMP_PARALLEL_FOR
 		for (int qp = 0; qp < xs * ys; qp++) {
 			int q = (qp / xs);
 			{
@@ -747,7 +560,7 @@ template <class T> struct SWorkImg {
 		maxval = tc.maxval;
 		minval = tc.minval;
 		avgval = tc.avgval;
-#pragma omp parallel for schedule(static)
+OMP_PARALLEL_FOR
 		for (int qp = 0; qp < xs * ys; qp++) {
 			int q = (qp / xs);
 			int p = qp % xs;
@@ -1634,7 +1447,7 @@ template <class T> struct SVoxImg {
 				return;
 			}
 		}
-#pragma omp for schedule(static)
+OMP_FOR
 		for (int q = 0; q < zs; ++q) {
 			dat[q].Set(xs,ys,-1);
 		}
@@ -1653,7 +1466,7 @@ template <class T> struct SVoxImg {
 				return;
 			}
 		}
-#pragma omp for schedule(static)
+OMP_FOR
 		for (int q = 0; q < zs; ++q) {
 			dat[q].Set(xs,ys,0.0);
 		}
@@ -1671,7 +1484,7 @@ template <class T> struct SVoxImg {
 				return *this;
 			}
 		}
-#pragma omp for schedule(static)
+OMP_FOR
 		for (int q = 0; q < zs; ++q) {
 			dat[q] = tc.dat[q];
 		}
@@ -1681,7 +1494,7 @@ template <class T> struct SVoxImg {
 	void GetZLoopLaplace(SVoxImg &s) {
 		if (xs != s.xs || ys != s.ys || zs != s.zs) 
 			return;
-#pragma omp parallel for
+OMP_PARALLEL_FOR
 		for (int zz = 0; zz < zs; ++zz) {
 			int zp(zz+1); if (zp == zs) zp = 0;
 			int zm(zz-1); if (zm == -1) zm = zs-1;
@@ -1708,7 +1521,7 @@ template <class T> struct SVoxImg {
 		if (xs != gz.xs || ys != gz.ys || zs != gz.zs) 
 			return;
 
-#pragma omp parallel for
+OMP_PARALLEL_FOR
 		for (int r = 0; r < zs; ++r) {
 			int rm(r-1); if (rm == -1) rm = zs-1;
 			int rp(r+1); if (rp == zs) rp = 0;
@@ -1789,7 +1602,7 @@ template <class T> struct SVoxImg {
 	void GetLaplace(SVoxImg &s) {
 		if (xs != s.xs || ys != s.ys || zs != s.zs) 
 			return;
-#pragma omp parallel for
+OMP_PARALLEL_FOR
 		for (int zz = 0; zz < zs; ++zz) {
 			int zp(zz+1); if (zp == zs) zp = zs-2;
 			int zm(zz-1); if (zm == -1) zm = 1;
@@ -1815,7 +1628,7 @@ template <class T> struct SVoxImg {
 		if (xs != gz.xs || ys != gz.ys || zs != gz.zs) 
 			return;
 
-#pragma omp parallel for
+OMP_PARALLEL_FOR
 		for (int z = 0; z < zs; ++z) {
 			int zm(z-1); if (zm == -1) zm = 1;
 			int zp(z+1); if (zp == zs) zp = zs-2;
@@ -1848,7 +1661,7 @@ template <class T> struct SVoxImg {
 		if (xs != hyz.xs || ys != hyz.ys || zs != hyz.zs) 
 			return;
 
-#pragma omp parallel for
+OMP_PARALLEL_FOR
 		for (int z = 0; z < zs; ++z) {
 			int zm(z-1); if (zm == -1) zm = 1;
 			int zp(z+1); if (zp == zs) zp = zs-2;
@@ -1879,7 +1692,7 @@ template <class T> struct SVoxImg {
 		if (xs != glen.xs || ys != glen.ys || zs != glen.zs) 
 			return;
 
-#pragma omp parallel for
+OMP_PARALLEL_FOR
 		for (int r = 0; r < zs; ++r) {
 			int rm(r-1); if (rm == -1) rm = 1;
 			int rp(r+1); if (rp == zs) rp = zs-2;
@@ -1903,7 +1716,7 @@ template <class T> struct SVoxImg {
 
 
 	SVoxImg& operator*= (realnum r) {
-#pragma omp for schedule(static)
+OMP_FOR
 		for (int q = 0; q < zs; ++q) {
 			dat[q] *= r;	
 		}

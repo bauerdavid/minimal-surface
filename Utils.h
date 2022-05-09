@@ -1,6 +1,4 @@
 #pragma once
-#include <utility>
-#include "AreaEikonal.h"
 #include <numeric>
 #include <algorithm>
 #include <sitkImageFileWriter.h>
@@ -14,8 +12,53 @@
 #include <iomanip>
 #include <regex>
 #include <unordered_set>
+#include <stack>
+#include <utility>
+
+//#define SINGLE_THREAD
+#ifdef SINGLE_THREAD
+#define OMP_PARALLEL_FOR
+#define OMP_PARALLEL
+#define OMP_FOR
+#define OMP_FOR_NOWAIT
+#define OMP_CRITICAL(section_name)
+#define OMP_ATOMIC
+#define OMP_CRITICAL_NO_TAG
+#define OMP_PARALLEL_FOR_NUM_THREADS(n_threads)
+#define OMP_PARALLEL_NUM_THREADS(n_threads)
+#define OMP_FOR_REDUCTION(op, operand)
+#define OMP_PARALLEL_FOR_REDUCTION(op, operand)
+#else
+#define OMP_PARALLEL_FOR __pragma(omp parallel for)
+#define OMP_PARALLEL __pragma(omp parallel)
+#define OMP_FOR __pragma(omp for)
+#define OMP_FOR_NOWAIT __pragma(omp for nowait)
+#define OMP_CRITICAL(section_name) __pragma(omp critical(section_name))
+#define OMP_ATOMIC __pragma(omp atomic)
+#define OMP_CRITICAL_NO_TAG __pragma(omp critical)
+#define OMP_PARALLEL_FOR_NUM_THREADS(n_threads) __pragma(omp parallel for num_threads(n_threads))
+#define OMP_PARALLEL_NUM_THREADS(n_threads) __pragma(omp parallel num_threads(n_threads))
+#define OMP_FOR_REDUCTION(op, operand) __pragma(omp for reduction(op: operand))
+#define OMP_PARALLEL_FOR_REDUCTION(op, operand) __pragma(omp parallel for reduction(op: operand))
+#endif
+
+#define USE_VECTOR_AS_SET
+#define STORE_POINT_AS_INTEGER
+#ifdef STORE_POINT_AS_INTEGER
+#define POINT3D unsigned long long
+#define POINT3D_HASH std::hash<unsigned long long>
+#define REMOVABLE_POINT ULLONG_MAX
+#else
+#define POINT3D Vec3<int>
+#define POINT3D_HASH Vec3Hash<int>
+#define REMOVABLE_POINT POINT3D(-1, -1, -1)
+#endif
+
+#define POINT3D_MAP(val_type) POINT3D, val_type, POINT3D_HASH
+#define POINT3D_SET POINT3D, POINT3D_HASH
 
 #define PROFILE_FUNCTIONS
+
 #ifdef PROFILE_FUNCTIONS
 class profiler {
 	std::chrono::steady_clock::time_point start_time;
@@ -184,7 +227,13 @@ static inline std::string methodName(const std::string& prettyFunction)
 
 #endif
 
-#define BUF_IDX(buffer, xs, ys, zs, xx, yy, zz) buffer[(xx) + (xs)*((yy)+(ys)*(zz))]
+#define GET_MACRO(_1, _2, _3, _4, _5, _6, _7, NAME,...) NAME
+#define BUF_IDX2D(buffer, xs, ys, xx, yy) buffer[(xx)+(xs)*(yy)]
+#define BUF_IDX3D(buffer, xs, ys, zs, xx, yy, zz) buffer[(xx)+(xs)*((yy)+(ys)*(zz))]
+//#define BUF_IDX(...) GET_MACRO(__VA_ARGS__, BUF_IDX3D, NOT_DEF, BUF_IDX2D, NOT_DEF, NOT_DEF, NOT_DEF)(__VA_ARGS__)
+
+#include "AreaEikonal.h"
+#include "Vec.h"
 
 namespace sitk = itk::simple;
 
@@ -278,16 +327,8 @@ public:
 		return img.GetBufferAsDouble();
 	}
 
-	static void WriteToImage(sitk::Image& img, SVoxImg<SWorkImg<double>>& data) {
-		double* buffer = img.GetBufferAsDouble();
-		for (int zz = 0; zz < data.zs; zz++) {
-			for (int yy = 0; yy < data.ys; yy++) {
-				for (int xx = 0; xx < data.xs; xx++) {
-					buffer[xx + data.xs * (yy + data.ys * zz)] = data[zz][yy][xx];
-				}
-			}
-		}
-
+	static const double* GetBuffer(const sitk::Image& img) {
+		return img.GetBufferAsDouble();
 	}
 };
 
@@ -305,6 +346,10 @@ public:
 	static float* GetBuffer(sitk::Image& img) {
 		return img.GetBufferAsFloat();
 	}
+
+	static const float* GetBuffer(const sitk::Image& img) {
+		return img.GetBufferAsFloat();
+	}
 };
 
 template<>
@@ -318,6 +363,10 @@ public:
 	}
 
 	static int* GetBuffer(sitk::Image& img) {
+		return img.GetBufferAsInt32();
+	}
+
+	static const int* GetBuffer(const sitk::Image& img) {
 		return img.GetBufferAsInt32();
 	}
 };
@@ -335,10 +384,14 @@ public:
 	static unsigned char* GetBuffer(sitk::Image& img) {
 		return img.GetBufferAsUInt8();
 	}
+
+	static const unsigned char* GetBuffer(const sitk::Image& img) {
+		return img.GetBufferAsUInt8();
+	}
 };
 
 template<typename T>
-std::pair<IPoi3<double>, IPoi3<double>> best_plane_from_points(const std::vector<std::vector<T>>& c)
+std::pair<Vec3<double>, Vec3<double>> best_plane_from_points(const std::vector<std::vector<T>>& c)
 {
 	// copy coordinates to  matrix in Eigen format
 	size_t num_atoms = c.size();
@@ -349,19 +402,19 @@ std::pair<IPoi3<double>, IPoi3<double>> best_plane_from_points(const std::vector
 		coord.col(i)[2] = c[i][2];
 	}
 	// calculate centroid
-	IPoi3<double> centroid(coord.row(0).mean(), coord.row(1).mean(), coord.row(2).mean());
+	Vec3<double> centroid(coord.row(0).mean(), coord.row(1).mean(), coord.row(2).mean());
 
 	// subtract centroid
-	coord.row(0).array() -= centroid.x;
-	coord.row(1).array() -= centroid.y;
-	coord.row(2).array() -= centroid.z;
+	coord.row(0).array() -= centroid.x();
+	coord.row(1).array() -= centroid.y();
+	coord.row(2).array() -= centroid.z();
 
 	// we only need the left-singular matrix here
 	//  http://math.stackexchange.com/questions/99299/best-fitting-plane-given-a-set-of-points
 	auto svd = coord.jacobiSvd(Eigen::ComputeThinU | Eigen::ComputeThinV);
 	auto U = svd.matrixU().data();
-	IPoi3<double> plane_normal(U[6], U[7], U[8]);
-	return std::make_pair(centroid, plane_normal);
+	Vec3<double> meeting_plane_normal(U[6], U[7], U[8]);
+	return std::make_pair(centroid, meeting_plane_normal);
 }
 
 void rotate(const std::vector<double>& rotation_matrix, const std::vector<double> value, std::vector<double>& dest);
@@ -409,44 +462,20 @@ std::vector<double> rotation_matrix_from_vectors(std::vector<T>& vec1, std::vect
 	return rotation_matrix;
 }
 
-void find_rotated_size(std::vector<unsigned int>& original_size, std::vector<double>& rotation_matrix, std::vector<unsigned int>& rotated_size);
+std::vector<unsigned> find_rotated_size(const std::vector<unsigned int>& original_size, const std::vector<double>& rotation_matrix);
 
-template<typename T, sitk::PixelIDValueEnum pixelIdValueEnum = TypeEnumTrait<T>::value, class PixelManager = PixelManagerTrait<pixelIdValueEnum>>
-sitk::Image vox_img_2_sitk(SVoxImg<SWorkImg<T>>& data) {
-	int xs(data.xs), ys(data.ys), zs(data.zs);
-	sitk::Image img({ (unsigned)xs, (unsigned)ys, (unsigned)zs }, pixelIdValueEnum);
-	//PixelManager.WriteToImage(img, data);
-	CType<pixelIdValueEnum>::Type* buffer = PixelManager::GetBuffer(img);
-	for (unsigned int zz = 0; zz < zs; zz++) {
-		for (unsigned int yy = 0; yy < ys; yy++) {
-			for (unsigned int xx = 0; xx < xs; xx++) {
-				//buffer[xx + xs * (yy + ys * zz)] = data[zz][yy][xx];
-				PixelManager::SetPixel(img, { xx, yy, zz }, data[zz][yy][xx]);
-			}
-		}
-	}
-	return img;
-}
-
-template<typename T, sitk::PixelIDValueEnum pixelIdValueEnum = TypeEnumTrait<T>::value, class PixelManager = PixelManagerTrait<pixelIdValueEnum>>
-sitk::Image work_img_2_sitk(SWorkImg<T>& data) {
-	unsigned int xs(data.xs), ys(data.ys);
-	sitk::Image img(xs, ys, pixelIdValueEnum);
-	T* buffer = PixelManager::GetBuffer(img);
-	for (unsigned int yy = 0; yy < ys; yy++) {
-		for (unsigned int xx = 0; xx < xs; xx++) {
-			//buffer[xx + xs * yy] = data[yy][xx];
-			PixelManager::SetPixel(img, { xx, yy }, data[yy][xx]);
-		}
-	}
-	return img;
-}
 template
 <sitk::InterpolatorEnum interpolator = sitk::sitkLinear>
-sitk::Image resample_img(sitk::Image& src, sitk::Image& dst, std::vector<double>& rotation_matrix, std::vector<unsigned int> sample_size, bool inverse = false, bool useNearestNeighborExtrapolator = false) {
+sitk::Image resample_img(sitk::Image src, sitk::Image& dst, const std::vector<double>& rotation_matrix, bool inverse = false, bool useNearestNeighborExtrapolator = false) {
 	std::vector<unsigned> data_size = src.GetSize();
-	if (sample_size.size() == 0)
-		find_rotated_size(data_size, rotation_matrix, sample_size);
+	std::vector<unsigned> sample_size = find_rotated_size(data_size, rotation_matrix);
+	return resample_img<interpolator>(src, dst, rotation_matrix, sample_size, inverse, useNearestNeighborExtrapolator);
+}
+
+template
+<sitk::InterpolatorEnum interpolator = sitk::sitkLinear>
+sitk::Image resample_img(sitk::Image src, sitk::Image& dst, const std::vector<double>& rotation_matrix, std::vector<unsigned int> sample_size, bool inverse = false, bool useNearestNeighborExtrapolator = false) {
+	std::vector<unsigned> data_size = src.GetSize();
 	sitk::Image sample_img(sample_size, src.GetPixelID());
 	std::vector<double> original_direction = src.GetDirection();
 	std::vector<double> original_origin = src.GetOrigin();
@@ -470,35 +499,10 @@ sitk::Image resample_img(sitk::Image& src, sitk::Image& dst, std::vector<double>
 	return sample_img;
 }
 
-template<typename T, sitk::PixelIDValueEnum pixelIdValueEnum = TypeEnumTrait<T>::value, sitk::InterpolatorEnum interpolatorEnum = TypeEnumTrait<T>::interpolator, class PixelManager = PixelManagerTrait<pixelIdValueEnum>>
-sitk::Image resample_vox_img(SVoxImg<SWorkImg<T>>& data, SVoxImg<SWorkImg<T>>& out, std::vector<double>& rotation_matrix, std::vector<unsigned int> sample_size, bool inverse=false, bool useNearestNeighborExtrapolator=false) {
-	unsigned int xs(data.xs), ys(data.ys), zs(data.zs);
-	std::vector<unsigned int> data_size = { (unsigned int)xs, (unsigned int)ys, (unsigned int)zs };
-	sitk::Image data_img = vox_img_2_sitk<T, pixelIdValueEnum, PixelManager>(data);
-	sitk::Image resampled;
-
-	sitk::Image sample_image = resample_img<interpolatorEnum>(data_img, resampled, rotation_matrix, sample_size, inverse, useNearestNeighborExtrapolator);
-	//double pixVal = resampled.GetPixelAsDouble({ 40, 40, 40 });
-	sitk_2_vox_img<T, PixelManager>(resampled, out);
-	return sample_image;
-}
-
-template<typename T, class PixelManager = PixelManagerTrait<TypeEnumTrait<T>::value>>
-void sitk_2_vox_img(sitk::Image& sitk_img, SVoxImg<SWorkImg<T>>& vox_img) {
-	vector<unsigned int> sample_size = sitk_img.GetSize();
-	vox_img.Set0(sample_size[0], sample_size[1], sample_size[2]);
-	for (unsigned int z = 0; z < sample_size[2]; z++) {
-		for (unsigned int y = 0; y < sample_size[1]; y++) {
-			for (unsigned int x = 0; x < sample_size[0]; x++) {
-				T newval = PixelManager::GetPixel(sitk_img, { x, y, z });
-				vox_img[z][y][x] = newval;
-			}
-		}
-	}
-}
 
 
-void save_image(std::string filename, sitk::Image& img);
+
+void save_image(std::string filename, const sitk::Image& img);
 /*
 template<typename T, class TypeEnum = TypeEnumTrait<T>, class PixelManager = PixelManagerTrait<T>>
 void save_slice(string filename, SVoxImg <SWorkImg<T>>& data, int xslice) {
@@ -514,79 +518,6 @@ void save_slice(string filename, SVoxImg <SWorkImg<T>>& data, int xslice) {
 	}
 	save_image(filename, img);
 }*/
-
-template<typename T, typename K=T, sitk::PixelIDValueEnum pixelIdValueEnum = TypeEnumTrait<K>::value, class PixelManager = PixelManagerTrait<pixelIdValueEnum>>
-void save_vox_img(std::string filename, SVoxImg < SWorkImg<T>>& data) {
-	unsigned int xs(data.xs), ys(data.ys), zs(data.zs);
-	sitk::Image img(xs, ys, zs, pixelIdValueEnum);
-	K* buffer = PixelManager::GetBuffer(img);
-	for (unsigned int zz = 0; zz < zs; zz++) {
-		for (unsigned int yy = 0; yy < ys; yy++) {
-			for (unsigned int xx = 0; xx < xs; xx++) {
-				//buffer[xx + xs * (yy + ys * zz)] = data[zz][yy][xx];
-				PixelManager::SetPixel(img, { xx, yy, zz }, data[zz][yy][xx]);
-			}
-		}
-	}
-	save_image(filename, img);
-}
-
-template<>
-inline void save_vox_img<double>
-(std::string filename, SVoxImg < SWorkImg<double>>& data) {
-	unsigned int xs(data.xs), ys(data.ys), zs(data.zs);
-	sitk::Image img(xs, ys, zs, sitk::sitkFloat32);
-	float* buffer = img.GetBufferAsFloat();
-	for (unsigned int zz = 0; zz < zs; zz++) {
-		for (unsigned int yy = 0; yy < ys; yy++) {
-			for (unsigned int xx = 0; xx < xs; xx++) {
-				//buffer[xx + xs * (yy + ys * zz)] = data[zz][yy][xx];
-				PixelManagerTrait<sitk::sitkFloat32>::SetPixel(img, { xx, yy, zz }, data[zz][yy][xx]);
-			}
-		}
-	}
-	save_image(filename, img);
-}
-
-
-template<typename T, sitk::PixelIDValueEnum pixelIdValueEnum = TypeEnumTrait<T>::value, class PixelManager = PixelManagerTrait<pixelIdValueEnum>>
-void save_work_img(std::string filename, SWorkImg<T>& data) {
-	unsigned int xs(data.xs), ys(data.ys);
-	sitk::Image img(xs, ys, pixelIdValueEnum);
-	for (unsigned int yy = 0; yy < ys; yy++) {
-		for (unsigned int xx = 0; xx < xs; xx++) {
-			PixelManager::SetPixel(img, { xx, yy }, data[yy][xx]);
-		}
-	}
-	save_image(filename, img);
-}
-
-template<>
-inline void save_work_img<double>
-(std::string filename, SWorkImg<double>& data) {
-	unsigned int xs(data.xs), ys(data.ys);
-	sitk::Image img(xs, ys, TypeEnumTrait<float>::value);
-	for (unsigned int yy = 0; yy < ys; yy++) {
-		for (unsigned int xx = 0; xx < xs; xx++) {
-			PixelManagerTrait<sitk::sitkFloat32>::SetPixel(img, { xx, yy }, data[yy][xx]);
-		}
-	}
-	save_image(filename, img);
-}
-
-template<typename T>
-void neg_to_minus1(SVoxImg<SWorkImg<T>>& data) {
-	int xs(data.xs), ys(data.ys), zs(data.zs);
-	for (int zz = 0; zz < zs; zz++) {
-		for (int yy = 0; yy < ys; yy++) {
-			for (int xx = 0; xx < xs; xx++) {
-				if (data[zz][yy][xx] < 0) {
-					data[zz][yy][xx] = -1;
-				}
-			}
-		}
-	}
-}
 
 void neg_to_minus1(sitk::Image& img);
 
@@ -621,3 +552,32 @@ sitk::Image create_19_neighbors_SE() {
 	}
 	return se;
 }
+
+sitk::Image CalculatePhi(const sitk::Image& image, double beta = 14., double alpha = 0.01);
+
+template<sitk::PixelIDValueEnum pixelID>
+sitk::Image GetImageSlice(const sitk::Image& image, int direction, int slice) {
+	vector<unsigned> size = image.GetSize();
+	int idxs[3];
+	idxs[direction] = slice;
+	int loop_direction1 = direction == 0 ? 1 : 0;
+	int loop_direction2 = direction == 2 ? 1 : 2;
+	sitk::Image slice_image(size[loop_direction1], size[loop_direction2], image.GetPixelID());
+	const CType<pixelID>::Type* input_buffer = PixelManagerTrait<pixelID>::GetBuffer(image);
+	CType<pixelID>::Type* slice_buffer = PixelManagerTrait<pixelID>::GetBuffer(slice_image);
+
+	for (int i = 0; i < size[loop_direction2]; i++) {
+		for (int j = 0; j < size[loop_direction1]; j++) {
+			idxs[loop_direction1] = j;
+			idxs[loop_direction2] = i;
+			BUF_IDX2D(slice_buffer, size[loop_direction1], size[loop_direction2], j, i) = BUF_IDX3D(input_buffer, size[0], size[1], size[2], idxs[0], idxs[1], idxs[2]);
+		}
+	}
+	return slice_image;
+}
+
+double GetImageMinimum(const sitk::Image& image);
+
+double GetImageMaximum(const sitk::Image& image);
+
+std::vector<Vec3<int>> ResolvePath(Vec3<int> point, const sitk::Image& distanceMap);

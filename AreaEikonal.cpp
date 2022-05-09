@@ -6,8 +6,6 @@
 #include "SimpleITK.h"
 #include <vector>
 #include <sitkImageOperators.h>
-#include <itkBinaryErodeImageFilter.h>
-#include <itkFlatStructuringElement.h>
 #include "FMSigned.h"
 #define BIG_NUMBER 1e11
 #define MAX_THREADS 32
@@ -21,10 +19,6 @@
 #define MAX_FIELD_VAL 0.95
 #define M -1
 
-inline unsigned int connectivity_bit(bool val, int x, int y, int z) {
-
-	return (unsigned int)val << (x + 1) + 3 * ((y + 1) + 3 * (z + 1));
-}
 
 inline double calculate_speed(double curv, double phi, double S = 1) {
 	if (curv < -phi / (4 * S))
@@ -53,30 +47,19 @@ inline T squared_sum(T x, T y, T z) {
 namespace sitk = itk::simple;
 using namespace std;
 
-//const int max_threads = omp_get_max_threads();
-int a = 0;
-CCurvEikonal::CCurvEikonal(void)
-{
-	m_j[0] = m_j[1] = 0;
 
+void AreaEikonal::SmoothDistances() {
+	mDistanceMap[0] = sitk::DiscreteGaussian(mDistanceMap[0]);
+	mDistanceMap[1] = sitk::DiscreteGaussian(mDistanceMap[1]);
 }
 
-CCurvEikonal::~CCurvEikonal(void)
-{
-}
-
-void CPhaseContainer::SmoothDistances() {
-	m_distance[0] = sitk::DiscreteGaussian(m_distance[0]);
-	m_distance[1] = sitk::DiscreteGaussian(m_distance[0]);
-}
-
-void CPhaseContainer::CombineDistance() {
-	vector<unsigned> size = meeting_plane_positions.GetSize();
+void AreaEikonal::CombineDistance() {
+	vector<unsigned> size = mMeetingPointsMap.GetSize();
 	int xs(size[0]), ys(size[1]), zs(size[2]);
-	double* distance0_buffer = m_distance[0].GetBufferAsDouble();
-	double* distance1_buffer = m_distance[1].GetBufferAsDouble();
-	double* combined_buffer = m_combined_distance.GetBufferAsDouble();
-#pragma omp parallel for FIND_MEET_POINTS_SCHEDULE
+	double* distance0_buffer = mDistanceMap[0].GetBufferAsDouble();
+	double* distance1_buffer = mDistanceMap[1].GetBufferAsDouble();
+	double* combined_buffer = mCombinedDistanceMap.GetBufferAsDouble();
+OMP_PARALLEL_FOR
 	for (int zyx = 0; zyx < zs * ys * xs; zyx++)
 	{
 		int zz = zyx / (ys * xs);
@@ -97,17 +80,17 @@ void CPhaseContainer::CombineDistance() {
 	}
 }
 
-void CPhaseContainer::ExtractMeetingPlane() {
+void AreaEikonal::FitMeetingPlane() {
 	_PROFILING;
-	vector<unsigned> size= meeting_plane_positions.GetSize();
-	double* distance0_buffer = m_distance[0].GetBufferAsDouble();
-	double* distance1_buffer = m_distance[1].GetBufferAsDouble();
-	int* meeting_plane_buffer = meeting_plane_positions.GetBufferAsInt32();
+	vector<unsigned> size= mMeetingPointsMap.GetSize();
+	double* distance0_buffer = mDistanceMap[0].GetBufferAsDouble();
+	double* distance1_buffer = mDistanceMap[1].GetBufferAsDouble();
+	int* meeting_plane_buffer = mMeetingPointsMap.GetBufferAsInt32();
 	int xs(size[0]), ys(size[1]), zs(size[2]);
-#pragma omp parallel
+OMP_PARALLEL
 	{
 		vector<POINT3D> temp;
-#pragma omp for
+OMP_FOR
 		for (int zyx = 0; zyx < zs * ys * xs; zyx++)
 		{
 			int zz = zyx / (ys * xs);
@@ -139,13 +122,13 @@ void CPhaseContainer::ExtractMeetingPlane() {
 				}
 			}
 		}
-#pragma omp critical (fill_meeting_plane)
-		meeting_plane.insert(temp.begin(), temp.end());
+OMP_CRITICAL(fill_meeting_plane)
+		mMeetingPoints.insert(temp.begin(), temp.end());
 	}
 	vector<vector<double>> meeting_plane_vec;
-	meeting_plane_vec.reserve(meeting_plane.size());
+	meeting_plane_vec.reserve(mMeetingPoints.size());
 
-	std::transform(meeting_plane.begin(), meeting_plane.end(), back_inserter(meeting_plane_vec),
+	std::transform(mMeetingPoints.begin(), mMeetingPoints.end(), back_inserter(meeting_plane_vec),
 #ifdef STORE_POINT_AS_INTEGER
 		[](unsigned long long val) {
 			
@@ -154,56 +137,44 @@ void CPhaseContainer::ExtractMeetingPlane() {
 			return v;
 		}
 #else
-		[](const IPoi3<int>& val) {
+		[](const Vec3<int>& val) {
 
 			return vector<double>({ (double)val.x, (double)val.y, (double)val.z });
 		}
 #endif
 	);
-	std::pair<IPoi3<double>, IPoi3<double>> plane_info = best_plane_from_points(meeting_plane_vec);
-	plane_center = plane_info.first;
-	plane_normal = plane_info.second;
-	double max_norm_val = abs(plane_normal.x);
-	int max_norm_sign = sgn(plane_normal.x);
-	if (abs(plane_normal.y) > max_norm_val) {
-		max_norm_val = abs(plane_normal.y);
-		max_norm_sign = sgn(plane_normal.y);
+	std::pair<Vec3<double>, Vec3<double>> plane_info = best_plane_from_points(meeting_plane_vec);
+	mMeetingPlaneCenter = plane_info.first;
+	mMeetingPlaneNormal = plane_info.second;
+	double max_norm_val = abs(mMeetingPlaneNormal.x());
+	int max_norm_sign = sgn(mMeetingPlaneNormal.x());
+	if (abs(mMeetingPlaneNormal.y()) > max_norm_val) {
+		max_norm_val = abs(mMeetingPlaneNormal.y());
+		max_norm_sign = sgn(mMeetingPlaneNormal.y());
 	}
-	if (abs(plane_normal.z) > max_norm_val) {
-		max_norm_val = abs(plane_normal.z);
-		max_norm_sign = sgn(plane_normal.z);
+	if (abs(mMeetingPlaneNormal.z()) > max_norm_val) {
+		max_norm_val = abs(mMeetingPlaneNormal.z());
+		max_norm_sign = sgn(mMeetingPlaneNormal.z());
 	}
-	plane_normal.x *= max_norm_sign;
-	plane_normal.y *= max_norm_sign;
-	plane_normal.z *= max_norm_sign;
-	plane_offset = -(plane_center.x * plane_normal.x + plane_center.y * plane_normal.y + plane_center.z * plane_normal.z);
+	mMeetingPlaneNormal *= max_norm_sign;
+	mMeetingPlaneOffset = -(mMeetingPlaneCenter*mMeetingPlaneNormal).Sum();
 
 	vector<double> sample_plane_normal = { 1, 0, 0 };
 	// calculate rotation between the two normals
-	vector<double> plane_normal = vector<double>({ this->plane_normal.x, this->plane_normal.y, this->plane_normal.z });
-	rotation_matrix = rotation_matrix_from_vectors<double>(sample_plane_normal, plane_normal);
+	vector<double> meetingPlaneNormal = vector<double>(this->mMeetingPlaneNormal.begin(), this->mMeetingPlaneNormal.end());
 }
 
-// Image prep&check
-
-#define GAUTOO 1
-
-// Phasefield stuff
-
-realnum g_w = 2.75;
-
-
-void CPhaseContainer::FindMeetPoints() {
+void AreaEikonal::UpdateMeetPoints() {
 	_PROFILING;
-	vector<unsigned> size = m_field[0].GetSize();
+	vector<unsigned> size = mPhaseFieldMap[0].GetSize();
 	int xs = size[0], ys = size[1], zs = size[2];
-	int* meeting_plane_buffer = meeting_plane_positions.GetBufferAsInt32();
+	int* meeting_plane_buffer = mMeetingPointsMap.GetBufferAsInt32();
 	for (int ii = 0; ii < 2; ii++) {
-		sitk::Image& distance = m_distance[ii];
-		sitk::Image& counterd = m_distance[(ii + 1) % 2];
+		sitk::Image& distance = mDistanceMap[ii];
+		sitk::Image& counterd = mDistanceMap[(ii + 1) % 2];
 		double* distance_buffer = distance.GetBufferAsDouble();
 		double* counterd_buffer = counterd.GetBufferAsDouble();
-#pragma omp parallel for FIND_MEET_POINTS_SCHEDULE
+OMP_PARALLEL_FOR
 		for (int zyx = 0; zyx < zs * ys * xs; zyx++) {
 			int zz = zyx / (ys * xs);
 			if (zz > 0 && zz < zs - 1)
@@ -219,7 +190,7 @@ void CPhaseContainer::FindMeetPoints() {
 						int xp = xx + 1, xm = xx - 1;
 
 
-						if (counterd_buffer[xx + xs * (yy + ys * zz)] >= 0 && !BUF_IDX(meeting_plane_buffer, xs, ys, zs, xx, yy, zz)) {
+						if (counterd_buffer[xx + xs * (yy + ys * zz)] >= 0 && !BUF_IDX3D(meeting_plane_buffer, xs, ys, zs, xx, yy, zz)) {
 							if (distance_buffer[xx + xs * (yy + ys * zz)] - counterd_buffer[xx + xs * (yy + ys * zz)] >= 0 &&
 								((distance_buffer[xx + xs * (yp + ys * zz)] > 0 && distance_buffer[xx + xs * (yp + ys * zz)] - counterd_buffer[xx + xs * (yp + ys * zz)] < 0) ||
 									(distance_buffer[xx + xs * (ym + ys * zz)] > 0 && distance_buffer[xx + xs * (ym + ys * zz)] - counterd_buffer[xx + xs * (ym + ys * zz)] < 0) ||
@@ -228,8 +199,8 @@ void CPhaseContainer::FindMeetPoints() {
 									(distance_buffer[xx + xs * (yy + ys * zp)] > 0 && distance_buffer[xx + xs * (yy + ys * zp)] - counterd_buffer[xx + xs * (yy + ys * zp)] < 0) ||
 									(distance_buffer[xx + xs * (yy + ys * zm)] > 0 && distance_buffer[xx + xs * (yy + ys * zm)] - counterd_buffer[xx + xs * (yy + ys * zm)] < 0))) {
 								meeting_plane_buffer[xx + xs * (yy + ys * zz)] = 1;
-#pragma omp atomic
-								n_meet_points++;
+OMP_ATOMIC
+								mMeetingPointsCount++;
 							}
 						}
 					}
@@ -239,197 +210,194 @@ void CPhaseContainer::FindMeetPoints() {
 	}
 }
 
+void AreaEikonal::UpdateMeetingPlane() {
+	int prev_point_count = mMeetingPointsCount >= mMeetingPointsMin ? mMeetingPointsCount : mMeetingPointsMin;
+	UpdateMeetPoints();
+	if (mMeetingPointsCount > prev_point_count)
+		FitMeetingPlane();
+	else if (mMeetingPointsCount == prev_point_count && mMeetingPointsCount > 0) {
+		mPlaneFinalized = true;
+	}
+}
 
-//-------------------------------------------------------------------------------------------------
-
-
-void CPhaseContainer::Initialize(sitk::Image data, CVec3& start_point, CVec3& end_point) {
-	_PROFILING;
-	vector<uint32_t> size = data.GetSize();
-	unsigned int spacex(size[0]), spacey(size[1]), spacez(size[2]);
-	//g_cyc = 0;
-	m_thickstate = sitk::Image(size, sitk::sitkInt32) - 1;
-	m_Sumcurvature = sitk::Image(size, sitk::sitkFloat64);
-	meeting_plane_positions = sitk::Image(size, sitk::sitkInt32);
-	// expansion
-
-	m_temp_sdist[0] = sitk::Image(size, sitk::sitkFloat64);
-	m_temp_sdist[1] = sitk::Image(size, sitk::sitkFloat64);
-	m_smoothstate = sitk::Image(size, sitk::sitkInt32) - 1;
-	// expansion
+void AreaEikonal::InitializeContainers(const sitk::Image& image) {
+	vector<uint32_t> size = image.GetSize();
+	mMeetingPointsMap = sitk::Image(size, sitk::sitkInt32);
 
 
-	m_field[0] = sitk::Image(size, sitk::sitkFloat64) - 1;
-	m_field[1] = sitk::Image(size, sitk::sitkFloat64) - 1;
-	m_distance[0] = sitk::Image(size, sitk::sitkFloat64) - 1;
-	m_distance[1] = sitk::Image(size, sitk::sitkFloat64) - 1;
-	m_combined_distance = sitk::Image(size, sitk::sitkFloat64) - 1;
-	m_flow_idx = sitk::Image(size, sitk::sitkInt32) - 1;
+	mPhaseFieldMap[0] = sitk::Image(size, sitk::sitkFloat64) - 1;
+	mPhaseFieldMap[1] = sitk::Image(size, sitk::sitkFloat64) - 1;
+	mDistanceMap[0] = sitk::Image(size, sitk::sitkFloat64) - 1;
+	mDistanceMap[1] = sitk::Image(size, sitk::sitkFloat64) - 1;
+	mCombinedDistanceMap = sitk::Image(size, sitk::sitkFloat64) - 1;
 
+	mSampleImage = sitk::Image(size, sitk::sitkFloat64);
 
-	m_velo[0] = sitk::Image(size, sitk::sitkFloat64);
-	m_velo[1] = sitk::Image(size, sitk::sitkFloat64);
-	m_aux = sitk::Image(size, sitk::sitkFloat64);
-	m_smoothdist = sitk::Image(size, sitk::sitkFloat64) - 1;
-	m_smoothaux = sitk::Image(size, sitk::sitkFloat64);
-	m_smoothaux2 = sitk::Image(size, sitk::sitkFloat64);
-
-	m_data = data;
-	m_sample_image = sitk::Image(size, sitk::sitkFloat64);
-	m_start_point = start_point;
-	m_end_point = end_point;
-
-	m_curvature[0] = sitk::Image(size, sitk::sitkFloat64);
-	m_curvature[1] = sitk::Image(size, sitk::sitkFloat64);
+	mCurvatureMap[0] = sitk::Image(size, sitk::sitkFloat64);
+	mCurvatureMap[1] = sitk::Image(size, sitk::sitkFloat64);
 #ifdef DEBUG_CURVATURE
-	
+
 	m_new_update[0] = sitk::Image(size, sitk::sitkUInt8);
 	m_new_update[1] = sitk::Image(size, sitk::sitkUInt8);
 #endif
-	double xdist = start_point.x - end_point.x;
-	double ydist = start_point.y - end_point.y;
-	double zdist = start_point.z - end_point.z;
-	double point_dist = sqrt(xdist*xdist + ydist*ydist + zdist*zdist);
-	double init_dist = sqrt(point_dist);
-	int hs = INIT_DIST+2;//5 (int)(1.5f*g_w/2);
-	m_currentdistance = 0;
-	for (int ii = 0; ii < 2; ++ii) {
-		CVec3 point = !ii ? start_point : end_point;
-		double* field_buffer = m_field[ii].GetBufferAsDouble();
-		double* distance_buffer = m_distance[ii].GetBufferAsDouble();
-		for (int zz = point.z - hs; zz < point.z + hs; ++zz) {
-			if (zz < 0 || zz >= spacez) continue;
-			for (int yy = point.y - hs; yy < point.y + hs; ++yy) {
-				if (yy < 0 || yy >=spacey) continue;
-				for (int xx = point.x - hs; xx < point.x + hs; ++xx) {
-					if (xx < 0 || xx >= spacex) continue;
-					int dx = xx - point.x, dy = yy - point.y;
-					int dz = zz - point.z;
-					int dd = dx * dx + dy * dy + dz * dz;
-					if ((int)dd <= INIT_DIST * INIT_DIST) {
-						double dd_sqrt = sqrt(dd);
-						if (dd > (INIT_DIST-1)*(INIT_DIST-1)) {
-							field_buffer[xx + spacex * (yy + spacey * zz)] = INIT_DIST-dd_sqrt;
-#ifdef USE_VECTOR_AS_SET
-							active_set[ii].push_back(point_to_representation(xx, yy, zz));
-#else
-							active_set[ii].insert(point_to_representation(xx, yy, zz));
-#endif
-						}
-						else {
-							field_buffer[xx + spacex * (yy + spacey * zz)] = 1.0;
-						}
-						distance_buffer[xx + spacex * (yy + spacey * zz)] = dd_sqrt;
-						if (m_currentdistance < dd_sqrt) m_currentdistance = dd_sqrt;
+}
 
-						// curvatures
-						//if (dd < 1e-11) dd = 1e-11; dd = 1.0/dd;
-						//m_phasefield.m_thickstate[ii][zz][yy][xx] = 2;
-						//m_phasefield.m_Sumcurvature[ii][zz][yy][xx] = dd+dd;
-					}
-					else if (dd < (INIT_DIST+1)*(INIT_DIST+1)) {
+void AreaEikonal::InitializeDistanceMap(int idx, Vec3<double> center, int initialRadius) {
+	vector<uint32_t> size = mPhaseFieldMap[0].GetSize();
+	unsigned int spacex(size[0]), spacey(size[1]), spacez(size[2]); 
+	int hs = initialRadius + 2;
+	mCurrentDistance = 0;
+	double* field_buffer = mPhaseFieldMap[idx].GetBufferAsDouble();
+	double* distance_buffer = mDistanceMap[idx].GetBufferAsDouble();
+	for (int zz = center.z() - hs; zz < center.z() + hs; ++zz) {
+		if (zz < 0 || zz >= spacez) continue;
+		for (int yy = center.y() - hs; yy < center.y() + hs; ++yy) {
+			if (yy < 0 || yy >= spacey) continue;
+			for (int xx = center.x() - hs; xx < center.x() + hs; ++xx) {
+				if (xx < 0 || xx >= spacex) continue;
+				int dx = xx - center.x(), dy = yy - center.y();
+				int dz = zz - center.z();
+				int dd = dx * dx + dy * dy + dz * dz;
+				if ((int)dd <= initialRadius * initialRadius) {
+					double dd_sqrt = sqrt(dd);
+					if (dd > (initialRadius - 1) * (initialRadius - 1)) {
+						field_buffer[xx + spacex * (yy + spacey * zz)] = initialRadius - dd_sqrt;
 #ifdef USE_VECTOR_AS_SET
-						active_set[ii].push_back(point_to_representation(xx, yy, zz));
+						mActivePoints[idx].push_back(point_to_representation(xx, yy, zz));
 #else
-						active_set[ii].insert(point_to_representation(xx, yy, zz));
+						mActivePoints[idx].insert(point_to_representation(xx, yy, zz));
 #endif
-						BUF_IDX(field_buffer, spacex, spacey, spacez, xx, yy, zz) = INIT_DIST-sqrt(dd);
 					}
+					else {
+						field_buffer[xx + spacex * (yy + spacey * zz)] = 1.0;
+					}
+					distance_buffer[xx + spacex * (yy + spacey * zz)] = dd_sqrt;
+					if (mCurrentDistance < dd_sqrt) mCurrentDistance = dd_sqrt;
+				}
+				else if (dd < (initialRadius + 1) * (initialRadius + 1)) {
+#ifdef USE_VECTOR_AS_SET
+					mActivePoints[idx].push_back(point_to_representation(xx, yy, zz));
+#else
+					mActivePoints[idx].insert(point_to_representation(xx, yy, zz));
+#endif
+					BUF_IDX3D(field_buffer, spacex, spacey, spacez, xx, yy, zz) = initialRadius - sqrt(dd);
 				}
 			}
 		}
-
 	}
-	n_min_meet_points = spacex * spacey < spacex* spacez ? spacex * spacey :
-		spacex * spacez < spacey* spacez ? spacex * spacez : spacey * spacez;
-	n_min_meet_points /= 4;
-
-	m_bdone = false;
 }
 
-void CPhaseContainer::Initialize(CPhaseContainer& phasefield, vector<double>& rotation_matrix, bool inverse) {
+int AreaEikonal::GetSmallestPlaneSize() {
+	vector<uint32_t> size = mPhaseFieldMap[0].GetSize();
+	unsigned int xs(size[0]), ys(size[1]), zs(size[2]);
+	return xs * ys < xs* zs ? xs * ys :
+		xs * zs < ys* zs ? xs * zs : ys * zs;
+}
+
+void AreaEikonal::Initialize(const sitk::Image& image, Vec3<double>& startPoint, Vec3<double>& endPoint, double beta, double alpha) {
 	_PROFILING;
-	vector<unsigned int> sample_size;
-	resample_img(phasefield.m_thickstate, m_thickstate, rotation_matrix, sample_size, inverse);
-	resample_img(phasefield.m_Sumcurvature, m_Sumcurvature, rotation_matrix, sample_size, inverse);
-	neg_to_minus1(m_Sumcurvature);
+	mMeetingPointsCount = 0;
+	mMeetingPlaneCenter = Vec3<double>({ -1, -1, -1 });
+	mIterationCount = 0;
+	mPlaneFinalized = false;
+	mMeetingPlaneOffset = 1e11;
+	mPhiMap = CalculatePhi(image, beta, alpha);
+	InitializeContainers(image);
+	mStartPoint = startPoint;
+	mEndPoint = endPoint;
+	//g_cyc = 0;
+	
+	Vec3<double> point_diff(startPoint - endPoint);
+	double point_dist = sqrt((point_diff*point_diff).Sum());
+	double init_dist = sqrt(point_dist);
+	InitializeDistanceMap(0, startPoint, init_dist);
+	InitializeDistanceMap(1, endPoint, init_dist);
+	mMeetingPointsMin = GetSmallestPlaneSize() / 4;
+}
 
-	resample_img<sitk::sitkNearestNeighbor>(phasefield.meeting_plane_positions, meeting_plane_positions, rotation_matrix, sample_size, inverse);
-	// expansion
+AreaEikonal AreaEikonal::Rotate(vector<double>& rotation_matrix, bool inverse) const {
+	_PROFILING;
+	AreaEikonal rotated;
+	rotated.mMeetingPointsCount = 0;
+	rotated.mMeetingPlaneCenter = Vec3<double>({ -1, -1, -1 });
+	rotated.mIterationCount = 0;
+	rotated.mPlaneFinalized = false;
+	rotated.mMeetingPlaneOffset = 1e11;
+	rotated.mUsesCorrection = mUsesCorrection;
+	resample_img<sitk::sitkNearestNeighbor>(mMeetingPointsMap, rotated.mMeetingPointsMap, rotation_matrix, inverse);
 
-	m_temp_sdist[0] = sitk::Image(m_thickstate.GetSize(), sitk::sitkFloat64);
-	m_temp_sdist[1] = sitk::Image(m_thickstate.GetSize(), sitk::sitkFloat64);
-	resample_img<sitk::sitkNearestNeighbor>(phasefield.m_smoothstate, m_smoothstate, rotation_matrix, sample_size, inverse);
-	// expansion
+	resample_img(mPhaseFieldMap[0], rotated.mPhaseFieldMap[0], rotation_matrix, inverse);
+	neg_to_minus1(rotated.mPhaseFieldMap[0]);
+	resample_img(mPhaseFieldMap[1], rotated.mPhaseFieldMap[1], rotation_matrix, inverse);
+	neg_to_minus1(rotated.mPhaseFieldMap[1]);
+	resample_img(mDistanceMap[0], rotated.mDistanceMap[0], rotation_matrix, inverse, true);
+	neg_to_minus1(rotated.mDistanceMap[0]);
+	resample_img(mDistanceMap[1], rotated.mDistanceMap[1], rotation_matrix, inverse, true);
+	neg_to_minus1(rotated.mDistanceMap[1]);
+	rotated.mSampleImage = resample_img(mCombinedDistanceMap, rotated.mCombinedDistanceMap, rotation_matrix, inverse, true);
+	neg_to_minus1(rotated.mCombinedDistanceMap);
 
+	resample_img(mPhiMap, rotated.mPhiMap, rotation_matrix, inverse, true);
 
-	resample_img(phasefield.m_field[0], m_field[0], rotation_matrix, sample_size, inverse);
-	neg_to_minus1(m_field[0]);
-	resample_img(phasefield.m_field[1], m_field[1], rotation_matrix, sample_size, inverse);
-	neg_to_minus1(m_field[1]);
-	resample_img(phasefield.m_distance[0], m_distance[0], rotation_matrix, sample_size, inverse, true);
-	neg_to_minus1(m_distance[0]);
-	resample_img(phasefield.m_distance[1], m_distance[1], rotation_matrix, sample_size, inverse, true);
-	neg_to_minus1(m_distance[1]);
-	m_sample_image = resample_img(phasefield.m_combined_distance, m_combined_distance, rotation_matrix, sample_size, inverse, true);
-	neg_to_minus1(m_combined_distance);
-	resample_img<sitk::sitkNearestNeighbor>(phasefield.m_flow_idx, m_flow_idx, rotation_matrix, sample_size, inverse, true);
+	rotated.mCurrentDistance = mCurrentDistance;
 
-	resample_img(phasefield.m_velo[0], m_velo[0], rotation_matrix, sample_size, inverse);
-	resample_img(phasefield.m_velo[1], m_velo[1], rotation_matrix, sample_size, inverse);
-	resample_img(phasefield.m_aux, m_aux, rotation_matrix, sample_size, inverse);
-	resample_img(phasefield.m_smoothdist, m_smoothdist, rotation_matrix, sample_size, inverse);
-	neg_to_minus1(m_smoothdist);
-	resample_img(phasefield.m_smoothaux, m_smoothaux, rotation_matrix, sample_size, inverse);
-	resample_img(phasefield.m_smoothaux2, m_smoothaux2, rotation_matrix, sample_size, inverse);
-
-	resample_img(phasefield.m_data, m_data, rotation_matrix, sample_size, inverse, true);
-
-	m_currentdistance = phasefield.m_currentdistance;
-
-	m_curvature[0] = sitk::Image(m_thickstate.GetSize(), sitk::sitkFloat64);
-	m_curvature[1] = sitk::Image(m_thickstate.GetSize(), sitk::sitkFloat64);
+	rotated.mCurvatureMap[0] = sitk::Image(rotated.mPhiMap.GetSize(), sitk::sitkFloat64);
+	rotated.mCurvatureMap[1] = sitk::Image(rotated.mPhiMap.GetSize(), sitk::sitkFloat64);
 #ifdef DEBUG_CURVATURE
 	
-	m_new_update[0] = sitk::Image(m_thickstate.GetSize(), sitk::sitkUInt8);
-	m_new_update[1] = sitk::Image(m_thickstate.GetSize(), sitk::sitkUInt8);
+	rotated.m_new_update[0] = sitk::Image(rotated.mPhiMap.GetSize(), sitk::sitkUInt8);
+	rotated.m_new_update[1] = sitk::Image(rotated.mPhiMap.GetSize(), sitk::sitkUInt8);
 #endif
-	m_bdone = phasefield.m_bdone;
-	vector<unsigned> new_size = m_sample_image.GetSize();
-	n_min_meet_points = new_size[0] * new_size[1] < new_size[0] * new_size[2] ? new_size[0] * new_size[1] :
-		new_size[0] * new_size[2] < new_size[1] * new_size[2] ? new_size[0] * new_size[2] : new_size[1] * new_size[2];
-	n_min_meet_points /= 4;
+	vector<unsigned> new_size = rotated.mSampleImage.GetSize();
+	rotated.mMeetingPointsMin = rotated.GetSmallestPlaneSize()/4;
 
 	for (int ii = 0; ii < 2; ii++) {
-		for (auto it = phasefield.active_set[ii].begin(); it != phasefield.active_set[ii].end(); it++) {
+		for (auto it = mActivePoints[ii].begin(); it != mActivePoints[ii].end(); it++) {
 			auto [xx, yy, zz] = representation_to_point<double>(*it);
 			vector<double> pos({ xx, yy, zz });
-			pos = phasefield.m_data.TransformContinuousIndexToPhysicalPoint(pos);
-			pos = m_sample_image.TransformPhysicalPointToContinuousIndex(pos);
+			pos = mPhiMap.TransformContinuousIndexToPhysicalPoint(pos);
+			pos = rotated.mSampleImage.TransformPhysicalPointToContinuousIndex(pos);
 #ifdef USE_VECTOR_AS_SET
-			active_set[ii].push_back(point_to_representation(pos[0], pos[1], pos[2]));
+			rotated.mActivePoints[ii].push_back(point_to_representation(pos[0], pos[1], pos[2]));
 #else
-			active_set[ii].insert(point_to_representation(pos[0], pos[1], pos[2]));
+			mActivePoints[ii].insert(point_to_representation(pos[0], pos[1], pos[2]));
+#endif
+		}
+		for (auto it = mInactivePoints[ii].begin(); it != mInactivePoints[ii].end(); it++) {
+			auto [xx, yy, zz] = representation_to_point<double>(*it);
+			vector<double> pos({ xx, yy, zz });
+			pos = mPhiMap.TransformContinuousIndexToPhysicalPoint(pos);
+			pos = rotated.mSampleImage.TransformPhysicalPointToContinuousIndex(pos);
+#ifdef USE_VECTOR_AS_SET
+			rotated.mActivePoints[ii].push_back(point_to_representation(pos[0], pos[1], pos[2]));
+#else
+			mActivePoints[ii].insert(point_to_representation(pos[0], pos[1], pos[2]));
 #endif
 		}
 	}
+	return rotated;
 }
 
+std::vector<double> AreaEikonal::TransformPhysicalPointToContinuousIndex(const std::vector<double>& point) const {
+	return mSampleImage.TransformPhysicalPointToContinuousIndex(point);
+}
 
-bool g_modeswitch = false;
+std::vector<double> AreaEikonal::TransformContinuousIndexToPhysicalPoint(const std::vector<double>& point) const {
+	return mSampleImage.TransformContinuousIndexToPhysicalPoint(point);
+}
 int current_iteration = 0;
 
-void CPhaseContainer::UpdateCurvature(int i) {
+void AreaEikonal::UpdateCurvature(int i) {
 	static int n_threads = omp_get_max_threads();
-	sitk::Image& field = m_field[i];
-	auto& act_set = active_set[i];
-	const vector<unsigned>& size = m_field[i].GetSize();
+	sitk::Image& field = mPhaseFieldMap[i];
+	auto& act_set = mActivePoints[i];
+	const vector<unsigned>& size = mPhaseFieldMap[i].GetSize();
 	int xs = size[0], ys = size[1], zs = size[2]; 
 	sitk::Image& temp_sdist = FMSigned::build_for_neighbors(i, field, 2, 1, act_set);
 	double* sdist_buffer = temp_sdist.GetBufferAsDouble();
-	double* curvature_buffer = m_curvature[i].GetBufferAsDouble();
+	double* curvature_buffer = mCurvatureMap[i].GetBufferAsDouble();
 	memset(curvature_buffer, 0, xs * ys * zs * sizeof(double));
-#pragma omp parallel for num_threads(n_threads/2)
+OMP_PARALLEL_FOR_NUM_THREADS(n_threads/2)
 #ifdef USE_VECTOR_AS_SET
 	for (int i = 0; i < act_set.size(); i++)
 	{
@@ -459,15 +427,15 @@ void CPhaseContainer::UpdateCurvature(int i) {
 
 
 							realnum sumcur =
-								BUF_IDX(sdist_buffer, xs, ys, zs, xp, yy, zz) +
-								BUF_IDX(sdist_buffer, xs, ys, zs, xm, yy, zz) +
-								BUF_IDX(sdist_buffer, xs, ys, zs, xx, yp, zz) +
-								BUF_IDX(sdist_buffer, xs, ys, zs, xx, ym, zz) +
-								BUF_IDX(sdist_buffer, xs, ys, zs, xx, yy, zp) +
-								BUF_IDX(sdist_buffer, xs, ys, zs, xx, yy, zm) -
-								6 * BUF_IDX(sdist_buffer, xs, ys, zs, xx, yy, zz);
+								BUF_IDX3D(sdist_buffer, xs, ys, zs, xp, yy, zz) +
+								BUF_IDX3D(sdist_buffer, xs, ys, zs, xm, yy, zz) +
+								BUF_IDX3D(sdist_buffer, xs, ys, zs, xx, yp, zz) +
+								BUF_IDX3D(sdist_buffer, xs, ys, zs, xx, ym, zz) +
+								BUF_IDX3D(sdist_buffer, xs, ys, zs, xx, yy, zp) +
+								BUF_IDX3D(sdist_buffer, xs, ys, zs, xx, yy, zm) -
+								6 * BUF_IDX3D(sdist_buffer, xs, ys, zs, xx, yy, zz);
 							//if (sumcur < -2) sumcur == -2;
-							BUF_IDX(curvature_buffer, xs, ys, zs, xx, yy, zz) = sumcur;
+							BUF_IDX3D(curvature_buffer, xs, ys, zs, xx, yy, zz) = sumcur;
 						}
 					} 
 				} 
@@ -476,19 +444,19 @@ void CPhaseContainer::UpdateCurvature(int i) {
 	}
 }
 
-realnum CPhaseContainer::GetMinS(int i) {
+realnum AreaEikonal::GetMinS(int i) const {
 
 	static int n_threads = omp_get_max_threads();
-	sitk::Image& field = m_field[i];
-	auto& act_set = active_set[i];
+	const sitk::Image& field = mPhaseFieldMap[i];
+	auto& act_set = mActivePoints[i];
 	int n_top = 5000;
 	//int n_top = act_set.size();
 	vector<double> topSs;
 	topSs.reserve(n_top + 1);
-	double* field_buffer = field.GetBufferAsDouble();
-	double* data_buffer = m_data.GetBufferAsDouble();
-	double* curvature_buffer = m_curvature[i].GetBufferAsDouble();
-	const vector<unsigned>& size = m_field[i].GetSize();
+	const double* field_buffer = field.GetBufferAsDouble();
+	const double* phi_buffer = mPhiMap.GetBufferAsDouble();
+	const double* curvature_buffer = mCurvatureMap[i].GetBufferAsDouble();
+	const vector<unsigned>& size = mPhaseFieldMap[i].GetSize();
 	int xs = size[0], ys = size[1], zs = size[2];
 	int n_outliers(0);
 	realnum minS(DBL_MAX);
@@ -496,12 +464,12 @@ realnum CPhaseContainer::GetMinS(int i) {
 		return minS;
 	vector<vector<double>> heaps(n_threads / 2);
 
-#pragma omp parallel num_threads(n_threads/2)
+OMP_PARALLEL_NUM_THREADS(n_threads/2)
 	{
 		//double temp_minS(DBL_MAX);
 		vector<double>& temp = heaps[omp_get_thread_num()];
 		temp.reserve(act_set.size()/(n_threads/2));
-#pragma omp for reduction(+: n_outliers)
+OMP_FOR_REDUCTION(+, n_outliers)
 #ifdef USE_VECTOR_AS_SET
 		for (int i = 0; i < act_set.size(); i++)
 		{
@@ -529,9 +497,9 @@ realnum CPhaseContainer::GetMinS(int i) {
 								int yp = yy + 1, ym = yy - 1;
 								int xp = xx + 1, xm = xx - 1;
 
-								realnum d0 = data_buffer[xx + xs * (yy + ys * zz)];
-								if (d0 < 1e-33) d0 = 1e-33;
-								double sumcur = BUF_IDX(curvature_buffer, xs, ys, zs, xx, yy, zz);
+								realnum phi = phi_buffer[xx + xs * (yy + ys * zz)];
+								if (phi < 1e-33) phi = 1e-33;
+								double sumcur = BUF_IDX3D(curvature_buffer, xs, ys, zs, xx, yy, zz);
 								realnum&& xn = field_buffer[xp + xs * (yy + ys * zz)] - field_buffer[xm + xs * (yy + ys * zz)];
 								realnum&& yn = field_buffer[xx + xs * (yp + ys * zz)] - field_buffer[xx + xs * (ym + ys * zz)];
 								realnum&& zn = field_buffer[xx + xs * (yy + ys * zp)] - field_buffer[xx + xs * (yy + ys * zm)];
@@ -541,7 +509,7 @@ realnum CPhaseContainer::GetMinS(int i) {
 								{
 									n_outliers++;
 								}
-								realnum S = calculate_S(sumcur, 1 / d0, 2/gradlen);
+								realnum S = calculate_S(sumcur, phi, 2/gradlen);
 								temp.push_back(S);
 								//loop body
 							}
@@ -570,7 +538,6 @@ realnum CPhaseContainer::GetMinS(int i) {
 		indices[heap_idx]++;
 	}
 	if (topSs.empty()) {
-		m_bdone = true;
 		return DBL_MAX;
 	}
 	/*minS = 0;
@@ -584,29 +551,29 @@ realnum CPhaseContainer::GetMinS(int i) {
 	minS = topSs[idx];
 	return minS;
 }
-realnum CPhaseContainer::UpdateVelo(int i, bool use_correction, double S) {
+realnum AreaEikonal::UpdateVelo(int i, double S) {
 	static int n_threads = omp_get_max_threads();
 	//_PROFILING;
-	sitk::Image& field = m_field[i];
+	sitk::Image& field = mPhaseFieldMap[i];
 	double* field_buffer = field.GetBufferAsDouble();
 
-	double* data_buffer = m_data.GetBufferAsDouble();
+	double* phi_buffer = mPhiMap.GetBufferAsDouble();
 	
 
-	const vector<unsigned>& size = m_field[i].GetSize();
+	const vector<unsigned>& size = mPhaseFieldMap[i].GetSize();
 	int xs = size[0], ys = size[1], zs = size[2];
 
 	////////////////////////////////////////////////////////////////////
 	// evolution logic
 	////////////////////////////////////////////////////////////////////
-	auto& act_set = active_set[i];
+	auto& act_set = mActivePoints[i];
 	
-	//realnum maxv(0);
-	double* curvature_buffer = m_curvature[i].GetBufferAsDouble();
+	//realnum max_velocity(0);
+	double* curvature_buffer = mCurvatureMap[i].GetBufferAsDouble();
 
 	// Inhomogeneous
 	// Calculate the velocity at every point (velo[zz][yy][xx]), and the maximum velocity (maxv)
-	auto& changed_velo = m_changed_velo[i];
+	auto& changed_velo = mVelocities[i];
 #ifdef USE_VECTOR_AS_SET
 	changed_velo.resize(act_set.size());
 #else
@@ -616,10 +583,10 @@ realnum CPhaseContainer::UpdateVelo(int i, bool use_correction, double S) {
 
 	double maxv(0);
 
-#pragma omp parallel num_threads(n_threads/2)
+OMP_PARALLEL_NUM_THREADS(n_threads/2)
 	{
 		double temp_maxv(0);
-#pragma omp for
+OMP_FOR
 #ifdef USE_VECTOR_AS_SET
 		for (int i = 0; i < act_set.size(); i++)
 		{
@@ -652,21 +619,25 @@ realnum CPhaseContainer::UpdateVelo(int i, bool use_correction, double S) {
 								realnum&& zn = field_buffer[xx + xs * (yy + ys * zp)] - field_buffer[xx + xs * (yy + ys * zm)];
 								realnum gradlen = sqrt(xn * xn + yn * yn + zn * zn + 1e-99);
 
-								realnum sumcur = BUF_IDX(curvature_buffer, xs, ys, zs, xx, yy, zz);
 
 								realnum eikon;
 
-								realnum d0 = data_buffer[xx + xs * (yy + ys * zz)];
-								if (d0 < 1e-33) d0 = 1e-33;
-
-								eikon = calculate_speed(sumcur, 1 / d0, S);
+								realnum phi = phi_buffer[xx + xs * (yy + ys * zz)];
+								if (phi < 1e-33) phi = 1e-33;
+								if (mUsesCorrection) {
+									realnum sumcur = BUF_IDX3D(curvature_buffer, xs, ys, zs, xx, yy, zz);
+									eikon = calculate_speed(sumcur, phi, S);
+								}
+								else {
+									eikon = 1 / phi;
+								}
 								eikon *= gradlen; // normalize
 								if (eikon < 1e-11) eikon = 1e-11;
 
 #ifdef USE_VECTOR_AS_SET
 								changed_velo[i] = make_pair(pn, eikon);
 #else
-#pragma omp critical
+OMP_CRITICAL_NO_TAG
 								changed_velo[pn] = eikon;
 #endif
 								if (eikon > temp_maxv) temp_maxv = eikon;
@@ -677,7 +648,7 @@ realnum CPhaseContainer::UpdateVelo(int i, bool use_correction, double S) {
 				}
 			} // for zz
 		}
-#pragma omp critical (maxS_selection)
+OMP_CRITICAL(maxS_selection)
 		{
 			if (temp_maxv > maxv) maxv = temp_maxv;
 		}
@@ -685,7 +656,7 @@ realnum CPhaseContainer::UpdateVelo(int i, bool use_correction, double S) {
 #ifdef DEBUG_CURVATURE
 	{
 		if (current_iteration % 50 == 0) {
-			save_image("Y:/BIOMAG/shortest path/curv_debug/dbg_" + std::to_string(i) + "_" + std::to_string(current_iteration) + "_curv.tif", m_curvature[i]);
+			save_image("Y:/BIOMAG/shortest path/curv_debug/dbg_" + std::to_string(i) + "_" + std::to_string(current_iteration) + "_curv.tif", mCurvatureMap[i]);
 			save_image("Y:/BIOMAG/shortest path/curv_debug/dbg_" + std::to_string(i) + "_" + std::to_string(current_iteration) + "_dist.tif", m_distance[i]);
 			save_image("Y:/BIOMAG/shortest path/curv_debug/dbg_" + std::to_string(i) + "_" + std::to_string(current_iteration) + "_field.tif", field);
 			//save_image("Y:/BIOMAG/shortest path/curv_debug/dbg_" + std::to_string(i) + "_" + std::to_string(current_iteration) + "_sdist.tif", temp_sdist);
@@ -694,22 +665,22 @@ realnum CPhaseContainer::UpdateVelo(int i, bool use_correction, double S) {
 #endif
 	return maxv;
 }
-void CPhaseContainer::UpdateField(int idx, double maxv) {
+void AreaEikonal::UpdateField(int idx, double maxv) {
 	static int n_threads = omp_get_max_threads();
 	_PROFILING;
-	double* field_buffer = m_field[idx].GetBufferAsDouble();
-	vector<unsigned> size = m_field[idx].GetSize();
+	double* field_buffer = mPhaseFieldMap[idx].GetBufferAsDouble();
+	vector<unsigned> size = mPhaseFieldMap[idx].GetSize();
 	int xs = size[0], ys = size[1], zs = size[2]; 
-	auto& changed_velo = m_changed_velo[idx];
-	auto& act_set = active_set[idx];
+	auto& changed_velo = mVelocities[idx];
+	auto& act_set = mActivePoints[idx];
 #ifdef DEBUG_CURVATURE
 	uint8_t* new_update_buffer = m_new_update[idx].GetBufferAsUInt8();
 	memset(new_update_buffer, 0, xs * ys * zs);
 	double* distance_buffer = m_distance[idx].GetBufferAsDouble();
 #endif
-#pragma omp parallel num_threads(n_threads/2)
+OMP_PARALLEL_NUM_THREADS(n_threads/2)
 	{
-#pragma omp for
+OMP_FOR
 #ifdef USE_VECTOR_AS_SET
 		for (int i = 0; i < changed_velo.size(); i++) {
 
@@ -727,22 +698,22 @@ void CPhaseContainer::UpdateField(int idx, double maxv) {
 				if (BUF_IDX(distance_buffer, xs, ys, zs, xx, yy, zz) < -0.5)
 					BUF_IDX(new_update_buffer, xs, ys, zs, xx, yy, zz) = 1;
 #endif
-				BUF_IDX(field_buffer, xs, ys, zs, xx, yy, zz) += velo;
-				if (BUF_IDX(field_buffer, xs, ys, zs, xx, yy, zz) >= MAX_FIELD_VAL) {
+				BUF_IDX3D(field_buffer, xs, ys, zs, xx, yy, zz) += velo;
+				if (BUF_IDX3D(field_buffer, xs, ys, zs, xx, yy, zz) >= MAX_FIELD_VAL) {
 
 #ifdef USE_VECTOR_AS_SET
 					act_set[i] = REMOVABLE_POINT;
 #else
-#pragma omp critical
+OMP_CRITICAL_NO_TAG
 					act_set.erase(pn);
 #endif
-					if (BUF_IDX(field_buffer, xs, ys, zs, xx, yy, zz) >= 1.25)
-						BUF_IDX(field_buffer, xs, ys, zs, xx, yy, zz) = 1.25;
+					if (BUF_IDX3D(field_buffer, xs, ys, zs, xx, yy, zz) >= 1.25)
+						BUF_IDX3D(field_buffer, xs, ys, zs, xx, yy, zz) = 1.25;
 				}
 		}
 	}
 #ifdef DEBUG_CURVATURE
-#pragma omp critical
+OMP_CRITICAL_NO_TAG
 	{
 		if (current_iteration % 50 == 0)
 			save_image("Y:/BIOMAG/shortest path/curv_debug/dbg_" + std::to_string(idx) + "_" + std::to_string(current_iteration) + "_updated_pos.tif", m_new_update[idx]);
@@ -751,32 +722,33 @@ void CPhaseContainer::UpdateField(int idx, double maxv) {
 	}
 #endif
 }
-void CPhaseContainer::UpdateDistance(int idx, realnum current_distance) {
+void AreaEikonal::UpdateDistance(int idx, realnum current_distance) {
 
 	static int n_threads = omp_get_max_threads();
 	_PROFILING;
-	CVec3 origin_point = !idx ? m_start_point : m_end_point;
-	auto& changed_velo = m_changed_velo[idx];
-	auto& act_set = active_set[idx];
-	double* field_buffer = m_field[idx].GetBufferAsDouble();
-	// m_phasefield.m_distance[i]
-	double* distance_buffer = m_distance[idx].GetBufferAsDouble();
+	Vec3<double> origin_point = !idx ? mStartPoint : mEndPoint;
+	auto& changed_velo = mVelocities[idx];
+	auto& act_set = mActivePoints[idx];
+	double* field_buffer = mPhaseFieldMap[idx].GetBufferAsDouble();
+	// mAreaEikonal.m_distance[i]
+	double* distance_buffer = mDistanceMap[idx].GetBufferAsDouble();
 
-	// m_phasefield.m_distance[(i+1)&1]
-	double* counterd_buffer = m_distance[(idx + 1) & 1].GetBufferAsDouble();
+	// mAreaEikonal.m_distance[(i+1)&1]
+	double* counterd_buffer = mDistanceMap[(idx + 1) & 1].GetBufferAsDouble();
 	//unsigned int* connectivity_buffer = m_distance_connectivity.GetBufferAsUInt32();
-	vector<unsigned> size = m_field[idx].GetSize();
+	vector<unsigned> size = mPhaseFieldMap[idx].GetSize();
 	int xs = size[0], ys = size[1], zs = size[2];
-#pragma omp parallel num_threads(n_threads/2)
+OMP_PARALLEL_NUM_THREADS(n_threads/2)
 	{
 #ifdef USE_VECTOR_AS_SET
 		vector<POINT3D> temp;
+		vector<POINT3D> temp_inact;
 #else
 		unordered_set<POINT3D_SET> temp;
 #endif
 		temp.reserve(1000);
 
-#pragma omp for nowait
+OMP_FOR_NOWAIT
 #ifdef USE_VECTOR_AS_SET
 		for (int i = 0; i < changed_velo.size(); i++) {
 			POINT3D pn = changed_velo[i].first;
@@ -801,16 +773,20 @@ void CPhaseContainer::UpdateDistance(int idx, realnum current_distance) {
 								for (int j = -1; j <= 1; j++) {
 									for (int i = -1; i <= 1; i++) {
 										if ((i + 1) % 2 + (j + 1) % 2 + (k + 1) % 2 == 2) {
-											if (BUF_IDX(field_buffer, xs, ys, zs, xx + i, yy + j, zz + k) < MAX_FIELD_VAL
-												&& (plane_center.x < -0.5 || sgn(plane_normal.x * origin_point.x + plane_normal.y * origin_point.y + plane_normal.z * origin_point.z + plane_offset) * (plane_normal.x * xx + i + plane_normal.y * yy + j + plane_normal.z * zz + k + plane_offset) + MAX_DIST_FROM_PLANE > 0)
-												&& xx+i > 0 && xx+i < xs-1 && yy + j > 0 && yy + j < ys - 1 && zz + k > 0 && zz + k < zs - 1
-												) {
+											if (BUF_IDX3D(field_buffer, xs, ys, zs, xx + i, yy + j, zz + k) < MAX_FIELD_VAL
+												&& (mMeetingPlaneCenter.x() < -0.5 || -sgn((mMeetingPlaneNormal * origin_point).Sum() + mMeetingPlaneOffset) * ((mMeetingPlaneNormal * Vec3<double>({(double)xx+i, (double)yy+j, (double)zz+k})).Sum() + mMeetingPlaneOffset) < MAX_DIST_FROM_PLANE))
+											{
+												if (xx + i > 0 && xx + i < xs - 1 && yy + j > 0 && yy + j < ys - 1 && zz + k > 0 && zz + k < zs - 1) {
 
 #ifdef USE_VECTOR_AS_SET
-												temp.push_back(point_to_representation(xx + i, yy + j, zz + k));
+													temp.push_back(point_to_representation(xx + i, yy + j, zz + k));
 #else
-												temp.insert(point_to_representation(xx + i, yy + j, zz + k));
+													temp.insert(point_to_representation(xx + i, yy + j, zz + k));
 #endif
+												}
+												else {
+													temp_inact.push_back(point_to_representation(xx + i, yy + j, zz + k));
+												}
 											} // end if
 										} // end if
 									} // end for i
@@ -820,7 +796,7 @@ void CPhaseContainer::UpdateDistance(int idx, realnum current_distance) {
 					} // end if yy
 				} // end if zz
 		} // end for i
-#pragma omp critical
+OMP_CRITICAL_NO_TAG
 		{
 #ifdef USE_VECTOR_AS_SET
 			act_set.insert(act_set.end(), temp.begin(), temp.end());
@@ -840,374 +816,148 @@ void CPhaseContainer::UpdateDistance(int idx, realnum current_distance) {
 #endif
 }
 
-bool CPhaseContainer::IsDone() {
+bool AreaEikonal::IsDone() const {
 	_PROFILING;
-	if (active_set[0].empty() && active_set[1].empty())
+	if (mActivePoints[0].empty() && mActivePoints[1].empty())
 		return true;
-	vector<unsigned> size = m_field[0].GetSize();
+	vector<unsigned> size = mPhaseFieldMap[0].GetSize();
 	int xs = size[0], ys = size[1], zs = size[2];
-	double* dist0_buffer = m_distance[0].GetBufferAsDouble();
-	double* dist1_buffer = m_distance[1].GetBufferAsDouble();
+	const double* dist0_buffer = mDistanceMap[0].GetBufferAsDouble();
+	const double* dist1_buffer = mDistanceMap[1].GetBufferAsDouble();
 	for (int zz = 1; zz < zs - 1; zz++) {
 		for (int yy = 1; yy < ys - 1; yy++) {
 			for (int xx = 1; xx < xs - 1; xx++) {
-				if (BUF_IDX(dist0_buffer, xs, ys, zs, xx, yy, zz) < 0 && BUF_IDX(dist1_buffer, xs, ys, zs, xx, yy, zz) < 0)
+				if (BUF_IDX3D(dist0_buffer, xs, ys, zs, xx, yy, zz) < 0 && BUF_IDX3D(dist1_buffer, xs, ys, zs, xx, yy, zz) < 0)
 					return false;
 			}
 		}
 	}
 	return true;
 }
-void CPhaseContainer::Iterate(bool use_correction)
+void AreaEikonal::Iterate()
 {
 	_PROFILING;
-	// m_phasefield.m_field[i]
-	if(!n_plane_finalized)
-		if (++m_counter % REFRESH_ITERS == 0) {
-			int n_prev_meet_points = n_meet_points >= 100? n_meet_points : 100;
-			FindMeetPoints();
-			if(n_meet_points > n_min_meet_points)
-				ExtractMeetingPlane();
-			if (n_meet_points == n_prev_meet_points && n_meet_points > 0) {
-				n_plane_finalized = true;
-			}
-			
+	// mAreaEikonal.m_field[i]
+	if (++mIterationCount % REFRESH_ITERS == 0 && !mPlaneFinalized) {
+		UpdateMeetingPlane();
+	}
+
+	//Calculate the value of capital S
+	realnum min_capital_s = 1e-11;
+	vector<double> min_capital_s_vals(2);
+	_BLOCK_PROFILING;
+	OMP_PARALLEL_FOR_NUM_THREADS(2)
+		for (int i = 0; i < 2; i++) {
+			UpdateCurvature(i);
+			min_capital_s_vals[i] = GetMinS(i);
 		}
-	vector<double> maxvs(2);
-	vector<double> minSs(2);
-	_BLOCK_PROFILING;
-#pragma omp parallel for num_threads(2)
-	for (int i = 0; i < 2; i++) {
-		UpdateCurvature(i);
-		minSs[i] = GetMinS(i);
-	}
 	_UNBLOCK_PROFILING;
-	realnum minS = minSs[0] < minSs[1] ? minSs[0] : minSs[1];
-	if (minS < 1e-11) minS = 1e-11;
-	_BLOCK_PROFILING;
-#pragma omp parallel for num_threads(2)
-	for (int i = 0; i < 2; i++) {
-		maxvs[i] = UpdateVelo(i, use_correction, minS);
-	}
-	_UNBLOCK_PROFILING;
-	double maxv = maxvs[0] > maxvs[1] ? maxvs[0] : maxvs[1];
-	realnum mdatspedmax = 2; //*2 set max speed
-	maxv = mdatspedmax/maxv;
-	m_currentdistance += maxv;
-	//m_currentdistance += 1;
-
-	// update phase field values
-	_BLOCK_PROFILING;
-#pragma omp parallel for num_threads(2)
-	for (int i = 0; i < 2; i++) {
-		UpdateField(i, maxv);
-		UpdateDistance(i, m_currentdistance);
-	}
-	_UNBLOCK_PROFILING;
-	m_bdone = IsDone();
-	// TODO: check for collision
-	// updating the distance map to the current value, and checking if it is complete
+	min_capital_s = min_capital_s_vals[0] < min_capital_s_vals[1] ? min_capital_s_vals[0] : min_capital_s_vals[1];
+	if (min_capital_s < 1e-11) min_capital_s = 1e-11;
 	
-	////////////////////////////////////////////////////////////////////
-	// phase field regularization w/o velocity zeroed out
-	////////////////////////////////////////////////////////////////////
+	//Calculate the velocity along the front
+	vector<double> max_velocities(2);
+	_BLOCK_PROFILING;
+OMP_PARALLEL_FOR_NUM_THREADS(2)
+	for (int i = 0; i < 2; i++) {
+		max_velocities[i] = UpdateVelo(i, min_capital_s);
+	}
+	_UNBLOCK_PROFILING;
+	double max_velocity = max_velocities[0] > max_velocities[1] ? max_velocities[0] : max_velocities[1];
+	realnum mdatspedmax = 2; 
+	max_velocity = mdatspedmax/max_velocity;
+	mCurrentDistance += max_velocity;
 
-
+	// update phase field and distance values
+	_BLOCK_PROFILING;
+OMP_PARALLEL_FOR_NUM_THREADS(2)
+	for (int i = 0; i < 2; i++) {
+		UpdateField(i, max_velocity);
+		UpdateDistance(i, mCurrentDistance);
+	}
+	_UNBLOCK_PROFILING;
 }
-void CPhaseContainer::CalculateAlignedCombinedDistance(double p0_x, double p1_x) {
+void AreaEikonal::Calculate(const sitk::Image& image, Vec3<double>& point1, Vec3<double>& point2, double beta, double alpha) {
+	Initialize(image, point1, point2, beta, alpha);
+	Calculate();
+}
+void AreaEikonal::Calculate() {
+	while (!IsDone()) {
+		Iterate();
+	}
+}
+void AreaEikonal::CombineDistance(int slice, double p0_x, double p1_x) {
 	_PROFILING;
-	vector<unsigned> size = m_data.GetSize();
+	vector<unsigned> size = mPhiMap.GetSize();
 	int xs(size[0]), ys(size[1]), zs(size[2]);
-	m_combined_distance = sitk::Image({ (unsigned) xs, (unsigned)ys, (unsigned)zs }, sitk::sitkFloat64) - 1;
-	m_flow_idx = sitk::Image({ (unsigned)xs, (unsigned)ys, (unsigned)zs }, sitk::sitkInt32) - 1;
-	double* dist0_buffer = m_distance[0].GetBufferAsDouble();
-	double* dist1_buffer = m_distance[1].GetBufferAsDouble();
-	double* combined_dist_buffer = m_combined_distance.GetBufferAsDouble();
-	int* flow_idx_buffer = m_flow_idx.GetBufferAsInt32();
+	mCombinedDistanceMap = sitk::Image({ (unsigned) xs, (unsigned)ys, (unsigned)zs }, sitk::sitkFloat64) - 1;
+	double* dist0_buffer = mDistanceMap[0].GetBufferAsDouble();
+	double* dist1_buffer = mDistanceMap[1].GetBufferAsDouble();
+	double* combined_dist_buffer = mCombinedDistanceMap.GetBufferAsDouble();
 
 	for (int zz = 0; zz < zs; zz++) {
 		for (int yy = 0; yy < ys; yy++) {
 			for (int xx = 0; xx < xs; xx++) {
-				int xx_sgn = sgn(m_plane_slice - xx);
-				int p0_sgn = sgn(m_plane_slice - p0_x);
-				int p1_sgn = sgn(m_plane_slice - p1_x);
-				if (abs(m_plane_slice - xx) < 0.5) {
+				int xx_sgn = sgn(slice - xx);
+				int p0_sgn = sgn(slice - p0_x);
+				int p1_sgn = sgn(slice - p1_x);
+				if (abs(slice - xx) < 0.5) {
 					combined_dist_buffer[xx + xs * (yy + ys * zz)] = (dist0_buffer[xx + p0_sgn + xs * (yy + ys * zz)] + dist1_buffer[xx + p1_sgn + xs * (yy + ys * zz)]);
 				}
 				else if (p0_sgn == xx_sgn) {
 					combined_dist_buffer[xx + xs * (yy + ys * zz)] = dist0_buffer[xx + xs * (yy + ys * zz)];
-					flow_idx_buffer[xx + xs * (yy + ys * zz)] = 0;
 				}
 				else if (p1_sgn == xx_sgn) {
 					combined_dist_buffer[xx + xs * (yy + ys * zz)] = dist1_buffer[xx + xs * (yy + ys * zz)];
-					flow_idx_buffer[xx + xs * (yy + ys * zz)] = 1;
 				}
 			}
 		}
 	}
 }
 
-// only for xslice
-void CPlanePhaseField::GetDistancemean(SVoxImg<SWorkImg<realnum>>& distance1, SVoxImg<SWorkImg<realnum>>& distance2,  int xslice)
-{
-	_PROFILING;
-	//TODO: instead of searching for the selected x slice, locate the meeting surface of the two processes, and use that
-	int xs = distance1.xs, ys = distance1.ys, zs = distance1.zs;
-	m_nall = m_npos = m_since_last_update = 0;
-	m_bInited = false;
-	if (!xslice) return;
-
-	m_gx2D.Set(ys, zs, 0.0f);
-	m_gy2D.Set(ys, zs, 0.0f);
-	m_field2D.Set(ys, zs, 1.0f);
-	m_velo2D.Set(ys, zs, 0.0f);
-
-	for (int zz = 1; zz < zs-1; ++zz) {
-		for (int yy = 1; yy < ys-1; ++yy) {
-			{
-				int xx = xslice;
-				int yp = yy + 1; if (yp > ys - 2) yp = ys - 2;
-				int ym = yy - 1; if (ym < 1) ym = 1;
-				int zp = zz + 1; if (zp > zs - 2) zp = zs - 2;
-				int zm = zz - 1; if (zm < 1) zm = 1;
-				m_gx2D[zz][yy] = (distance1[zz][yp][xx] - distance1[zz][ym][xx] + distance2[zz][yp][xx] - distance2[zz][ym][xx]);
-				m_gy2D[zz][yy] = (distance1[zp][yy][xx] - distance1[zm][yy][xx] + distance2[zp][yy][xx] - distance2[zm][yy][xx]);
-			}
-			//if current point is not on the edge of the data
-			if (!(zz < 5 || zz >= zs - 5 || yy < 5 || yy >= ys - 5))
-				m_field2D[zz][yy] = -1.0f;
-			else ++m_npos;
-			++m_nall;
-		}
-	}
-
-	m_nect = 100;
-	m_nfct = 5000;
-	m_bInited = true;
-
+void AreaEikonal::SetUsesCorrection(bool useCorrection) {
+	mUsesCorrection = useCorrection;
+}
+Vec3<double> AreaEikonal::GetMeetingPlaneCenter() const {
+	return mMeetingPlaneCenter;
 }
 
-void CPlanePhaseField::GetDistancemean(sitk::Image& distance, int xslice)
-{
-	vector<unsigned> size = distance.GetSize();
-	int xs = size[0], ys = size[1], zs = size[2];
-	double* distance_buffer = distance.GetBufferAsDouble();
-	m_nall = m_npos = m_since_last_update = 0;
-	m_bInited = false;
-	if (!xslice) return;
-
-	m_gx2D.Set(ys, zs, 0.0f);
-	m_gy2D.Set(ys, zs, 0.0f);
-	m_field2D.Set(ys, zs, 1.0f);
-	m_velo2D.Set(ys, zs, 0.0f);
-	m_distance2D[0].Set(ys, zs, -1);
-	m_distance2D[1].Set(ys, zs, -1);
-
-
-	for (int zz = 0; zz < zs; ++zz) {
-		for (int yy = 0; yy < ys; ++yy) {
-			{
-				int xx = xslice;
-				m_distance2D[0][zz][yy] = distance_buffer[xx - 1 + xs * (yy + ys * zz)];
-				m_distance2D[1][zz][yy] = distance_buffer[xx + 1 + xs * (yy + ys * zz)];
-				if (zz == 0 || yy == 0 || zz == zs - 1 || yy == ys - 1) continue;
-				int yp = yy + 1; if (yp > ys - 2) yp = ys - 2;
-				int ym = yy - 1; if (ym < 1) ym = 1;
-				int zp = zz + 1; if (zp > zs - 2) zp = zs - 2;
-				int zm = zz - 1; if (zm < 1) zm = 1;
-				m_gx2D[zz][yy] = distance_buffer[xx + xs * (yp + ys * zz)] - distance_buffer[xx + xs * (ym + ys * zz)];
-				m_gy2D[zz][yy] = distance_buffer[xx + xs * (yy + ys * zp)] - distance_buffer[xx + xs * (yy + ys * zm)];
-			}
-			//if current point is not on the edge of the data
-			if (!(zz < 5 || zz >= zs - 5 || yy < 5 || yy >= ys - 5))
-				m_field2D[zz][yy] = -1.0f;
-			else ++m_npos;
-			++m_nall;
-		}
-	}
-
-	m_nect = 100;
-	m_nfct = 20000;
-	m_bInited = true;
-
+Vec3<double> AreaEikonal::GetMeetingPlaneNormal() const {
+	return mMeetingPlaneNormal;
 }
 
-void CPlanePhaseField::Iterate() 
-{
-	_PROFILING;
-	if (!m_bInited) return;
-
-	int xs = m_field2D.xs, ys = m_field2D.ys;
-	m_velo2D.GetLaplace(m_field2D);
-	m_velo2D *= 4.0f;
-
-	realnum fac = 1.0f;
-	realnum maxv(0.0f);
-	#pragma omp parallel
-	{
-		double temp_maxv(0);
-#pragma omp for
-		for (int yx = 0; yx < xs * ys; yx++) {
-			int yy = yx / xs;
-			if (yy > 0 && yy < ys - 1) {
-				int xx = yx % xs;
-				if (xx > 0 && xx < xs - 1) {
-					realnum fmm = m_field2D[yy][xx];
-					m_velo2D[yy][xx] -= fac * fmm * fmm * fmm;
-					m_velo2D[yy][xx] += fac * fmm;
-					realnum gfx = 0.5f * (m_field2D[yy][xx + 1] - m_field2D[yy][xx - 1]);
-					realnum gfy = 0.5f * (m_field2D[yy + 1][xx] - m_field2D[yy - 1][xx]);
-
-					m_velo2D[yy][xx] += 10.0f * (gfx * m_gx2D[yy][xx] + gfy * m_gy2D[yy][xx]);
-					realnum cv = m_velo2D[yy][xx];
-					if (cv < 0)
-						cv *= -1;
-					if (cv > temp_maxv)
-						temp_maxv = cv;
-				}
-			}
-		}
-#pragma omp critical
-		if (temp_maxv > maxv)
-			maxv = temp_maxv;
-	}
-
-	if (maxv > 1e-5f)
-		maxv = 0.025f / maxv;
-	int npos(0);
-
-	#pragma omp parallel for reduction(+: npos)
-	for (int yy = 1; yy < ys - 1; ++yy) {
-		for (int xx = 1; xx < xs - 1; ++xx) {
-			m_field2D[yy][xx] += m_velo2D[yy][xx]*maxv;
-			if (m_field2D[yy][xx] > 0) ++npos;
-		}
-	}
-	if (npos > m_npos)
-		m_since_last_update = 0;
-	else if (++m_since_last_update >= 200)
-		m_nect = 0;
-	
-	m_npos = npos;
-	/*--m_nect;
-	if (!m_nect) {
-		realnum relpos = ((realnum)abs(npos - m_npos)) / ((realnum)m_nall);
-		m_nect = 100;
-		m_npos = npos;
-		if (relpos < 0.0003f) {
-			m_nect = 0;
-		}
-	}*/
-
-	--m_nfct;
-	if (m_nfct <= 0)
-		m_nect = 0;
-
+double AreaEikonal::GetMeetingPlaneOffset() const {
+	return mMeetingPlaneOffset;
 }
 
-std::unordered_set<unsigned long>& CPlanePhaseField::RetrieveBound()
-{
-	_PROFILING;
-	int xs = m_field2D.xs, ys = m_field2D.ys;
-	m_bound.clear();
-	for (int yy = 1; yy < ys - 1; ++yy) {
-		for (int xx = 1; xx < xs - 1; ++xx) {
-
-			if (m_field2D[yy][xx] > 0) {
-				if (m_field2D[yy + 1][xx] <= 0 || m_field2D[yy - 1][xx] <= 0
-					|| m_field2D[yy][xx + 1] <= 0 || m_field2D[yy][xx - 1] <= 0)
-					m_bound.emplace((yy << 16) + xx);
-			}
-
-		}
-	}
-	return m_bound;
+const sitk::Image& AreaEikonal::GetPhiMap() const {
+	return mPhiMap;
 }
 
-
-CVec3 operator *(double f, CVec3 &v)
-{
-	return CVec3(f*v.x,f*v.y,f*v.z);
-}
-CVec3 operator +(CVec3 &v, CVec3 &w)
-{
-	return CVec3(v.x+w.x,v.y+w.y,v.z+w.z);
+const sitk::Image& AreaEikonal::GetMeetingPointsMap() const {
+	return mMeetingPointsMap;
 }
 
-void CCurvEikonal::ResolvePath(realnum x, realnum y, realnum z, bool bClear, int i, int j)
+const sitk::Image& AreaEikonal::GetSampleImage() const
 {
-	sitk::Image& distance = m_phasefield.m_distance[i]; // m_smoothdist 
-	vector<uint32_t> size = distance.GetSize();
-	int xs = size[0], ys = size[1], zs = size[2];
-	double* distance_buffer = distance.GetBufferAsDouble();
-	if (bClear && m_minpath[i]) m_minpath[i][j].clear();
-
-	int ix((int)x), iy((int)y), iz((int)z);
-	if (iz < 2 || iz >= zs - 2) return;
-	if (ix < 2 || ix >= xs - 2) return;
-	if (iy < 2 || iy >= ys - 2) return;
-
-	if (BUF_IDX(distance_buffer, xs, ys, zs, ix, iy, iz) < 0) return;
-
-	CVec3 path(ix, iy, iz);
-	m_minpath[i][j].push_back(path);
-	static vector<double> sqrts = { 0, 1, sqrt(2), sqrt(3) };
-
-	for (int ii = 0; ii < 11111; ++ii) {
-		ix = (int)path.x; iy = (int)path.y; iz = (int)path.z;
-
-		if (iz < 2) iz = 2; if (iz >= zs - 2) iz = zs - 3;
-		if (ix < 2) ix = 2; if (ix >= xs - 2) ix = xs - 3;
-		if (iy < 2) iy = 2; if (iy >= ys - 2) iy = ys - 3;
-
-		{
-			realnum mmin(0);
-			int pz(0), py(0), px(0);
-			for (int zo = -1; zo <= 1; ++zo) {
-				int zz = iz + zo;
-				for (int yo = -1; yo <= 1; ++yo) {
-					int yy = iy + yo;
-					for (int xo = -1; xo <= 1; ++xo) {
-						int xx = ix + xo;
-						if (!zo && !yo && !xo) continue;
-						double dist = sqrts[abs(xo) + abs(yo) + abs(zo)];
-
-						CVec3 dir(xo, yo, zo);
-
-						realnum d1 = BUF_IDX(distance_buffer, xs, ys, zs, xx, yy, zz), d0 = BUF_IDX(distance_buffer, xs, ys, zs, ix, iy, iz);
-						double val = (d1 - d0) / dist;
-						if (val < mmin) {
-							mmin = val;
-							pz = zo; py = yo; px = xo;
-						}
-
-
-					}
-				}
-			}
-
-			path.x = ix + px; path.y = iy + py; path.z = iz + pz;
-
-		}
-
-		m_minpath[i][j].push_back(path);
-
-
-
-		CVec3 dir = path; dir -= m_reference[i];
-		if (dir.x * dir.x + dir.y * dir.y + dir.z * dir.z < 1.75f) {
-			m_minpath[i][j].push_back(m_reference[i]);
-			break;
-		}
-
-	}
-
+	return mSampleImage;
 }
 
-void CCurvEikonal::ResolvePath(int i)
-{
-	m_inittype = 0;
-	m_resolvready = 0;
-	ResolvePath(m_distanceto.x, m_distanceto.y, m_distanceto.z, true, i, m_j[i]);
-	if (m_minpath[i][m_j[i]].size()) ++m_j[i];
+double AreaEikonal::GetCurrentDistance() const {
+	return mCurrentDistance;
+}
+const sitk::Image& AreaEikonal::GetDistanceMap(int i) const {
+	return mDistanceMap[i];
+}
+
+const sitk::Image& AreaEikonal::GetCombinedDistanceMap() const {
+	return mCombinedDistanceMap;
+}
+
+const sitk::Image& AreaEikonal::GetPhaseFieldMap(int i) const {
+	return mPhaseFieldMap[i];
+}
+
+vector<Vec3<int>> AreaEikonal::ResolvePath(Vec3<int> point, int idx) const {
+	return ::ResolvePath(point, mDistanceMap[idx]);
 }

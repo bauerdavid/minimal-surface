@@ -14,13 +14,8 @@
 #include <fstream>
 #include <sitkImage.h>
 #include <sitkAdditionalProcedures.h>
-#include <omp.h>
 #include "FMSigned.h"
-#define DISTANCE_ITERATION 1
-#define DISTANCE_MEAN_ITERATION 2
-#define PLANE_PHASEFIELD_ITERATION 3
-#define TRANSPORT_FUNCTION_ITERATION 4
-#define DONE_ITERATION 5
+#include <thread>
 
 #define EXPCOEF_RANGE 100
 using namespace std;
@@ -30,7 +25,7 @@ namespace sitk = itk::simple;
 CChildView::CChildView()
 {
 	m_pControl = 0;
-	m_threadactivated = 0;
+	mAlgorithmStage = 0;
 	m_bispoint = 0;
 	m_zsee = 0;
 	m_ysee = 0;
@@ -163,7 +158,7 @@ void CChildView::OnPaint()
 		offx += m_dispd1.xs+1;
 		if (m_dispd2.xs) {
 			DispImage(dc,m_dispd2,offx,offy);
-			std::vector<POINT3D> &bound = m_liftedEikonal.m_boundcontour;
+			std::vector<POINT3D> &bound = mBoundaryContour;
 			int si = bound.size();
 			if (si) {
 				for (int ii = 0; ii < si; ++ii) {
@@ -174,7 +169,6 @@ void CChildView::OnPaint()
 			}
 		}
 		offx += m_dispd2.xs+1;
-		if (m_dispd3.xs) DispImage(dc,m_dispd3,offx,offy); // no dispd3
 		
 		CPen *oldpen = dc.SelectObject(&g_bluepen);
 		dc.MoveTo(m_disp.xs,m_zsee); dc.LineTo(offx,m_zsee);
@@ -189,116 +183,108 @@ void CChildView::OnPaint()
 		//offx = 0; offy = m_disp.ys-1; if (m_dislic.xs) DispImage(dc,m_dislic,offx,offy);
 	}	
 
-	vector<unsigned> size = m_liftedEikonal.m_phasefield.m_field[0].GetSize();
+	vector<unsigned> size = mInputImage.GetSize();
 	int xs(size[0]), ys(size[1]), zs(size[2]);
 
-	if (m_threadactivated)  {
-		//char txt[100];
-		//sprintf_s(txt, 99, "%d %d         ", g_ign, g_ian);
-		//dc.TextOutA(300, 10, txt);
+	if (mAlgorithmStage)  {
 		for (int ii = 0; ii < 2; ++ii) {
-			double* field_buffer = m_liftedEikonal.m_phasefield.m_field[ii].GetBufferAsDouble();
-			int* meeting_plane_buffer = m_liftedEikonal.m_phasefield.meeting_plane_positions.GetBufferAsInt32();
-
+			if (mPhaseFieldMap[ii] == NULL) return;
+			const double* field_buffer = mPhaseFieldMap[ii]->GetBufferAsDouble();
+			const int* meeting_points_buffer = mMeetingPointsMap->GetBufferAsInt32();
 			int zsee = 0;
 			if (m_pControl) {
 				zsee = m_zsee;
 			}
 
-			int pasi = m_liftedEikonal.m_minpath[ii][00].size();
-
-			if (m_threadactivated != PLANE_PHASEFIELD_ITERATION) {
+			if (mAlgorithmStage == DISTANCE_ITERATION || mAlgorithmStage == DONE_ITERATION) {
 				if (m_disp.xs && !m_btransportview) {
 					for (int yy = 0; yy < ys; ++yy) {
 						for (int xx = 0; xx < xs; ++xx) {
-							if (m_threadactivated == DISTANCE_ITERATION || m_threadactivated == DONE_ITERATION) {
-								if (abs(m_liftedEikonal.m_phasefield.plane_normal.x*xx+ m_liftedEikonal.m_phasefield.plane_normal.y*yy+ m_liftedEikonal.m_phasefield.plane_normal.z*zsee+ m_liftedEikonal.m_phasefield.plane_offset) < 0.5) {
-									dc.SetPixelV(xx, yy, 0xff00ff);
-								}
-								else if (meeting_plane_buffer[xx + xs * (yy + ys * zsee)] > 0) {
-									dc.SetPixelV(xx, yy, 0xff0000);
-								}
-								else if (field_buffer[xx + xs * (yy + ys * zsee)] > -0.9f && field_buffer[xx + xs * (yy + ys * zsee)] < 0.3f)
-									dc.SetPixelV(xx, yy, !ii ? 0xff : 0xff00);
+							Vec3<double> pixel(xx, yy, zsee);
+							if (abs((mPlaneNormal*pixel).Sum() + mPlaneOffset) < 0.5) {
+								dc.SetPixelV(xx, yy, 0xff00ff);
 							}
+							else if (meeting_points_buffer != NULL && meeting_points_buffer[xx + xs * (yy + ys * zsee)] > 0) {
+								dc.SetPixelV(xx, yy, 0xff0000);
+							}
+							else if (field_buffer != NULL && field_buffer[xx + xs * (yy + ys * zsee)] > -0.9f && field_buffer[xx + xs * (yy + ys * zsee)] < 0.3f)
+								dc.SetPixelV(xx, yy, !ii ? 0xff : 0xff00);
 						}
 					}
 				}
-			}
 
-			if (m_dispd1.xs) for (int zz = 0; zz < zs; ++zz) {
-				for (int xx = 0; xx < xs; ++xx) {
-					if (m_threadactivated  == DISTANCE_ITERATION || m_threadactivated == DONE_ITERATION) {
-						if (abs(m_liftedEikonal.m_phasefield.plane_normal.x * xx + m_liftedEikonal.m_phasefield.plane_normal.y * m_ysee + m_liftedEikonal.m_phasefield.plane_normal.z * zz + m_liftedEikonal.m_phasefield.plane_offset) < 0.5) {
-							dc.SetPixelV(m_disp.xs + 1 + xx, zz, 0xff00ff);
+				if (m_dispd1.xs) 
+					for (int zz = 0; zz < zs; ++zz) {
+						for (int xx = 0; xx < xs; ++xx) {
+							Vec3<double> pixel(xx, m_ysee, zz);
+							if (abs((mPlaneNormal * pixel).Sum() + mPlaneOffset) < 0.5) {
+								dc.SetPixelV(m_disp.xs + 1 + xx, zz, 0xff00ff);
+							}
+							else if (meeting_points_buffer != NULL && meeting_points_buffer[xx + xs * (m_ysee + ys * zz)] > 0) {
+								dc.SetPixelV(m_disp.xs + 1 + xx, zz, 0xff0000);
+							}
+							else if (field_buffer != NULL && field_buffer[xx + xs * (m_ysee + ys * zz)] > -0.9f && field_buffer[xx + xs * (m_ysee + ys * zz)] < 0.3f)
+								dc.SetPixelV(m_disp.xs + 1 + xx, zz, !ii ? 0xff : 0xff00);
+						
 						}
-						else if (meeting_plane_buffer[xx + xs * (m_ysee + ys * zz)] > 0) {
-							dc.SetPixelV(m_disp.xs + 1 + xx, zz, 0xff0000);
-						}
-						else if (field_buffer[xx + xs * (m_ysee + ys * zz)] > -0.9f && field_buffer[xx + xs * (m_ysee + ys * zz)] < 0.3f)
-							dc.SetPixelV(m_disp.xs+1+xx,zz,!ii?0xff:0xff00);
 					}
-					/*else if (!pasi) {
-						realnum tocc(dismap[zsee][yy][xx]); // ARRIVA!!
-						if (tocc >= 0) 
-							dc.SetPixelV(xx,yy,GetDepthColor(tocc/16));
-					}*/
-				}
-			}
-			if (m_dispd2.xs) { // xslice
-				for (int zz = 0; zz < zs; ++zz) {
-					for (int yy = 0; yy < ys; ++yy) {
-						if (m_threadactivated == DISTANCE_ITERATION || m_threadactivated == DONE_ITERATION) {
-							if (abs(m_liftedEikonal.m_phasefield.plane_normal.x * m_xsee + m_liftedEikonal.m_phasefield.plane_normal.y * yy + m_liftedEikonal.m_phasefield.plane_normal.z * zz + m_liftedEikonal.m_phasefield.plane_offset) < 0.5) {
+				if (m_dispd2.xs) { // xslice
+					for (int zz = 0; zz < zs; ++zz) {
+						for (int yy = 0; yy < ys; ++yy) {
+							Vec3<double> pixel(m_xsee, yy, zz);
+							if (abs((mPlaneNormal * pixel).Sum() + mPlaneOffset) < 0.5) {
 								dc.SetPixelV(2 * (m_disp.xs + 1) + yy, zz, 0xff00ff);
 							}
-							else if (meeting_plane_buffer[m_xsee + xs * (yy + ys * zz)] > 0) {
+							else if (meeting_points_buffer != NULL && meeting_points_buffer[m_xsee + xs * (yy + ys * zz)] > 0) {
 								dc.SetPixelV(2 * (m_disp.xs + 1) + yy, zz, 0xff0000);
 							}
-							else if (field_buffer[m_xsee + xs * (yy + ys * zz)] > -0.9f && field_buffer[m_xsee + xs * (yy + ys * zz)] < 0.3f)
+							else if (field_buffer != NULL && field_buffer[m_xsee + xs * (yy + ys * zz)] > -0.9f && field_buffer[m_xsee + xs * (yy + ys * zz)] < 0.3f)
 								dc.SetPixelV(2 * (m_disp.xs + 1) + yy, zz, !ii ? 0xff : 0xff00);
 						}
-						if (m_threadactivated == PLANE_PHASEFIELD_ITERATION) {
-							SWorkImg<realnum>& field2D = m_liftedEikonal.m_inicountourCalculator.m_field2D;
-							if (field2D[zz][yy] > 0.5f)
-								dc.SetPixelV(2 * (m_disp.xs + 1) + yy, zz, 0xff);
-							else if(field2D[zz][yy] < -0.5f)
-								dc.SetPixelV(2 * (m_disp.xs + 1) + yy, zz, 0xff0000);
-						}
-						/*else if (!pasi) {
-							realnum tocc(dismap[zsee][yy][xx]); // ARRIVA!!
-							if (tocc >= 0)
-								dc.SetPixelV(xx,yy,GetDepthColor(tocc/16));
-						}*/
 					}
 				}
 			}
-			if (pasi) {
+
+			
+			else if (mPhaseField2DMap != NULL && mAlgorithmStage == PLANE_PHASEFIELD_ITERATION && m_dispd2.xs) { // xslice
+				const double* field2d_buffer = mEstimator.GetInitialContourCalculator().GetPhaseField().GetBufferAsDouble();
+				vector<unsigned> size = mEstimator.GetInitialContourCalculator().GetPhaseField().GetSize();
+				int ph_xs(size[0]), ph_ys(size[1]);
+					for (int zz = 0; zz < zs; ++zz) {
+						for (int yy = 0; yy < ys; ++yy) {
+							if (BUF_IDX2D(field2d_buffer, ph_xs, ph_ys, yy, zz) > 0.5f)
+								dc.SetPixelV(2 * (m_disp.xs + 1) + yy, zz, 0xff);
+							else if (BUF_IDX2D(field2d_buffer, ph_xs, ph_ys, yy, zz) < -0.5f)
+								dc.SetPixelV(2 * (m_disp.xs + 1) + yy, zz, 0xff0000);
+						}
+					}
+			}
+			if (!mEstimator.mMinimalPaths[ii].empty()) {
 				CPen* oldpen = dc.SelectObject(&g_yellowpen);
 
-				int8_t* path_x_buffer = m_path_image_x.GetBufferAsInt8();
-				int8_t* path_y_buffer = m_path_image_y.GetBufferAsInt8();
-				int8_t* path_z_buffer = m_path_image_z.GetBufferAsInt8();
-				if (BUF_IDX(path_z_buffer, xs, ys, zs, 0, 0, m_zsee) == -100) {
+				int8_t* path_x_buffer = mPathImageX.GetBufferAsInt8();
+				int8_t* path_y_buffer = mPathImageY.GetBufferAsInt8();
+				int8_t* path_z_buffer = mPathImageZ.GetBufferAsInt8();
+				if (BUF_IDX3D(path_z_buffer, xs, ys, zs, 0, 0, m_zsee) == -100) {
 					for (int yy = 0; yy < ys; yy++) {
 						for (int xx = 0; xx < xs; xx++) {
-							BUF_IDX(path_z_buffer, xs, ys, zs, xx, yy, m_zsee) = 0;
+							BUF_IDX3D(path_z_buffer, xs, ys, zs, xx, yy, m_zsee) = 0;
 						}
 					}
-					for (int jj = 0; jj < MAXMINPATH; ++jj) {
-						//CPen *oldpen = dc.SelectObject(&g_yellowpen);
-						std::vector<CVec3>& minpath = m_liftedEikonal.m_minpath[ii][jj];
-						pasi = minpath.size();
-						if (!pasi) break;
-						for (int ii = 0; ii < pasi; ++ii) {
-							if(BUF_IDX(path_z_buffer, xs, ys, zs, (int)minpath[ii].x, (int)minpath[ii].y, m_zsee) < 1)
-								BUF_IDX(path_z_buffer, xs, ys, zs, (int)minpath[ii].x, (int)minpath[ii].y, m_zsee) = minpath[ii].z < m_zsee ? -1 : 1;
+					for(int ii=0; ii<2; ii++)
+						for (int jj = 0; jj < mEstimator.mMinimalPaths[ii].size(); ++jj) {
+							std::vector<Vec3<int>>& minpath = mEstimator.mMinimalPaths[ii][jj];
+							int point_count = minpath.size();
+							if (!point_count) break;
+							for (int p = 0; p < point_count; ++p) {
+								if(BUF_IDX3D(path_z_buffer, xs, ys, zs, (int)minpath[p].x(), (int)minpath[p].y(), m_zsee) < 1)
+									BUF_IDX3D(path_z_buffer, xs, ys, zs, (int)minpath[p].x(), (int)minpath[p].y(), m_zsee) = minpath[p].z() < m_zsee ? -1 : 1;
+							}
 						}
-					}
 				}
 				for (int yy = 0; yy < ys; yy++) {
 					for (int xx = 0; xx < xs; xx++) {
-						int8_t val = BUF_IDX(path_z_buffer, xs, ys, zs, xx, yy, m_zsee);
+						int8_t val = BUF_IDX3D(path_z_buffer, xs, ys, zs, xx, yy, m_zsee);
 						if (val) {
 							int color = val < 0 ? 0x7fff : 0xffff;
 							dc.SetPixelV(xx, yy, color);
@@ -306,26 +292,26 @@ void CChildView::OnPaint()
 					}
 				}
 
-				if (BUF_IDX(path_y_buffer, xs, ys, zs, 0, m_ysee, 0) == -100) {
+				if (BUF_IDX3D(path_y_buffer, xs, ys, zs, 0, m_ysee, 0) == -100) {
 					for (int zz = 0; zz < zs; zz++) {
 						for (int xx = 0; xx < xs; xx++) {
-							BUF_IDX(path_y_buffer, xs, ys, zs, xx, m_ysee, zz) = 0;
+							BUF_IDX3D(path_y_buffer, xs, ys, zs, xx, m_ysee, zz) = 0;
 						}
 					}
-					for (int jj = 0; jj < MAXMINPATH; ++jj) {
-						//CPen *oldpen = dc.SelectObject(&g_yellowpen);
-						std::vector<CVec3>& minpath = m_liftedEikonal.m_minpath[ii][jj];
-						pasi = minpath.size();
-						if (!pasi) break;
-						for (int ii = 0; ii < pasi; ++ii) {
-							if (BUF_IDX(path_y_buffer, xs, ys, zs, (int)minpath[ii].x, m_ysee, (int)minpath[ii].z) < 1)
-								BUF_IDX(path_y_buffer, xs, ys, zs, (int)minpath[ii].x, m_ysee, (int)minpath[ii].z) = minpath[ii].y < m_ysee ? -1 : 1;
+					for (int ii = 0; ii < 2; ii++)
+						for (int jj = 0; jj < mEstimator.mMinimalPaths[ii].size(); ++jj) {
+							std::vector<Vec3<int>>& minpath = mEstimator.mMinimalPaths[ii][jj];
+							int point_count = minpath.size();
+							if (!point_count) break;
+							for (int p = 0; p < point_count; ++p) {
+								if (BUF_IDX3D(path_y_buffer, xs, ys, zs, (int)minpath[p].x(), m_ysee, (int)minpath[p].z()) < 1)
+									BUF_IDX3D(path_y_buffer, xs, ys, zs, (int)minpath[p].x(), m_ysee, (int)minpath[p].z()) = minpath[p].y() < m_ysee ? -1 : 1;
+							}
 						}
-					}
 				}
 				for (int zz = 0; zz < zs; zz++) {
 					for (int xx = 0; xx < xs; xx++) {
-						int8_t val = BUF_IDX(path_y_buffer, xs, ys, zs, xx, m_ysee, zz);
+						int8_t val = BUF_IDX3D(path_y_buffer, xs, ys, zs, xx, m_ysee, zz);
 						if (val) {
 							int color = val < 0 ? 0x7fff : 0xffff;
 							dc.SetPixelV(xx + m_disp.xs + 1, zz, color);
@@ -333,50 +319,39 @@ void CChildView::OnPaint()
 					}
 				}
 
-				if (BUF_IDX(path_x_buffer, xs, ys, zs, m_xsee, 0, 0) == -100) {
+				if (BUF_IDX3D(path_x_buffer, xs, ys, zs, m_xsee, 0, 0) == -100) {
 					for (int zz = 0; zz < zs; zz++) {
 						for (int yy = 0; yy < ys; yy++) {
-							BUF_IDX(path_x_buffer, xs, ys, zs, m_xsee, yy, zz) = 0;
+							BUF_IDX3D(path_x_buffer, xs, ys, zs, m_xsee, yy, zz) = 0;
 						}
 					}
-					for (int jj = 0; jj < MAXMINPATH; ++jj) {
-						//CPen *oldpen = dc.SelectObject(&g_yellowpen);
-						std::vector<CVec3>& minpath = m_liftedEikonal.m_minpath[ii][jj];
-						pasi = minpath.size();
-						if (!pasi) break;
-						for (int ii = 0; ii < pasi; ++ii) {
-							if (BUF_IDX(path_x_buffer, xs, ys, zs, m_xsee, (int)minpath[ii].y, (int)minpath[ii].z) < 1)
-								BUF_IDX(path_x_buffer, xs, ys, zs, m_xsee, (int)minpath[ii].y, (int)minpath[ii].z) = minpath[ii].x < m_xsee ? -1 : 1;
+					for (int ii = 0; ii < 2; ii++)
+						for (int jj = 0; jj < mEstimator.mMinimalPaths[ii].size(); ++jj) {
+							std::vector<Vec3<int>>& minpath = mEstimator.mMinimalPaths[ii][jj];
+							int point_count = minpath.size();
+							if (!point_count) break;
+							for (int p = 0; p < point_count; ++p) {
+								if (BUF_IDX3D(path_x_buffer, xs, ys, zs, m_xsee, (int)minpath[p].y(), (int)minpath[p].z()) < 1)
+									BUF_IDX3D(path_x_buffer, xs, ys, zs, m_xsee, (int)minpath[p].y(), (int)minpath[p].z()) = minpath[p].x() < m_xsee ? -1 : 1;
+							}
 						}
-					}
 				}
 				for (int zz = 0; zz < zs; zz++) {
 					for (int yy = 0; yy < ys; yy++) {
-						int8_t val = BUF_IDX(path_x_buffer, xs, ys, zs, m_xsee, yy, zz);
+						int8_t val = BUF_IDX3D(path_x_buffer, xs, ys, zs, m_xsee, yy, zz);
 						if (val) {
 							int color = val < 0 ? 0x7fff : 0xffff;
 							dc.SetPixelV(yy + 2 * (m_disp.xs + 1), zz, color);
 						}
 					}
 				}
-				
-				
-				
-
-					//dc.MoveTo((int)minpath[0].x, (int)minpath[0].y);
-					
-
-					//dc.MoveTo((int)minpath[0].x + m_disp.xs + 1, (int)minpath[0].z);
-					
-					//dc.MoveTo((int)minpath[0].y + 2 * (m_disp.xs + 1), (int)minpath[0].z);
-
 				dc.SelectObject(oldpen);
 			}
 		}
 
 
-		{
-			double* field_buffer = m_liftedEikonal.m_phasefield.m_field[0].GetBufferAsDouble();
+		/*{
+			const double* field_buffer = mEstimator.mAreaEikonal.GetPhaseFieldMap(0).GetBufferAsDouble();
 
 			int xx(0), yy(0), zz(0);
 			dc.MoveTo(xx,300-(int)(10*field_buffer[xx + xs * (m_ysee + ys * m_zsee)]));
@@ -386,21 +361,21 @@ void CChildView::OnPaint()
 			dc.MoveTo(zz,400-(int)(10*field_buffer[m_xsee + xs * (m_ysee + ys * zz)]));
 			for (zz = 1; zz < zs; ++zz) dc.LineTo(zz*5,400-(int)(10*field_buffer[m_xsee + xs * (m_ysee + ys * zz)]));
 
-		}
+		}*/
 
 	}
 			
 
 	if (m_disp.xs) {
 		if (m_bispoint > 0) {
-			if (abs(m_zsee-m_start_point.z) < 3) dc.FillSolidRect(m_start_point.x-1, m_start_point.y-1,3,3,0xff);
-			if (abs(m_ysee- m_start_point.y) < 3) dc.FillSolidRect(m_start_point.x+m_disp.xs, m_start_point.z-1,3,3,0xff);
-			if (abs(m_xsee- m_start_point.x) < 3) dc.FillSolidRect(m_start_point.y+2*m_disp.xs+1, m_start_point.z -1,3,3,0xff);
+			if (abs(m_zsee-mStartPoint.z()) < 3) dc.FillSolidRect(mStartPoint.x() -1, mStartPoint.y() -1,3,3,0xff);
+			if (abs(m_ysee- mStartPoint.y()) < 3) dc.FillSolidRect(mStartPoint.x() +m_disp.xs, mStartPoint.z() -1,3,3,0xff);
+			if (abs(m_xsee- mStartPoint.x()) < 3) dc.FillSolidRect(mStartPoint.y() +2*m_disp.xs+1, mStartPoint.z() -1,3,3,0xff);
 		}
 		if (m_bispoint > 1) {
-			if (abs(m_zsee- m_end_point.z) < 3) dc.FillSolidRect(m_end_point.x-1, m_end_point.y-1,3,3,0xffff00);
-			if (abs(m_ysee- m_end_point.y) < 3) dc.FillSolidRect(m_end_point.x+m_disp.xs, m_end_point.z-1,3,3,0xffff00);
-			if (abs(m_xsee- m_end_point.x) < 3) dc.FillSolidRect(m_end_point.y+2*m_disp.xs+1, m_end_point.z-1,3,3,0xffff00);
+			if (abs(m_zsee- mEndPoint.z()) < 3) dc.FillSolidRect(mEndPoint.x() -1, mEndPoint.y() -1,3,3,0xffff00);
+			if (abs(m_ysee- mEndPoint.y()) < 3) dc.FillSolidRect(mEndPoint.x() +m_disp.xs, mEndPoint.z() -1,3,3,0xffff00);
+			if (abs(m_xsee- mEndPoint.x()) < 3) dc.FillSolidRect(mEndPoint.y() +2*m_disp.xs+1, mEndPoint.z() -1,3,3,0xffff00);
 		}
 	}
 
@@ -410,285 +385,221 @@ void CChildView::OnPaint()
 
 UINT BackgroundThread(LPVOID params)
 {
-	omp_set_nested(1);
-	omp_set_dynamic(1);
 	CChildView* view = (CChildView*)params;
-	int cyc = 0;
-	extern bool g_modeswitch;
-	bool dumped = false;
-	double start = omp_get_wtime();
-	ofstream f_stream;
-	f_stream.open("Y:/BIOMAG/shortest path/" INFO_FILENAME);
-#ifdef DEBUG_STATES
-	save_image("Y:/BIOMAG/shortest path/interm_imgs/ph0_data.tif", view->m_liftedEikonal.m_phasefield.m_data);
-	save_image("Y:/BIOMAG/shortest path/interm_imgs/ph0_testimage.tif", view->m_imageOp.GetTestImage());
-	save_image("Y:/BIOMAG/shortest path/interm_imgs/ph0_dist0.tif", view->m_liftedEikonal.m_phasefield.m_distance[0]);
-	save_image("Y:/BIOMAG/shortest path/interm_imgs/ph0_dist1.tif", view->m_liftedEikonal.m_phasefield.m_distance[1]);
-	save_image("Y:/BIOMAG/shortest path/interm_imgs/ph0_field0.tif", view->m_liftedEikonal.m_phasefield.m_field[0]);
-	save_image("Y:/BIOMAG/shortest path/interm_imgs/ph0_field1.tif", view->m_liftedEikonal.m_phasefield.m_field[1]);
-#endif
-	while (view->m_threadactivated) {
+	view->mEstimator.Calculate(view->mInputImage, view->mStartPoint, view->mEndPoint, view->m_expfac, 0.01);
 
-		if (view->m_threadactivated == DISTANCE_ITERATION) { // 3D
-			if (!view->m_liftedEikonal.m_phasefield.m_bdone)
-			{
-				view->m_liftedEikonal.m_phasefield.Iterate(g_modeswitch);
-				if (view->m_liftedEikonal.m_phasefield.m_bdone) {
-#ifdef DEBUG_STATES
-					save_image("Y:/BIOMAG/shortest path/interm_imgs/ph1_flow_idx.tif", view->m_liftedEikonal.m_phasefield.m_flow_idx);
-#endif
-
-					view->m_liftedEikonal.m_phasefield.ExtractMeetingPlane();
-					view->m_liftedEikonal.m_phasefield.CombineDistance();
-					//view->m_liftedEikonal.rotation_matrix = { 1, 0, 0, 0, 1, 0, 0, 0, 1 };
-					view->m_liftedEikonal.m_rotated_phasefield.Initialize(view->m_liftedEikonal.m_phasefield, view->m_liftedEikonal.m_phasefield.rotation_matrix);
-					view->m_liftedEikonal.m_phasefield.SmoothDistances();
-
-					vector<double> plane_center_physical = { (view->m_liftedEikonal.m_phasefield.plane_center.x), (view->m_liftedEikonal.m_phasefield.plane_center.y), (view->m_liftedEikonal.m_phasefield.plane_center.z) };
-					vector<double> plane_center_transformed;
-					plane_center_transformed = view->m_liftedEikonal.m_rotated_phasefield.m_sample_image.TransformPhysicalPointToContinuousIndex(plane_center_physical);
-					view->m_liftedEikonal.m_rotated_phasefield.m_plane_slice = plane_center_transformed[0];
-#ifndef ITERATE_ROTATED
-					view->m_liftedEikonal.m_rotated_phasefield.CalculateAlignedCombinedDistance(view->m_start_point.x, view->m_end_point.x);
-					view->m_liftedEikonal.m_rotated_phasefield.SmoothDistances();
-#endif
-					view->m_liftedEikonal.m_rotated_phasefield.m_bdone = false;
-					
-					// calculate data center
-					vector<unsigned int> size = view->m_liftedEikonal.m_phasefield.m_distance[0].GetSize();
-					double xs(size[0]);
-					double ys(size[1]);
-					double zs(size[2]);
-					vector<unsigned int> rot_size = view->m_liftedEikonal.m_rotated_phasefield.m_distance[0].GetSize();
-
-#ifdef DEBUG_STATES
-					save_image("Y:/BIOMAG/shortest path/interm_imgs/ph1_combined_distance.tif", view->m_liftedEikonal.m_phasefield.m_combined_distance);
-					save_image("Y:/BIOMAG/shortest path/interm_imgs/ph1_distance_0.tif", view->m_liftedEikonal.m_phasefield.m_distance[0]);
-					save_image("Y:/BIOMAG/shortest path/interm_imgs/ph1_distance_1.tif", view->m_liftedEikonal.m_phasefield.m_distance[1]);
-					save_image("Y:/BIOMAG/shortest path/interm_imgs/ph1_r_combined_distance.tif", view->m_liftedEikonal.m_rotated_phasefield.m_combined_distance);
-					save_image("Y:/BIOMAG/shortest path/interm_imgs/ph1_r_distance0.tif", view->m_liftedEikonal.m_rotated_phasefield.m_distance[0]);
-					save_image("Y:/BIOMAG/shortest path/interm_imgs/ph1_r_distance1.tif", view->m_liftedEikonal.m_rotated_phasefield.m_distance[1]);
-#endif
-
-					f_stream << "size (x, y, z):";
-					f_stream << " " << rot_size[0];
-					f_stream << " " << rot_size[1];
-					f_stream << " " << rot_size[2];
-					f_stream << endl;
-					f_stream << "plane center: " << plane_center_transformed[0] << endl;
-#ifndef ITERATE_ROTATED
-					view->m_threadactivated = DISTANCE_MEAN_ITERATION;
-#endif
-					view->Invalidate(FALSE);
-					
-				}
-			}
-			else if (!view->m_liftedEikonal.m_rotated_phasefield.m_bdone) {
-				view->m_liftedEikonal.m_rotated_phasefield.Iterate(g_modeswitch);
-				if (view->m_liftedEikonal.m_rotated_phasefield.m_bdone) {
-					//view->m_liftedEikonal.m_rotated_phasefield.CombineDistance();
-					vector<double> start_point({ view->m_start_point.x, view->m_start_point.y, view->m_start_point.z });
-					vector<double> end_point({ view->m_end_point.x, view->m_end_point.y, view->m_end_point.z });
-					start_point = view->m_liftedEikonal.m_phasefield.m_sample_image.TransformContinuousIndexToPhysicalPoint(start_point);
-					start_point = view->m_liftedEikonal.m_rotated_phasefield.m_sample_image.TransformPhysicalPointToContinuousIndex(start_point);
-					end_point = view->m_liftedEikonal.m_phasefield.m_sample_image.TransformContinuousIndexToPhysicalPoint(end_point);
-					end_point = view->m_liftedEikonal.m_rotated_phasefield.m_sample_image.TransformPhysicalPointToContinuousIndex(end_point);
-					view->m_liftedEikonal.m_rotated_phasefield.CalculateAlignedCombinedDistance(start_point[0], end_point[0]);
-					view->m_liftedEikonal.m_rotated_phasefield.SmoothDistances();
-					/*sitk::MinimumMaximumImageFilter minmax;
-					minmax.Execute(view->m_liftedEikonal.m_rotated_phasefield.m_distance[0]);
-					double maxval = minmax.GetMaximum();
-					minmax.Execute(view->m_liftedEikonal.m_rotated_phasefield.m_distance[1]);
-					maxval = max(maxval, minmax.GetMaximum());
-					view->m_liftedEikonal.m_rotated_phasefield.m_distance[0] /= maxval;
-					view->m_liftedEikonal.m_rotated_phasefield.m_distance[1] /= maxval;*/
-					view->m_threadactivated = DISTANCE_MEAN_ITERATION;
-#ifdef DEBUG_STATES
-					save_image("Y:/BIOMAG/shortest path/interm_imgs/ph1.5_r_combined_distance.tif", view->m_liftedEikonal.m_rotated_phasefield.m_combined_distance);
-					save_image("Y:/BIOMAG/shortest path/interm_imgs/ph1.5_r_distance0.tif", view->m_liftedEikonal.m_rotated_phasefield.m_distance[0]);
-					save_image("Y:/BIOMAG/shortest path/interm_imgs/ph1.5_r_distance1.tif", view->m_liftedEikonal.m_rotated_phasefield.m_distance[1]);
-#endif
-					view->Invalidate(FALSE);
-				}
-			}
-
-			if (++cyc > 7) { view->Invalidate(FALSE); cyc = 0; }
-
-			
-
-		}
-		else if (view->m_threadactivated == DISTANCE_MEAN_ITERATION) {
-			view->m_liftedEikonal.m_inicountourCalculator.GetDistancemean(view->m_liftedEikonal.m_rotated_phasefield.m_combined_distance, view->m_liftedEikonal.m_rotated_phasefield.m_plane_slice);
-#ifdef DEBUG_STATES
-			save_image("Y:/BIOMAG/shortest path/interm_imgs/ph2_r_combined_distance.tif", view->m_liftedEikonal.m_rotated_phasefield.m_combined_distance);
-			save_image("Y:/BIOMAG/shortest path/interm_imgs/ph2_r_distance_0.tif", view->m_liftedEikonal.m_rotated_phasefield.m_distance[0]);
-			save_image("Y:/BIOMAG/shortest path/interm_imgs/ph2_r_distance_1.tif", view->m_liftedEikonal.m_rotated_phasefield.m_distance[1]);
-			save_image("Y:/BIOMAG/shortest path/interm_imgs/ph2_r_data.tif", view->m_liftedEikonal.m_rotated_phasefield.m_data);
-			save_image("Y:/BIOMAG/shortest path/interm_imgs/ph2_r_flow_idx.tif", view->m_liftedEikonal.m_rotated_phasefield.m_flow_idx);
-
-			Sleep(300);
-			save_work_img("Y:/BIOMAG/shortest path/interm_imgs/ph2_slice_gx.tif",view->m_liftedEikonal.m_inicountourCalculator.m_gx2D);
-			save_work_img("Y:/BIOMAG/shortest path/interm_imgs/ph2_slice_gy.tif", view->m_liftedEikonal.m_inicountourCalculator.m_gy2D);
-			save_work_img("Y:/BIOMAG/shortest path/interm_imgs/ph2_slice_distance0.tif", view->m_liftedEikonal.m_inicountourCalculator.m_distance2D[0]);
-			save_work_img("Y:/BIOMAG/shortest path/interm_imgs/ph2_slice_distance1.tif", view->m_liftedEikonal.m_inicountourCalculator.m_distance2D[1]);
-#endif
-			if (view->m_liftedEikonal.m_inicountourCalculator.m_bInited)
-				view->m_threadactivated = PLANE_PHASEFIELD_ITERATION;
-		}
-		else if (view->m_threadactivated == PLANE_PHASEFIELD_ITERATION) { // plane
-			if (view->m_liftedEikonal.m_inicountourCalculator.m_nect) {
-				view->m_liftedEikonal.m_inicountourCalculator.Iterate();
-				
-			}
-			else {
-				//view->m_imageOp.GetXTestBound(view->m_xsee, view->m_liftedEikonal.m_boundcontour);
-				vector<unsigned> size = view->m_liftedEikonal.m_rotated_phasefield.m_distance[0].GetSize();
-				int xs(size[0]), ys(size[1]), zs(size[2]);
-				unordered_set<unsigned long>& bound = view->m_liftedEikonal.m_inicountourCalculator.RetrieveBound();
-				view->m_liftedEikonal.m_boundcontour.clear();
-				for (auto& it = bound.begin(); it != bound.end(); it++) {
-					int z = *it >> 16;
-					int y = *it & 0b1111111111111111;
-					vector<double> rotated;
-					rotated = view->m_liftedEikonal.m_rotated_phasefield.m_sample_image.TransformContinuousIndexToPhysicalPoint({ view->m_liftedEikonal.m_rotated_phasefield.m_plane_slice, (double)y, (double)z });
-					rotated = view->m_liftedEikonal.m_phasefield.m_sample_image.TransformPhysicalPointToContinuousIndex(rotated);
-					//rotate(view->m_liftedEikonal.m_phasefield.rotation_matrix, { view->m_liftedEikonal.m_rotated_phasefield.m_plane_slice, (double)y, (double)z }, rotated);
-					view->m_liftedEikonal.m_boundcontour.push_back(point_to_representation(round(rotated[0]), round(rotated[1]), round(rotated[2])));
-				}
-				view->m_imageOp.GetPlaneDistMap(ys, zs, bound);
-				if (xs > 0) {
-					sitk::Image& passi = view->m_imageOp.GetIniMap(xs, ys, zs, view->m_liftedEikonal.m_rotated_phasefield.m_plane_slice);
-					realnum maxdist = view->m_liftedEikonal.m_rotated_phasefield.m_currentdistance;
-					view->m_transport.TrInit(view->m_liftedEikonal.m_rotated_phasefield.m_combined_distance, passi, maxdist);
-#ifdef DEBUG_STATES
-					save_work_img("Y:/BIOMAG/shortest path/interm_imgs/ph3_slice_distance.tif", view->m_imageOp.m_loc);
-					save_image("Y:/BIOMAG/shortest path/interm_imgs/ph3_transport_gx.tif", view->m_transport.m_gx);
-					save_image("Y:/BIOMAG/shortest path/interm_imgs/ph3_transport_gy.tif", view->m_transport.m_gy);
-					save_image("Y:/BIOMAG/shortest path/interm_imgs/ph3_transport_gz.tif", view->m_transport.m_gz);
-					save_image("Y:/BIOMAG/shortest path/interm_imgs/ph3_transport_init0.tif", view->m_transport.m_transportfunction[0]);
-					save_image("Y:/BIOMAG/shortest path/interm_imgs/ph3_transport_init1.tif", view->m_transport.m_transportfunction[1]);
-					save_image("Y:/BIOMAG/shortest path/interm_imgs/ph3_transport_bound.tif", view->m_transport.m_isboundary);
-					save_work_img("Y:/BIOMAG/shortest path/interm_imgs/ph3_slice_field.tif", view->m_liftedEikonal.m_inicountourCalculator.m_field2D);
-#endif
-
-				}
-				view->m_threadactivated = TRANSPORT_FUNCTION_ITERATION;
-
-			}
-			if (++cyc > 7) { view->Invalidate(FALSE); cyc = 0; }
-		}
-		else if (view->m_threadactivated == TRANSPORT_FUNCTION_ITERATION) {
-			view->m_transport.TrControl(100000);
-			vector<unsigned> size = view->m_liftedEikonal.m_phasefield.m_data.GetSize();
-			unsigned int xs(size[0]), ys(size[1]), zs(size[2]);
-			vector<unsigned int> sample_size = { xs, ys, zs };
-#ifdef DEBUG_STATES
-			save_image("Y:/BIOMAG/shortest path/interm_imgs/ph4_transport0.tif", view->m_transport.m_transportfunction[0]);
-			save_image("Y:/BIOMAG/shortest path/interm_imgs/ph4_bound.tif", view->m_transport.m_isboundary);
-#endif
-			resample_img(view->m_transport.m_transportfunction[0], view->m_transport.m_transportfunction[0], view->m_liftedEikonal.m_phasefield.rotation_matrix, sample_size, true);
-			//neg_to_minus1(view->m_transport.m_transportfunction[0]);
-			resample_img<sitk::sitkNearestNeighbor>(view->m_transport.m_isboundary, view->m_transport.m_isboundary, view->m_liftedEikonal.m_phasefield.rotation_matrix, sample_size, true);
-#ifdef DEBUG_STATES
-			save_image("Y:/BIOMAG/shortest path/interm_imgs/ph4_unrot_transportfn.tif", view->m_transport.m_transportfunction[0]);
-			save_image("Y:/BIOMAG/shortest path/interm_imgs/ph4_unrot_bound.tif", view->m_transport.m_isboundary);
-#endif
-			view->m_transport.GetDispSlice(Talox, view->m_xsee, view->m_dispd2); // TaloX - enum
-			view->m_transport.GetDispSlice(Taloy, view->m_ysee, view->m_dispd1);
-			view->m_transport.GetDispSlice(Taloz, view->m_zsee, view->m_disp);
-			view->Invalidate();
-			//view->m_prevthreadactivated = 2;
-			Sleep(300);
-			view->m_threadactivated = DONE_ITERATION;
-		}
-		else if (view->m_threadactivated == DONE_ITERATION) {
-			if (!dumped) {
-				double length = omp_get_wtime() - start;
-				f_stream << "execution time: " << length << endl;
-				f_stream.close();
-				_DUMP_PROFILE_INFO("Y:/BIOMAG/shortest path/profiling.txt");
-				dumped = true;
-			}
-			Sleep(300);
-		}
-
-	}
-
+	GetDispSliceFromTransportFunction(view->mEstimator.GetTransportFunctionCalculator(), Talox, view->m_xsee, view->m_dispd2); // TaloX - enum
+	GetDispSliceFromTransportFunction(view->mEstimator.GetTransportFunctionCalculator(), Taloy, view->m_ysee, view->m_dispd1);
+	GetDispSliceFromTransportFunction(view->mEstimator.GetTransportFunctionCalculator(), Taloz, view->m_zsee, view->m_disp);
+	view->Invalidate();
+	_DUMP_PROFILE_INFO("Y:/BIOMAG/shortest path/profiling.txt");
 	return 0;
 }
 
 void CChildView::InitThread()
 {
-	if (m_threadactivated) return;
+	if (mAlgorithmStage) return;
 	if (!m_bispoint) {
-		m_start_point.x = 40;
-		m_end_point.x = 201;
-		m_start_point.y = m_end_point.y = 87;
-		m_start_point.z = m_end_point.z = 54;
+		mStartPoint.x() = 40;
+		mEndPoint.x() = 201;
+		mStartPoint.y() = mEndPoint.y() = 87;
+		mStartPoint.z() = mEndPoint.z() = 54;
 		m_bispoint = 2;
 	}
 	
 	
 	if (m_bispoint <= 1) {
-		m_end_point.x = -100;
-		m_end_point.y = -100;
+		mEndPoint.x() = -100;
+		mEndPoint.y() = -100;
 	}
-	m_imageOp.CreateTestInput(m_expfac);
-	sitk::Image& data = m_imageOp.GetTestInput();
-	vector<uint32_t> size = data.GetSize();
 	if (m_bispoint == 1) {
-		m_end_point.z = m_xsee;
+		mEndPoint.z() = m_xsee;
 	}
-	//sitk::Image data_im = vox_img_2_sitk(data);
-	m_liftedEikonal.m_phasefield.Initialize(data, m_start_point, m_end_point);
+	AreaEikonalES::iter_callback_type iter_cb = [this](int iteration) {
+		if (iteration % 7 == 0) {
+			std::thread invalidate_thread([this]() {Sleep(50); Invalidate(); });
+			invalidate_thread.detach();
+		}
+	};
+#ifdef DEBUG_STATES
+	//save initial maps
+	save_image("Y:/BIOMAG/shortest path/interm_imgs/ph0_testimage.tif", mInputImage);
+	EventSource::data_callback_type dist_init_debug_cb = [](const sitk::Image& map, int idx) {
+		save_image("Y:/BIOMAG/shortest path/interm_imgs/ph0_dist" + std::to_string(idx)+".tif", map);
+	};
+	mEstimator.HookStageDataInitializedEvent(AreaEikonalStage, dist_init_debug_cb, Distance);
 
+	EventSource::data_callback_type phase_init_debug_cb = [](const sitk::Image& map, int idx) {
+		save_image("Y:/BIOMAG/shortest path/interm_imgs/ph0_field" + std::to_string(idx) + ".tif", map);
+	};
+	mEstimator.HookStageDataInitializedEvent(AreaEikonalStage, phase_init_debug_cb, PhaseField);
 
+	EventSource::data_callback_type phi_init_debug_cb = [](const sitk::Image& map, int) {
+		save_image("Y:/BIOMAG/shortest path/interm_imgs/ph0_phi.tif", map);
+	};
+	mEstimator.HookCalculatedPhiMapEvent(phi_init_debug_cb);
+
+	const sitk::Image* final_distmap[2];
+	EventSource::data_callback_type distmap_update_debug_cb = [&final_distmap](const sitk::Image& map, int idx) {
+		final_distmap[idx] = &map;
+	};
+	EventSource::basic_callback_type finished_eikonal_debug_cb = [&final_distmap]() {
+		save_image("Y:/BIOMAG/shortest path/interm_imgs/ph1_distance_0.tif", *final_distmap[0]);
+		//save_image("Y:/BIOMAG/shortest path/interm_imgs/ph1_distance_1.tif", *final_distmap[1]);
+	};
+	mEstimator.HookStageUpdatedEvent(AreaEikonalStage, distmap_update_debug_cb, Distance);
+	mEstimator.HookStageFinishedEvent(AreaEikonalStage, finished_eikonal_debug_cb);
+
+	EventSource::data_callback_type init_rot_distmap_debug_cb = [](const sitk::Image& map, int idx) {
+		save_image("Y:/BIOMAG/shortest path/interm_imgs/ph1_r_distance_" + to_string(idx) + ".tif", map);
+	};
+	mEstimator.HookStageDataInitializedEvent(RotatedAreaEikonalStage, init_rot_distmap_debug_cb, Distance);
+
+	EventSource::data_callback_type rot_distmap_update_debug_cb = [&final_distmap](const sitk::Image& map, int idx) {
+		final_distmap[idx] = &map;
+	};
+	EventSource::basic_callback_type rot_finished_eikonal_debug_cb = [&final_distmap]() {
+		save_image("Y:/BIOMAG/shortest path/interm_imgs/ph1.5_r_distance_0.tif", *final_distmap[0]);
+		save_image("Y:/BIOMAG/shortest path/interm_imgs/ph1.5_r_distance_1.tif", *final_distmap[1]);
+	};
+	mEstimator.HookStageUpdatedEvent(RotatedAreaEikonalStage, rot_distmap_update_debug_cb, Distance);
+	mEstimator.HookStageFinishedEvent(RotatedAreaEikonalStage, rot_finished_eikonal_debug_cb);
+
+	/*EventSource::data_callback_type grad_x_init_debug_cb = [](const sitk::Image& map, int) {
+		save_image("Y:/BIOMAG/shortest path/interm_imgs/ph2_slice_gx.tif", map);
+	};
+	mEstimator.mInitialContourCalculator.HookInitializeGradXEvent(grad_x_init_debug_cb);
+
+	EventSource::data_callback_type grad_y_init_debug_cb = [](const sitk::Image& map, int) {
+		save_image("Y:/BIOMAG/shortest path/interm_imgs/ph2_slice_gy.tif", map);
+	};
+	mEstimator.mInitialContourCalculator.HookInitializeGradYEvent(grad_y_init_debug_cb);*/
+
+	const sitk::Image* final_transport;
+	EventSource::data_callback_type transport_updated_debug_cb = [&final_transport](const sitk::Image& map, int) {
+		final_transport = &map;
+	};
+	mEstimator.HookStageUpdatedEvent(TransportFunctionStage, transport_updated_debug_cb);
+	EventSource::basic_callback_type transport_finished_debug_cb = [&final_transport]() {
+		save_image("Y:/BIOMAG/shortest path/interm_imgs/ph4_transport0.tif", *final_transport);
+	};
+	mEstimator.HookStageFinishedEvent(TransportFunctionStage, transport_finished_debug_cb);
+
+	EventSource::basic_callback_type calculation_finished_debug_cb = [this]() {
+		save_image("Y:/BIOMAG/shortest path/interm_imgs/ph4_unrot_transportfn.tif", mEstimator.GetTransportFunctionCalculator().GetTransportFunction());
+		save_image("Y:/BIOMAG/shortest path/interm_imgs/ph3_transport_gx.tif", mEstimator.GetTransportFunctionCalculator().GetGradX());
+		save_image("Y:/BIOMAG/shortest path/interm_imgs/ph3_transport_gy.tif", mEstimator.GetTransportFunctionCalculator().GetGradY());
+		save_image("Y:/BIOMAG/shortest path/interm_imgs/ph3_transport_gz.tif", mEstimator.GetTransportFunctionCalculator().GetGradZ()); };
+#endif
+	EventSource::iter_callback_type change_state_cb = [this](int iteration) {
+		mAlgorithmStage = iteration;
+		switch (iteration) {
+		case DISTANCE_ITERATION:
+			break;
+		case DISTANCE_MEAN_ITERATION:
+			break;
+		case PLANE_PHASEFIELD_ITERATION:
+			break;
+		case TRANSPORT_FUNCTION_ITERATION:
+#ifdef DEBUG_STATES
+			save_image("Y:/BIOMAG/shortest path/interm_imgs/ph3_slice_field.tif", mEstimator.GetInitialContourCalculator().GetPhaseField());
+#endif
+			
+			break;
+		}
+		Invalidate(FALSE);
+	};
+
+	mEstimator.HookIterationEvent(change_state_cb);
+
+	EventSource::basic_callback_type finished_cb = [this]() {
+		mAlgorithmStage = DONE_ITERATION;
+	};
+
+	EventSource::data_callback_type field_init_cb = [this](const sitk::Image& map, int idx) {
+		if(mPhaseFieldMap[idx] != &map)
+			mPhaseFieldMap[idx] = &map;
+	};
+	EventSource::data_callback_type meeting_points_map_init_cb = [this](const sitk::Image& meetPointsMap, int) {
+		if(mMeetingPointsMap != &meetPointsMap)
+			mMeetingPointsMap = &meetPointsMap;
+	};
+	AreaEikonalES::plane_update_callback_type meeting_plane_update_cb = [this](Vec3<double> center, Vec3<double> normal) {
+		mPlaneNormal = normal;
+		mPlaneOffset = -(center * normal).Sum();
+	};
+	mEstimator.HookStageIterationEvent(AreaEikonalStage, iter_cb);
+	mEstimator.HookStageDataInitializedEvent(AreaEikonalStage, meeting_points_map_init_cb, MeetingPoints);
+	mEstimator.HookStageDataInitializedEvent(AreaEikonalStage, field_init_cb, PhaseField);
+	mEstimator.HookUpdateMeetingPlaneEvent(meeting_plane_update_cb);
+
+	EventSource::data_callback_type field_2d_update_cb = [this](const sitk::Image& field2D, int) {
+		if(mPhaseField2DMap != &field2D)
+			mPhaseField2DMap = &field2D;
+	};
+
+	mEstimator.HookStageIterationEvent(PlanePhaseFieldStage, iter_cb);
+	mEstimator.HookStageDataInitializedEvent(PlanePhaseFieldStage, field_2d_update_cb);
+	mEstimator.HookStageUpdatedEvent(PlanePhaseFieldStage, field_2d_update_cb);
+
+	//mEstimator.mAreaEikonal.Initialize(m_imageOp.m_testimage, mStartPoint, mEndPoint, m_expfac, 0.01);
 	CWinThread* thread = AfxBeginThread(BackgroundThread,this,THREAD_PRIORITY_NORMAL,0,CREATE_SUSPENDED,0);
 	if(thread == 0) return;
-	m_threadactivated = DISTANCE_ITERATION;
+	mAlgorithmStage = DISTANCE_ITERATION;
 	thread->m_bAutoDelete = true;
 	thread->ResumeThread();
-	Invalidate();
+	//Invalidate();
 
 }
 
 void CChildView::PauseThread(int threadstat) // 1-(re-)start 2-suspended
 {
-	if (!m_threadactivated) return;
-	if (m_threadactivated < DONE_ITERATION) {
-		m_prevthreadactivated = m_threadactivated;
-		if (m_prevthreadactivated == 3) m_prevthreadactivated = 2;
-		m_threadactivated = DONE_ITERATION;
-	}
-	else {
-		m_threadactivated = m_prevthreadactivated;
+	if (!mAlgorithmStage) return;
+	if (mAlgorithmStage < DONE_ITERATION) {
+		mAlgorithmStage = DONE_ITERATION;
 	}
 	Invalidate();
 }
 
 void CChildView::StopThread()
 {
-	m_threadactivated = 0;
+	mAlgorithmStage = 0;
 	_DUMP_PROFILE_INFO("Y:/BIOMAG/shortest path/profiling.txt")
 	Invalidate();
 }
 
 void CChildView::GetAllPathX()
 {
-	std::vector<POINT3D>& bound = m_liftedEikonal.m_boundcontour;
+	vector<double> plane_center_physical = mPlaneCenter;
+	vector<double> plane_center_transformed = mEstimator.GetRotatedAreaEikonal().TransformPhysicalPointToContinuousIndex(plane_center_physical);
+	double plane_slice = plane_center_transformed[0];
+	vector<unsigned> size = mEstimator.GetRotatedAreaEikonal().GetDistanceMap(0).GetSize();
+	unsigned int xs(size[0]), ys(size[1]), zs(size[2]);
+	unordered_set<unsigned long> boundary_points = mEstimator.GetInitialContourCalculator().RetrieveBound();
+	mBoundaryContour.clear();
+	for (auto& it = boundary_points.begin(); it != boundary_points.end(); it++) {
+		int z = *it >> 16;
+		int y = *it & 0b1111111111111111;
+		vector<double> rotated;
+		rotated = mEstimator.GetRotatedAreaEikonal().TransformContinuousIndexToPhysicalPoint({plane_slice, (double)y, (double)z});
+		rotated = mEstimator.GetAreaEikonal().TransformPhysicalPointToContinuousIndex(rotated);
+		mBoundaryContour.push_back(point_to_representation(round(rotated[0]), round(rotated[1]), round(rotated[2])));
+	}
+	std::vector<POINT3D>& bound = mBoundaryContour;
 	int si = bound.size();
 	if (si > MAXMINPATH) si = MAXMINPATH;
 	for (int jj = 0; jj < MAXMINPATH; ++jj) {
-		m_liftedEikonal.m_minpath[0][jj].clear();
-		//m_liftedEikonal.m_minpath[1][jj].clear();
+		mEstimator.mMinimalPaths[0].clear();
+		mEstimator.mMinimalPaths[1].clear();
 	}
-	int& mj = m_liftedEikonal.m_j[0];
-	mj = 0;
+
 	for (int jj = 0; jj < si; ++jj) {
 		auto [x, y, z] = representation_to_point<int>(bound[jj]);
-		m_liftedEikonal.ResolvePath(x + 1, y, z, true, 0, mj);
-		m_liftedEikonal.ResolvePath(x - 1, y, z, true, 0, mj);
-		if (m_liftedEikonal.m_minpath[0][mj].size()) ++mj;
+		if (z < 2 || z >= zs - 2) continue;
+		if (x < 2 || x >= xs - 2) continue;
+		if (y < 2 || y >= ys - 2) continue;
+		mEstimator.mMinimalPaths[0].push_back(mEstimator.GetAreaEikonal().ResolvePath({x, y, z}, 0));
+		mEstimator.mMinimalPaths[1].push_back(mEstimator.GetAreaEikonal().ResolvePath({x, y, z}, 1));
 
 		Invalidate();
 	}
@@ -707,45 +618,39 @@ void CChildView::OnLButtonUp(UINT nFlags, CPoint point)
 	// TODO: Add your message handler code here and/or call default
 	if (!pressed) return;
 
-		int8_t* x_path_buffer = m_path_image_x.GetBufferAsInt8();
-		int8_t* y_path_buffer = m_path_image_y.GetBufferAsInt8();
-		int8_t* z_path_buffer = m_path_image_z.GetBufferAsInt8();
-		vector<unsigned> size = m_path_image_x.GetSize();
+		int8_t* x_path_buffer = mPathImageX.GetBufferAsInt8();
+		int8_t* y_path_buffer = mPathImageY.GetBufferAsInt8();
+		int8_t* z_path_buffer = mPathImageZ.GetBufferAsInt8();
+		vector<unsigned> size = mPathImageX.GetSize();
 		memset(x_path_buffer, -100, size[0] * size[1] * size[2]);
 		memset(y_path_buffer, -100, size[0] * size[1] * size[2]);
 		memset(z_path_buffer, -100, size[0] * size[1] * size[2]);
 	
-	if (m_threadactivated == DONE_ITERATION) {
+	if (mAlgorithmStage == DONE_ITERATION) {
 		if (point.x < m_disp.xs) {
-			m_liftedEikonal.ResolvePath(point.x, point.y, m_zsee, true, 0, m_liftedEikonal.m_j[0]);
-			if (m_liftedEikonal.m_minpath[0][m_liftedEikonal.m_j[0]].size()) ++m_liftedEikonal.m_j[0];
-			m_liftedEikonal.ResolvePath(point.x, point.y, m_zsee, true, 1, m_liftedEikonal.m_j[1]);
-			if (m_liftedEikonal.m_minpath[1][m_liftedEikonal.m_j[1]].size()) ++m_liftedEikonal.m_j[1];
+			mEstimator.mMinimalPaths[0].push_back(mEstimator.GetAreaEikonal().ResolvePath({point.x, point.y, m_zsee}, 0));
+			mEstimator.mMinimalPaths[1].push_back(mEstimator.GetAreaEikonal().ResolvePath({ point.x, point.y, m_zsee }, 1));
 		}
 		else if (point.x < 2 * m_disp.xs + 1) {
-			m_liftedEikonal.ResolvePath(point.x - m_disp.xs - 1, m_ysee, point.y, true, 0, m_liftedEikonal.m_j[0]);
-			if (m_liftedEikonal.m_minpath[0][m_liftedEikonal.m_j[0]].size()) ++m_liftedEikonal.m_j[0];
-			m_liftedEikonal.ResolvePath(point.x - m_disp.xs - 1, m_ysee, point.y, true, 1, m_liftedEikonal.m_j[1]);
-			if (m_liftedEikonal.m_minpath[1][m_liftedEikonal.m_j[1]].size()) ++m_liftedEikonal.m_j[1];
+			mEstimator.mMinimalPaths[0].push_back(mEstimator.GetAreaEikonal().ResolvePath({ point.x - m_disp.xs - 1, m_ysee, point.y }, 0));
+			mEstimator.mMinimalPaths[1].push_back(mEstimator.GetAreaEikonal().ResolvePath({ point.x - m_disp.xs - 1, m_ysee, point.y }, 1));
 		}
 		else if(point.x < m_disp.xs+m_dispd1.xs+m_dispd2.xs) {
-			m_liftedEikonal.ResolvePath(m_xsee, point.x - 2 * (m_disp.xs + 1), point.y, true, 0, m_liftedEikonal.m_j[0]);
-			if (m_liftedEikonal.m_minpath[0][m_liftedEikonal.m_j[0]].size()) ++m_liftedEikonal.m_j[0];
-			m_liftedEikonal.ResolvePath(m_xsee, point.x - 2 * (m_disp.xs + 1), point.y, true, 1, m_liftedEikonal.m_j[1]);
-			if (m_liftedEikonal.m_minpath[1][m_liftedEikonal.m_j[1]].size()) ++m_liftedEikonal.m_j[1];
+			mEstimator.mMinimalPaths[0].push_back(mEstimator.GetAreaEikonal().ResolvePath({ m_xsee, point.x - 2 * (m_disp.xs + 1), point.y }, 0));
+			mEstimator.mMinimalPaths[1].push_back(mEstimator.GetAreaEikonal().ResolvePath({ m_xsee, point.x - 2 * (m_disp.xs + 1), point.y }, 1));
 		}
 		Invalidate();
 	}
-	else if (!m_threadactivated) {
-		vector<uint32_t> size = m_imageOp.m_testimage.GetSize();
+	else if (!mAlgorithmStage) {
+		vector<uint32_t> size = mInputImage.GetSize();
 		int xs(size[0]), ys(size[1]);
 		if (m_disp.xs && point.x < xs && point.y < ys) {
 			if (!m_bispoint) {
-				m_start_point = CVec3(point.x, point.y, m_zsee);
+				mStartPoint = Vec3<double>(point.x, point.y, m_zsee);
 				++m_bispoint;
 			}
 			else {
-				m_end_point = CVec3(point.x, point.y, m_zsee);
+				mEndPoint = Vec3<double>(point.x, point.y, m_zsee);
 				++m_bispoint;
 			}
 		}
@@ -856,26 +761,25 @@ void CControlDlg::OnBnClickedOpen()
 			sitk::Image ci = sitk::ReadImage(string((LPCTSTR)cfn), sitk::sitkUnknown);
 			auto type = ci.GetPixelID();
 			ci = sitk::Cast(ci, sitk::sitkFloat64);
-			m_pView->m_imageOp.m_testimage = sitk::RescaleIntensity(ci, 0, 1);
-			vector<uint32_t> size = m_pView->m_imageOp.m_testimage.GetSize();
+			m_pView->mInputImage = sitk::RescaleIntensity(ci, 0, 1);
+			vector<uint32_t> size = m_pView->mInputImage.GetSize();
 			int xs = size[0], ys = size[1], zs = size[2];
 			//sitk_2_vox_img(ci, m_pView->m_imageOp.m_testimage);
-			m_pView->m_imageOp.GauTest(false);
-			m_pView->m_imageOp.GauTest(true);
-			m_pView->m_imageOp.GauTest(false);
-			m_pView->m_imageOp.GauTest(true);
-			m_pView->m_imageOp.CreateTestInput(m_pView->m_expfac);
-			m_pView->m_path_image_x = sitk::Image(size, sitk::sitkInt8)-100;
-			m_pView->m_path_image_y = sitk::Image(size, sitk::sitkInt8)-100;
-			m_pView->m_path_image_z = sitk::Image(size, sitk::sitkInt8)-100;
+			m_pView->mInputImage = m_pView->m_imageOp.Blur(m_pView->mInputImage);
+			m_pView->mInputImage = m_pView->m_imageOp.Blur(m_pView->mInputImage);
+			m_pView->mInputImage = m_pView->m_imageOp.Blur(m_pView->mInputImage);
+			m_pView->mInputImage = m_pView->m_imageOp.Blur(m_pView->mInputImage);
+			m_pView->mPathImageX = sitk::Image(size, sitk::sitkInt8)-100;
+			m_pView->mPathImageY = sitk::Image(size, sitk::sitkInt8)-100;
+			m_pView->mPathImageZ = sitk::Image(size, sitk::sitkInt8)-100;
 			//CImage ci; ci.Load(LPCTSTR(cfn));
 
 			if (!xs || !ys || !zs) return;
-			double* im_buffer = m_pView->m_imageOp.m_testimage.GetBufferAsDouble();
+			const double* im_buffer = m_pView->mInputImage.GetBufferAsDouble();
 			m_pView->m_work.Set(xs, ys);
 			for (int yy = 0; yy < ys; yy++) {
 				for (int xx = 0; xx < xs; xx++) {
-					m_pView->m_work[yy][xx] = BUF_IDX(im_buffer, xs, ys, zs, xx, yy, m_pView->m_zsee);
+					m_pView->m_work[yy][xx] = BUF_IDX3D(im_buffer, xs, ys, zs, xx, yy, m_pView->m_zsee);
 				}
 			}
 			//m_pView->m_work = m_pView->m_imageOp.m_testimage[m_pView->m_zsee];
@@ -909,28 +813,28 @@ void CControlDlg::OnBnClickedIntImage1() // synth. image 1
 {
 	// TODO: Add your control notification handler code here
 	if (m_bini) return;
-	m_pView->m_imageOp.CreateTestImage(XS_,YS_,ZS_);
-	{
-		vector<uint32_t> size = m_pView->m_imageOp.m_testimage.GetSize();
-		m_pView->m_path_image_x = sitk::Image(size, sitk::sitkInt8) - 100;
-		m_pView->m_path_image_y = sitk::Image(size, sitk::sitkInt8) - 100;
-		m_pView->m_path_image_z = sitk::Image(size, sitk::sitkInt8) - 100;
-		int xs = size[0], ys = size[1], zs = size[2]; 
-		double* im_buffer = m_pView->m_imageOp.m_testimage.GetBufferAsDouble();
-		m_pView->m_work.Set(xs, ys);
-		for (int yy = 0; yy < ys; yy++) {
-			for (int xx = 0; xx < xs; xx++) {
-				m_pView->m_work[yy][xx] = BUF_IDX(im_buffer, xs, ys, zs, xx, yy, m_pView->m_zsee);
-			}
+	m_pView->mInputImage = m_pView->m_imageOp.CreateTestImage();
+	
+	vector<uint32_t> size = m_pView->mInputImage.GetSize();
+	m_pView->mPathImageX = sitk::Image(size, sitk::sitkInt8) - 100;
+	m_pView->mPathImageY = sitk::Image(size, sitk::sitkInt8) - 100;
+	m_pView->mPathImageZ = sitk::Image(size, sitk::sitkInt8) - 100;
+	int xs = size[0], ys = size[1], zs = size[2]; 
+	double* im_buffer = m_pView->mInputImage.GetBufferAsDouble();
+	m_pView->m_work.Set(xs, ys);
+	for (int yy = 0; yy < ys; yy++) {
+		for (int xx = 0; xx < xs; xx++) {
+			m_pView->m_work[yy][xx] = BUF_IDX3D(im_buffer, xs, ys, zs, xx, yy, m_pView->m_zsee);
 		}
-		m_pView->m_valid = 1;
-		m_pView->m_grays = true;
-		m_pView->m_color = false;
 	}
+	m_pView->m_valid = 1;
+	m_pView->m_grays = true;
+	m_pView->m_color = false;
+	
 	{
-		m_zlevel.SetRange(0,ZS_-1,1); // from z
-		m_cstartdir.SetRange(0,YS_-1,1); // from y
-		m_cstopdir.SetRange(0,XS_-1,1); // from x
+		m_zlevel.SetRange(0,zs-1,1); // from z
+		m_cstartdir.SetRange(0,ys-1,1); // from y
+		m_cstopdir.SetRange(0,xs-1,1); // from x
 		m_bini = true;
 
 		m_cdatafac.SetRange(1, EXPCOEF_RANGE,1); m_cdatafac.SetPos(EXP_COEF_DEF);
@@ -946,18 +850,18 @@ void CControlDlg::OnBnClickedIntImage1() // synth. image 1
 void CControlDlg::OnBnClickedGetBC() // contour on plane
 {
 	// TODO: Add your control notification handler code here
-	//m_pView->m_imageOp.GetXTestBound(m_pView->m_xsee/* - 1*/, m_pView->m_liftedEikonal.m_boundcontour);
-	//if (m_pView->m_liftedEikonal.m_phasefield.m_distance[0].xs > 0) {
-	//	int xs(m_pView->m_liftedEikonal.m_phasefield.m_distance[0].xs), ys(m_pView->m_liftedEikonal.m_phasefield.m_distance[0].ys), zs(m_pView->m_liftedEikonal.m_phasefield.m_distance[0].zs);
+	//m_pView->m_imageOp.GetXTestBound(m_pView->m_xsee/* - 1*/, m_pView->mEstimator.mBoundaryContour);
+	//if (m_pView->mEstimator.mAreaEikonal.m_distance[0].xs > 0) {
+	//	int xs(m_pView->mEstimator.mAreaEikonal.m_distance[0].xs), ys(m_pView->mEstimator.mAreaEikonal.m_distance[0].ys), zs(m_pView->mEstimator.mAreaEikonal.m_distance[0].zs);
 	//	SVoxImg<SWorkImg<realnum>> & passi = m_pView->m_imageOp.GetIniMap(xs, ys, zs, m_pView->m_xsee/* - 1*/);
-	//	//m_pView->m_transport.TrInit(m_pView->m_liftedEikonal.m_phasefield.m_smoothdist[0],passi, m_pView->m_liftedEikonal.m_currentdistance[0]);
-	//	m_pView->m_transport.TrInit(m_pView->m_liftedEikonal.m_phasefield.m_distance[0], passi, m_pView->m_liftedEikonal.m_phasefield.m_currentdistance);
+	//	//m_pview->mEstimator.mTransportFunctionCalculator.Initialize(m_pView->mEstimator.mAreaEikonal.m_smoothdist[0],passi, m_pView->mEstimator.mCurrentDistance[0]);
+	//	m_pview->mEstimator.mTransportFunctionCalculator.Initialize(m_pView->mEstimator.mAreaEikonal.m_distance[0], passi, m_pView->mEstimator.mAreaEikonal.mCurrentDistance);
 
 		//--m_pView->m_xsee;
 		/*
-		m_pView->m_transport.GetDispSlice(Talox, m_pView->m_xsee, m_pView->m_dispd2); // TaloX - enum
-		m_pView->m_transport.GetDispSlice(Taloy, m_pView->m_ysee, m_pView->m_dispd1);
-		m_pView->m_transport.GetDispSlice(Taloz, m_pView->m_zsee, m_pView->m_disp);*/
+		m_pview->mEstimator.mTransportFunctionCalculator.GetDispSlice(Talox, m_pView->m_xsee, m_pView->m_dispd2); // TaloX - enum
+		m_pview->mEstimator.mTransportFunctionCalculator.GetDispSlice(Taloy, m_pView->m_ysee, m_pView->m_dispd1);
+		m_pview->mEstimator.mTransportFunctionCalculator.GetDispSlice(Taloz, m_pView->m_zsee, m_pView->m_disp);*/
 	//}
 
 	//m_pView->Invalidate();
@@ -1003,7 +907,7 @@ void CControlDlg::OnNMCustomdrawSlider1(NMHDR *pNMHDR, LRESULT *pResult)
 {
 	LPNMCUSTOMDRAW pNMCD = reinterpret_cast<LPNMCUSTOMDRAW>(pNMHDR);
 	// TODO: Add your control notification handler code here
-	vector<uint32_t> size = m_pView->m_imageOp.m_testimage.GetSize();
+	vector<uint32_t> size = m_pView->mInputImage.GetSize();
 	if (!m_bini) goto ret;
 		m_pView->m_zsee = m_zlevel.GetPos();
 		char txt[22];
@@ -1011,11 +915,11 @@ void CControlDlg::OnNMCustomdrawSlider1(NMHDR *pNMHDR, LRESULT *pResult)
 		m_ezlevel.SetWindowTextA(txt);
 
 		int xs = size[0], ys = size[1], zs = size[2];
-		double* im_buffer = m_pView->m_imageOp.m_testimage.GetBufferAsDouble();
+		double* im_buffer = m_pView->mInputImage.GetBufferAsDouble();
 		m_pView->m_work.Set(xs, ys);
 		for (int yy = 0; yy < ys; yy++) {
 			for (int xx = 0; xx < xs; xx++) {
-				m_pView->m_work[yy][xx] = BUF_IDX(im_buffer, xs, ys, zs, xx, yy, m_pView->m_zsee);
+				m_pView->m_work[yy][xx] = BUF_IDX3D(im_buffer, xs, ys, zs, xx, yy, m_pView->m_zsee);
 			}
 		}
 
@@ -1023,7 +927,7 @@ void CControlDlg::OnNMCustomdrawSlider1(NMHDR *pNMHDR, LRESULT *pResult)
 		m_pView->m_work.GetDispImg(m_pView->m_disp);
 	}
 	else {
-		m_pView->m_transport.GetDispSlice(Taloz, m_pView->m_zsee, m_pView->m_disp);
+		GetDispSliceFromTransportFunction(m_pView->mEstimator.GetTransportFunctionCalculator(), Taloz, m_pView->m_zsee, m_pView->m_disp);
 	}
 		
 	m_pView->Invalidate();
@@ -1037,11 +941,11 @@ void CControlDlg::OnNMCustomdrawSlider2(NMHDR *pNMHDR, LRESULT *pResult)
 	LPNMCUSTOMDRAW pNMCD = reinterpret_cast<LPNMCUSTOMDRAW>(pNMHDR);
 	// TODO: Add your control notification handler code here
 	if (!m_bini) goto ret;
-	sitk::Image &testimg = m_pView->m_imageOp.m_testimage;
+	sitk::Image &testimg = m_pView->mInputImage;
 	double* testimg_buffer = testimg.GetBufferAsDouble();
 
 	if (!m_pView->m_btransportview) {
-		vector<uint32_t> size = m_pView->m_imageOp.m_testimage.GetSize();
+		vector<uint32_t> size = m_pView->mInputImage.GetSize();
 		int xs = size[0], ys = size[1], zs = size[2];
 		SWorkImg<realnum>& yslice = m_pView->m_intey;
 		yslice.Set(xs, zs);
@@ -1049,7 +953,7 @@ void CControlDlg::OnNMCustomdrawSlider2(NMHDR *pNMHDR, LRESULT *pResult)
 
 		for (int zz = 0; zz < zs; ++zz) {
 			for (int xx = 0; xx < xs; ++xx) {
-				yslice[zz][xx] = BUF_IDX(testimg_buffer, xs, ys, zs, xx, ylev, zz);
+				yslice[zz][xx] = BUF_IDX3D(testimg_buffer, xs, ys, zs, xx, ylev, zz);
 			}
 		}
 
@@ -1058,7 +962,7 @@ void CControlDlg::OnNMCustomdrawSlider2(NMHDR *pNMHDR, LRESULT *pResult)
 	}
 	else {
 		m_pView->m_ysee = m_cstartdir.GetPos();
-		m_pView->m_transport.GetDispSlice(Taloy, m_pView->m_ysee, m_pView->m_dispd1);
+		GetDispSliceFromTransportFunction(m_pView->mEstimator.GetTransportFunctionCalculator(), Taloy, m_pView->m_ysee, m_pView->m_dispd1);
 	}
 
 	m_pView->Invalidate();
@@ -1073,10 +977,10 @@ void CControlDlg::OnNMCustomdrawSlider3(NMHDR *pNMHDR, LRESULT *pResult)
 	if (!m_bini) goto ret;
 
 
-	sitk::Image &testimg = m_pView->m_imageOp.m_testimage;
+	sitk::Image &testimg = m_pView->mInputImage;
 	double* testimg_buffer = testimg.GetBufferAsDouble();
 	if (!m_pView->m_btransportview) {
-		vector<uint32_t> size = m_pView->m_imageOp.m_testimage.GetSize();
+		vector<uint32_t> size = m_pView->mInputImage.GetSize();
 		int xs = size[0], ys = size[1], zs = size[2]; 
 		SWorkImg<realnum>& xslice = m_pView->m_intex;
 		xslice.Set(ys, zs);
@@ -1084,7 +988,7 @@ void CControlDlg::OnNMCustomdrawSlider3(NMHDR *pNMHDR, LRESULT *pResult)
 
 		for (int zz = 0; zz < zs; ++zz) {
 			for (int yy = 0; yy < ys; ++yy) {
-				xslice[zz][yy] = BUF_IDX(testimg_buffer, xs, ys, zs, xlev, yy, zz);
+				xslice[zz][yy] = BUF_IDX3D(testimg_buffer, xs, ys, zs, xlev, yy, zz);
 			}
 		}
 
@@ -1093,7 +997,7 @@ void CControlDlg::OnNMCustomdrawSlider3(NMHDR *pNMHDR, LRESULT *pResult)
 	}
 	else {
 		m_pView->m_xsee = m_cstopdir.GetPos();
-		m_pView->m_transport.GetDispSlice(Talox, m_pView->m_xsee, m_pView->m_dispd2);
+		GetDispSliceFromTransportFunction(m_pView->mEstimator.GetTransportFunctionCalculator(), Talox, m_pView->m_xsee, m_pView->m_dispd2);
 	}
 
 
@@ -1177,15 +1081,15 @@ void CControlDlg::OnBnClickedIntImage2() // synth. image 2
 {
 	// TODO: Add your control notification handler code here
 	if (m_bini) return;
-	m_pView->m_imageOp.CreateTestImage2(XS_,YS_,ZS_);
+	m_pView->m_imageOp.CreateTestImage2();
 	{
-		vector<uint32_t> size = m_pView->m_imageOp.m_testimage.GetSize();
+		vector<uint32_t> size = m_pView->mInputImage.GetSize();
 		int xs = size[0], ys = size[1], zs = size[2];
-		double* im_buffer = m_pView->m_imageOp.m_testimage.GetBufferAsDouble();
+		double* im_buffer = m_pView->mInputImage.GetBufferAsDouble();
 		m_pView->m_work.Set(xs, ys);
 		for (int yy = 0; yy < ys; yy++) {
 			for (int xx = 0; xx < xs; xx++) {
-				m_pView->m_work[yy][xx] = BUF_IDX(im_buffer, xs, ys, zs, xx, yy, m_pView->m_zsee);
+				m_pView->m_work[yy][xx] = BUF_IDX3D(im_buffer, xs, ys, zs, xx, yy, m_pView->m_zsee);
 			}
 		}
 		m_pView->m_valid = 1;
@@ -1210,8 +1114,10 @@ void CControlDlg::OnBnClickedIntImage2() // synth. image 2
 void CControlDlg::OnBnClickedWWOCorr() // correction using mean surf metric
 {
 	// TODO: Add your control notification handler code here
-	extern bool g_modeswitch;
+	if (m_pView->mAlgorithmStage) return;
+	static bool g_modeswitch = false;
 	g_modeswitch = !g_modeswitch;
+	m_pView->mEstimator.SetUsesCorrection(g_modeswitch);
 	if (g_modeswitch)
 		m_cmsw.SetWindowTextA("With corr");
 	else
@@ -1225,9 +1131,9 @@ void CControlDlg::OnBnClickedSwitchView()
 	m_pView->m_btransportview = !m_pView->m_btransportview;
 	if (m_pView->m_btransportview) {
 
-		m_pView->m_transport.GetDispSlice(Talox, m_pView->m_xsee, m_pView->m_dispd2);
-		m_pView->m_transport.GetDispSlice(Taloy, m_pView->m_ysee, m_pView->m_dispd1);
-		m_pView->m_transport.GetDispSlice(Taloz, m_pView->m_zsee, m_pView->m_disp);
+		GetDispSliceFromTransportFunction(m_pView->mEstimator.GetTransportFunctionCalculator(), Talox, m_pView->m_xsee, m_pView->m_dispd2);
+		GetDispSliceFromTransportFunction(m_pView->mEstimator.GetTransportFunctionCalculator(), Taloy, m_pView->m_ysee, m_pView->m_dispd1);
+		GetDispSliceFromTransportFunction(m_pView->mEstimator.GetTransportFunctionCalculator(), Taloz, m_pView->m_zsee, m_pView->m_disp);
 
 	}
 
@@ -1238,13 +1144,105 @@ void CControlDlg::OnBnClickedSwitchView()
 void CControlDlg::OnBnClickedTestBuild()
 {
 	// TODO: Add your control notification handler code here
-	m_pView->m_transport.TrControl(333);
+	/*m_pView->mEstimator.mTransportFunctionCalculator.Calculate();
 	if (m_pView->m_btransportview) {
 
-		m_pView->m_transport.GetDispSlice(Talox, m_pView->m_xsee, m_pView->m_dispd2);
-		m_pView->m_transport.GetDispSlice(Taloy, m_pView->m_ysee, m_pView->m_dispd1);
-		m_pView->m_transport.GetDispSlice(Taloz, m_pView->m_zsee, m_pView->m_disp);
+		m_pView->mEstimator.mTransportFunctionCalculator.GetDispSlice(Talox, m_pView->m_xsee, m_pView->m_dispd2);
+		m_pView->mEstimator.mTransportFunctionCalculator.GetDispSlice(Taloy, m_pView->m_ysee, m_pView->m_dispd1);
+		m_pView->mEstimator.mTransportFunctionCalculator.GetDispSlice(Taloz, m_pView->m_zsee, m_pView->m_disp);
 
 	}
-	m_pView->Invalidate();
+	m_pView->Invalidate();*/
+}
+
+void GetDispSliceFromTransportFunction(const TransportFunction& transportFunction, int along, int at, SDisImg& r) // better colorization!
+{
+	if (!transportFunction.m_active) return;
+	realnum zlim(1e-22);
+	int bcol(0);
+	const sitk::Image& trf = transportFunction.GetTransportFunction();
+	const double* trf_buffer = trf.GetBufferAsDouble();
+	const int* bound_buffer = transportFunction.GetReadOnlyMap().GetBufferAsInt32();
+	std::vector<uint32_t> size = trf.GetSize();
+	int xs(size[0]), ys(size[1]), zs(size[2]);
+	double min_val(trf_buffer[0]); // boundary pixels were initialized to the minimum an won't be updated
+
+	if (along == Talox) {
+		if (ys != r.xs || zs != r.ys) {
+			r.Clean();
+			r.dat = new unsigned long[ys * zs];
+			if (!r.dat) return;
+			r.xs = ys; r.ys = zs;
+		}
+
+		int xx(at);
+		for (int zz = 0; zz < zs; ++zz) {
+			for (int yy = 0; yy < ys; ++yy) {
+				if (BUF_IDX3D(bound_buffer, xs, ys, zs, xx, yy, zz) == -1) // not initialized
+					r[zz][yy] = (0xff << 16) + (0xff << 8) + 0xff;
+				else { //if (mReadOnlyMap[zz][yy][xx] == 1) // boundary or internal
+					if (BUF_IDX3D(trf_buffer, xs, ys, zs, xx, yy, zz) < -zlim) // -mMin: maximal value
+						r[zz][yy] = (bcol << 16) + (bcol << 0) + (int)256 * (127 + 0xff * ((0.5 * BUF_IDX3D(trf_buffer, xs, ys, zs, xx, yy, zz) / min_val)));
+					else if (BUF_IDX3D(trf_buffer, xs, ys, zs, xx, yy, zz) > zlim)
+						r[zz][yy] = ((int)(127 - 0xff * (0.5 * BUF_IDX3D(trf_buffer, xs, ys, zs, xx, yy, zz) / min_val)) << 16) + (bcol << 8) + bcol;
+					else
+						r[zz][yy] = (0xff << 16) + (0xff << 8) + 0xff;
+				}
+
+			}
+		}
+
+	}
+	else if (along == Taloy) {
+		if (xs != r.xs || zs != r.ys) {
+			r.Clean();
+			r.dat = new unsigned long[xs * zs];
+			if (!r.dat) return;
+			r.xs = xs; r.ys = zs;
+		}
+
+		int yy(at);
+		for (int zz = 0; zz < zs; ++zz) {
+			for (int xx = 0; xx < xs; ++xx) {
+				if (BUF_IDX3D(bound_buffer, xs, ys, zs, xx, yy, zz) == -1) // not initialized
+					r[zz][xx] = (0xff << 16) + (0xff << 8) + 0xff;
+				else { //if (mReadOnlyMap[zz][yy][xx] == 1) // boundary or internal
+					if (BUF_IDX3D(trf_buffer, xs, ys, zs, xx, yy, zz) < -zlim) // -mMin: maximal value
+						r[zz][xx] = (bcol << 16) + (bcol << 0) + (int)256 * (127 + 0xff * ((0.5 * BUF_IDX3D(trf_buffer, xs, ys, zs, xx, yy, zz) / min_val)));
+					else if (BUF_IDX3D(trf_buffer, xs, ys, zs, xx, yy, zz) > zlim)
+						r[zz][xx] = ((int)(127 - 0xff * (0.5 * BUF_IDX3D(trf_buffer, xs, ys, zs, xx, yy, zz) / min_val)) << 16) + (bcol << 8) + bcol;
+					else
+						r[zz][xx] = (0xff << 16) + (0xff << 8) + 0xff;
+				}
+			}
+		}
+
+	}
+	else if (along == Taloz) {
+		if (xs != r.xs || ys != r.ys) {
+			r.Clean();
+			r.dat = new unsigned long[xs * ys];
+			if (!r.dat) return;
+			r.xs = xs; r.ys = ys;
+		}
+
+		int zz(at);
+		for (int yy = 0; yy < ys; ++yy) {
+			for (int xx = 0; xx < xs; ++xx) {
+				if (BUF_IDX3D(bound_buffer, xs, ys, zs, xx, yy, zz) == -1) // not initialized
+					r[yy][xx] = (0xff << 16) + (0xff << 8) + 0xff;
+				else { //if (mReadOnlyMap[zz][yy][xx] == 1) // boundary or internal
+					if (BUF_IDX3D(trf_buffer, xs, ys, zs, xx, yy, zz) < -zlim) // -mMin: maximal value
+						r[yy][xx] = (bcol << 16) + (bcol << 0) + (int)256 * (127 + 0xff * ((0.5 * BUF_IDX3D(trf_buffer, xs, ys, zs, xx, yy, zz) / min_val)));
+					else if (BUF_IDX3D(trf_buffer, xs, ys, zs, xx, yy, zz) > zlim)
+						r[yy][xx] = ((int)(127 - 0xff * (0.5 * BUF_IDX3D(trf_buffer, xs, ys, zs, xx, yy, zz) / min_val)) << 16) + (bcol << 8) + bcol;
+					else
+						r[yy][xx] = (0xff << 16) + (0xff << 8) + 0xff;
+				}
+			}
+		}
+
+	}
+
+
 }

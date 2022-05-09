@@ -47,7 +47,7 @@ class FMSigned
 	double* m_distance_buffer;
 	uint8_t* m_frozen_buffer;
 	double m_max_dist;
-	double m_velo;
+	double mVelocityMap;
 	int xs, ys, zs;
 	bool finished();
 	void initialize(sitk::Image& input_map, double max_distance, double velo);
@@ -60,7 +60,7 @@ class FMSigned
 		zs = input_size[2];
 		double* input_buffer = input_map.GetBufferAsDouble();
 		m_max_dist = max_distance;
-		m_velo = velo;
+		mVelocityMap = velo;
 		vector<uint32_t> init_size = m_distance_map.GetSize();
 		if (init_size != input_size) {
 			m_distance_map = sitk::Image(input_size, sitk::sitkFloat64) + INF;
@@ -75,12 +75,12 @@ class FMSigned
 		m_frozen_buffer = m_frozen.GetBufferAsUInt8();
 		vector<double> values;
 		values.reserve(bound_points.size());
-//#pragma omp parallel for
+//OMP_PARALLEL_FOR
 		for (auto it = bound_points.begin(); it != bound_points.end(); it++) {
 			auto [xx, yy, zz] = representation_to_point<int>(*it);
-			double val = -BUF_IDX(input_buffer, xs, ys, zs, xx, yy, zz);
-			BUF_IDX(m_distance_buffer, xs, ys, zs, xx, yy, zz) = val;
-			BUF_IDX(m_frozen_buffer, xs, ys, zs, xx, yy, zz) = 1;
+			double val = -BUF_IDX3D(input_buffer, xs, ys, zs, xx, yy, zz);
+			BUF_IDX3D(m_distance_buffer, xs, ys, zs, xx, yy, zz) = val;
+			BUF_IDX3D(m_frozen_buffer, xs, ys, zs, xx, yy, zz) = 1;
 			values.push_back(val);
 		}
 		m_narrow_band = IndexedPriorityQueue<POINT3D_MAP(double), std::greater<double>>(bound_points.begin(), bound_points.end(), values.begin(), fix_heap);
@@ -95,7 +95,7 @@ class FMSigned
 		zs = input_size[2];
 		double* input_buffer = input_map.GetBufferAsDouble();
 		m_max_dist = max_distance;
-		m_velo = velo;
+		mVelocityMap = velo;
 		std::vector<uint32_t> init_size = m_distance_map.GetSize();
 		if (init_size != input_size) {
 			m_distance_map = sitk::Image(input_size, sitk::sitkFloat64) + INF;
@@ -115,12 +115,12 @@ class FMSigned
 		
 		_SUB_PROFILE(initmaps);
 		values.reserve(bound_points.size());
-#pragma omp parallel for
+OMP_PARALLEL_FOR
 		for (int i = 0; i < bound_points.size(); i++) {
 			auto [xx, yy, zz] = representation_to_point<int>(bound_points[i]);
-			double val = -BUF_IDX(input_buffer, xs, ys, zs, xx, yy, zz);
-			BUF_IDX(m_distance_buffer, xs, ys, zs, xx, yy, zz) = val;
-			BUF_IDX(m_frozen_buffer, xs, ys, zs, xx, yy, zz) = 1;
+			double val = -BUF_IDX3D(input_buffer, xs, ys, zs, xx, yy, zz);
+			BUF_IDX3D(m_distance_buffer, xs, ys, zs, xx, yy, zz) = val;
+			BUF_IDX3D(m_frozen_buffer, xs, ys, zs, xx, yy, zz) = 1;
 			values[i] = val;
 		}
 		_END_SUBPROFILE(initmaps);
@@ -137,7 +137,7 @@ class FMSigned
 		ys = input_size[1];
 		zs = input_size[2];
 		m_max_dist = max_distance;
-		m_velo = velo;
+		mVelocityMap = velo;
 		std::vector<uint32_t> init_size = m_distance_map.GetSize();
 		if (init_size != input_size) {
 			m_distance_map = sitk::Image(input_size, sitk::sitkFloat64) + INF;
@@ -157,12 +157,12 @@ class FMSigned
 
 		_SUB_PROFILE(initmaps);
 		m_narrow_band_v.resize(bound_points.size());
-#pragma omp parallel for
+OMP_PARALLEL_FOR
 		for (int i = 0; i < bound_points.size(); i++) {
 			auto [xx, yy, zz] = representation_to_point<int>(bound_points[i]);
-			double val = -BUF_IDX(m_input_buffer, xs, ys, zs, xx, yy, zz);
-			BUF_IDX(m_distance_buffer, xs, ys, zs, xx, yy, zz) = val;
-			BUF_IDX(m_frozen_buffer, xs, ys, zs, xx, yy, zz) = 1;
+			double val = -BUF_IDX3D(m_input_buffer, xs, ys, zs, xx, yy, zz);
+			BUF_IDX3D(m_distance_buffer, xs, ys, zs, xx, yy, zz) = val;
+			BUF_IDX3D(m_frozen_buffer, xs, ys, zs, xx, yy, zz) = 1;
 			m_narrow_band_v[i] = std::make_pair(bound_points[i],val);
 		}
 		_END_SUBPROFILE(initmaps);
