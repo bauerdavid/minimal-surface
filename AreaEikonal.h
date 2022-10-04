@@ -132,7 +132,6 @@ private:
 
 	void UpdateDistance(int i, double current_distance) override {
 		AreaEikonal::UpdateDistance(i, current_distance);
-		UpdatedDistanceMapEvent(mDistanceMap[i], i);
 	}
 
 	void UpdateMeetPoints() override {
@@ -178,8 +177,6 @@ public:
 	void Initialize(const sitk::Image& image, Vec3<double>& start_point, Vec3<double>& end_point, double beta, double alpha) override {
 		AreaEikonal::Initialize(image, start_point, end_point, beta, alpha);
 		CalculatedPhiMapEvent(mPhiMap, 0);
-		UpdatedDistanceMapEvent(mDistanceMap[0], 0);
-		UpdatedDistanceMapEvent(mDistanceMap[1], 1);
 		InitializedPhaseFieldMapEvent(mPhaseFieldMap[0], 0);
 		InitializedPhaseFieldMapEvent(mPhaseFieldMap[1], 1);
 		InitializedDistanceMapEvent(mDistanceMap[0], 0);
@@ -191,6 +188,8 @@ public:
 	}
 	void Iterate() override {
 		AreaEikonal::Iterate();
+		UpdatedDistanceMapEvent(mDistanceMap[0], 0);
+		UpdatedDistanceMapEvent(mDistanceMap[1], 1);
 		IterationEvent(mIterationCount);
 	}
 

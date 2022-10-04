@@ -26,8 +26,9 @@ void MinimalSurfaceEstimator::Calculate(sitk::Image image, Vec3<double> point1, 
 	mAreaEikonal.CombineDistance();
 	vector<double> meeting_plane_normal(mAreaEikonal.GetMeetingPlaneNormal());
 	vector<double> rotation_matrix = rotation_matrix_from_vectors<double>(vector<double>({ 1, 0, 0 }), meeting_plane_normal);
+	vector<double> translation = calculateOffsetFromRotation(rotation_matrix, mAreaEikonal.GetSampleImage().GetSize());
+	ImageTransformCalculatedEvent(rotation_matrix, translation);
 	mRotatedAreaEikonal = mAreaEikonal.Rotate(rotation_matrix);
-	ImageTransformCalculatedEvent(mRotatedAreaEikonal.GetSampleImage().GetDirection(), mRotatedAreaEikonal.GetSampleImage().GetOrigin());
 	mAreaEikonal.SmoothDistances();
 	vector<double> plane_center_physical = mAreaEikonal.GetMeetingPlaneCenter();
 	vector<double> plane_center_transformed = mRotatedAreaEikonal.TransformPhysicalPointToContinuousIndex(plane_center_physical);
@@ -45,10 +46,23 @@ void MinimalSurfaceEstimator::Calculate(sitk::Image image, Vec3<double> point1, 
 	IterationEvent(DISTANCE_MEAN_ITERATION);
 	//calculate slice distance
 	sitk::Image distanceSlice = GetImageSlice<sitk::sitkFloat64>(mRotatedAreaEikonal.GetCombinedDistanceMap(), 0, plane_slice);
-	
-	IterationEvent(PLANE_PHASEFIELD_ITERATION);
-	mInitialContourCalculator.Calculate(distanceSlice);
+	vector<unsigned> slice_size = distanceSlice.GetSize();
+	sitk::Image plane_sample_image({1, slice_size[0], slice_size[1]}, sitk::sitkFloat64);
 
+	plane_sample_image.SetDirection(rotation_matrix);
+	vector<double> origin;
+	rotate(rotation_matrix, { plane_center_transformed[0], 0, 0}, origin);
+	std::transform(origin.begin(), origin.end(), translation.begin(), origin.begin(), std::plus<double>());
+	plane_sample_image.SetOrigin(origin);
+	plane_sample_image = sitk::Resample(image, plane_sample_image, sitk::Transform(), sitk::sitkLinear, 0., sitk::sitkUnknown, true);
+	sitk::Image plane_image_2d(slice_size, sitk::sitkFloat64);
+	memcpy(plane_image_2d.GetBufferAsDouble(), plane_sample_image.GetBufferAsDouble(), plane_image_2d.GetNumberOfPixels() * sizeof(double));
+	save_image("Y:/BIOMAG/shortest path/dist_plane_slice.tif", distanceSlice);
+	save_image("Y:/BIOMAG/shortest path/img_plane_slice.tif", plane_image_2d);
+	IterationEvent(PLANE_PHASEFIELD_ITERATION);
+	mInitialContourCalculator.Calculate(plane_image_2d, distanceSlice);
+
+	//mInitialContourCalculator.Calculate(plane_image_2d, distanceSlice);
 	//calculate transport function
 	sitk::Image initial_slice = sitk::SignedMaurerDistanceMap(sitk::Greater(mInitialContourCalculator.GetPhaseField(), 0), false, false);
 	initial_slice = sitk::Clamp(initial_slice, sitk::sitkFloat64, -25, 25);

@@ -305,6 +305,13 @@ void AreaEikonal::Initialize(const sitk::Image& image, Vec3<double>& startPoint,
 	InitializeContainers(image);
 	mStartPoint = startPoint;
 	mEndPoint = endPoint;
+	mActivePoints[0].clear();
+	mActivePoints[1].clear();
+	mInactivePoints[0].clear();
+	mInactivePoints[1].clear();
+	mVelocities[0].clear();
+	mVelocities[1].clear();
+	mMeetingPoints.clear();
 	//g_cyc = 0;
 	
 	Vec3<double> point_diff(startPoint - endPoint);

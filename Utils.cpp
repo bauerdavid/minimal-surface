@@ -166,3 +166,50 @@ vector<Vec3<int>> ResolvePath(Vec3<int> point, const sitk::Image& distanceMap)
 	}
 	return path;
 }
+
+double ImageQuantile(const sitk::Image& image, double Q)
+{
+	int n_pixels = image.GetNumberOfPixels();
+	cout << "n_pixels " << n_pixels << endl;
+	double* vals_buffer = (double*)malloc(n_pixels * sizeof(double));
+	cout << "buffer"<< endl;
+	memcpy(vals_buffer, image.GetBufferAsDouble(), n_pixels * sizeof(double));
+	cout << "copy" << endl;
+	std::nth_element(vals_buffer, vals_buffer + (int)(n_pixels * Q), vals_buffer + n_pixels);
+	cout << "nth_element" << endl;
+	double val = vals_buffer[(int)(n_pixels * Q)];
+	cout << "val " <<val << endl;
+	free(vals_buffer);
+	cout << "free" << endl;
+	return val;
+}
+
+sitk::Image SmartSigmoid(const sitk::Image& image, double qMax, double qMin, double eps)
+{
+	cout << "starting" << endl;
+	double q_maxval = ImageQuantile(image, qMax);
+	cout << "q_maxval " << q_maxval << endl;
+	double q_minval = ImageQuantile(image, qMin);
+	cout << "q_minval " << q_minval << endl;
+	double alpha = (q_maxval - q_minval) / log((1 / eps - 1) / (1 / 0.95 - 1));
+	cout << "alpha " << alpha << endl;
+	double beta = log(1 / eps - 1) * alpha + q_minval;
+	cout << "beta " << beta << endl;
+	return sitk::Sigmoid(image, alpha, beta, 1., 0.);
+}
+
+std::vector<double> calculateOffsetFromRotation(std::vector<double> rotationMatrix, std::vector<unsigned> imageSize) {
+	std::vector<unsigned>  rotated_size = find_rotated_size(imageSize, rotationMatrix);
+	sitk::Image sample_img(rotated_size, sitk::sitkInt8);
+	sample_img.SetDirection(rotationMatrix);
+	std::vector<double> data_center;
+	std::transform(imageSize.begin(), imageSize.end(), std::back_inserter(data_center), [](double v) { return (double)v / 2; });
+
+	std::vector<double> sample_center;
+	std::transform(rotated_size.begin(), rotated_size.end(), std::back_inserter(sample_center), [](double v) { return v / 2; });
+	sample_center = sample_img.TransformContinuousIndexToPhysicalPoint(sample_center);
+
+	std::vector<double> sample_origin;
+	std::transform(data_center.begin(), data_center.end(), sample_center.begin(), std::back_inserter(sample_origin), std::minus<double>());
+	return sample_origin;
+}

@@ -472,6 +472,8 @@ sitk::Image resample_img(sitk::Image src, sitk::Image& dst, const std::vector<do
 	return resample_img<interpolator>(src, dst, rotation_matrix, sample_size, inverse, useNearestNeighborExtrapolator);
 }
 
+std::vector<double> calculateOffsetFromRotation(std::vector<double> rotationMatrix, std::vector<unsigned> imageSize);
+
 template
 <sitk::InterpolatorEnum interpolator = sitk::sitkLinear>
 sitk::Image resample_img(sitk::Image src, sitk::Image& dst, const std::vector<double>& rotation_matrix, std::vector<unsigned int> sample_size, bool inverse = false, bool useNearestNeighborExtrapolator = false) {
@@ -498,8 +500,6 @@ sitk::Image resample_img(sitk::Image src, sitk::Image& dst, const std::vector<do
 	dst = sitk::Resample(src, sample_img, sitk::Transform(), interpolator, -1.0, sitk::sitkUnknown, useNearestNeighborExtrapolator);
 	return sample_img;
 }
-
-
 
 
 void save_image(std::string filename, const sitk::Image& img);
@@ -576,8 +576,41 @@ sitk::Image GetImageSlice(const sitk::Image& image, int direction, int slice) {
 	return slice_image;
 }
 
+template<sitk::PixelIDValueEnum pixelID>
+void DrawEllipse(sitk::Image& image, int radiusX, int radiusY, int eCenterX, int eCenterY, typename CType<pixelID>::Type value) {
+	int height = image.GetHeight();
+	int width = image.GetWidth();
+	CType<pixelID>::Type* image_buffer = PixelManagerTrait<pixelID>::GetBuffer(image);
+	int hh = radiusY * radiusY;
+	int ww = radiusX * radiusX;
+	int hhww = hh * ww;
+	int x0 = radiusX;
+	int dx = 0;
+
+	for (int x = -radiusX; x <= radiusX; x++) {
+		BUF_IDX2D(image_buffer, width, height, eCenterX + x, eCenterY) = value;
+	}
+	for (int y = 1; y <= radiusY; y++) {
+		int x1 = x0 - (dx - 1);
+		for (; x1 > 0; x1--) 
+			if (x1 * x1 * hh + y * y * ww <= hhww)
+				break;
+		dx = x0 - x1;
+		x0 = x1;
+
+		for (int x = -x0; x <= x0; x++) {
+			BUF_IDX2D(image_buffer, width, height, eCenterX + x, eCenterY - y) = value;
+			BUF_IDX2D(image_buffer, width, height, eCenterX + x, eCenterY + y) = value;
+		}
+	}
+}
+
 double GetImageMinimum(const sitk::Image& image);
 
 double GetImageMaximum(const sitk::Image& image);
 
 std::vector<Vec3<int>> ResolvePath(Vec3<int> point, const sitk::Image& distanceMap);
+
+double ImageQuantile(const sitk::Image& image, double Q);
+
+sitk::Image SmartSigmoid(const sitk::Image& image, double qMax = 0.95, double qMin = 0.01, double eps = 0.1);

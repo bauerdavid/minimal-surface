@@ -98,15 +98,27 @@ static PyObject* Estimator_HookStageDataInitializedEvent(Estimator* self, PyObje
 	int stage;
 	PyObject* callback;
 	int data_type = 0;
-	if (!PyArg_ParseTuple(args, "iO|i", &stage, &callback, &data_type))
+	if (!PyArg_ParseTuple(args, "iO|i", &stage, &callback, &data_type)) {
+		PyErr_Format(PyExc_TypeError, "Couldn't parse arguments in %s", __FUNCTION__);
 		return NULL;
-	if (!PyCallable_Check(callback))
+	}
+	if (!PyCallable_Check(callback)) {
+		PyErr_Format(PyExc_TypeError, "Second argument is not callable");
 		return NULL;
+	}
 	Py_INCREF(callback);
 	EventSource::data_callback_type handler = [callback](sitk::Image& map, int idx) {
 		vector<unsigned> size = map.GetSize();
 		int ndims = size.size();
-		int n_pixels = 1;
+		if (ndims > 0) {
+			cout << size[0] << ", " << size[1];
+			if (ndims > 2)
+				cout << ", " << size[2];
+			cout << endl;
+		}
+		else {
+			cout << "empty image" << endl;
+		}int n_pixels = 1;
 		npy_intp* image_dims = (npy_intp*)malloc(3 * sizeof(npy_intp));
 		if (image_dims == NULL) {
 			PyErr_NoMemory();
@@ -116,18 +128,35 @@ static PyObject* Estimator_HookStageDataInitializedEvent(Estimator* self, PyObje
 			image_dims[i] = size[ndims - i - 1];
 			n_pixels *= image_dims[i];
 		}
-		cout << "dims: " << ndims << endl;
+		cout << "ndims: " << ndims << endl;
 		if (ndims < 3)
 			image_dims[2] = 1;
 		double* map_buffer = map.GetBufferAsDouble();
+		cout << "got buffer" << endl;
 		PyGILState_STATE gstate;
 		gstate = PyGILState_Ensure(); 
 		PyObject* out = PyArray_SimpleNewFromData(3, image_dims, NPY_DOUBLE, map_buffer);
+		if (out == NULL) {
+			cout << "Couldn't create numpy array" << endl;
+		}
+		PyObject* maxval = PyArray_Max((PyArrayObject*)out, NPY_MAXDIMS, NULL);
+		double val;
+		PyArray_ScalarAsCtype(maxval, &val);
+		cout << "max: " << val << endl;
+		Py_DECREF(maxval);
+		//PyObject* out = Py_None; Py_INCREF(Py_None);
 		PyObject* args = Py_BuildValue("(Oi)", out, idx);
-		PyObject_Call(callback, args, NULL);
-		Py_DECREF(args);
+		if (args == NULL) {
+			cout << "args were not built" << endl;
+			goto closure;
+		}
+		if (PyObject_Call(callback, args, NULL) == NULL) {
+			cout << "There was an error" << endl;
+		}
+closure:
+		Py_XDECREF(args);
 		free(image_dims);
-		Py_DECREF(out);
+		Py_XDECREF(out);
 		PyGILState_Release(gstate);
 	};
 	self->mMinimalSurfaceEstimator->HookStageDataInitializedEvent(eStageEnum(stage), handler, eDataEnum(data_type));
@@ -138,33 +167,52 @@ static PyObject* Estimator_HookStageUpdatedEvent(Estimator* self, PyObject* args
 	int stage;
 	PyObject* callback;
 	int data_type = 0;
-	if (!PyArg_ParseTuple(args, "iO|i", &stage, &callback, &data_type))
+	if (!PyArg_ParseTuple(args, "iO|i", &stage, &callback, &data_type)) {
+		PyErr_Format(PyExc_TypeError, "Couldn't parse arguments in %s", __FUNCTION__);
 		return NULL;
-	if (!PyCallable_Check(callback))
+	}
+	if (!PyCallable_Check(callback)) {
+		PyErr_Format(PyExc_TypeError, "Second argument is not callable");
 		return NULL;
+	}
 	Py_INCREF(callback);
 	EventSource::data_callback_type handler = [callback](sitk::Image& map, int idx) {
 		vector<unsigned> size = map.GetSize();
-		int ndims = size.size();
-		int n_pixels = 1;
-		npy_intp* image_dims =(npy_intp*)malloc(ndims*sizeof(npy_intp));
-		if (image_dims == NULL) {
-			PyErr_NoMemory();
-			return;
+		if (size.size() > 0) {
+			cout << size[0] << ", " << size[1];
+			if (size.size() > 2)
+				cout << ", " << size[2];
+			cout << endl;
 		}
+		else {
+			cout << "empty image" << endl;
+		}
+		int ndims = size.size();
+
+		int n_pixels = 1;
+		npy_intp image_dims[3];
 		for (int i = 0; i < ndims; i++) {
 			image_dims[i] = size[ndims - i - 1];
 			n_pixels *= image_dims[i];
 		}
+		if (ndims < 3)
+			image_dims[2] = 1; 
 		double* map_buffer = map.GetBufferAsDouble();
 		PyGILState_STATE gstate;
 		gstate = PyGILState_Ensure(); 
-		PyObject* out = PyArray_SimpleNewFromData(ndims, image_dims, NPY_DOUBLE, map_buffer);
+		PyObject* out = PyArray_SimpleNewFromData(3, image_dims, NPY_DOUBLE, map_buffer);
 		PyObject* args = Py_BuildValue("(Oi)", out, idx);
-		PyObject_Call(callback, args, NULL);
+		if (PyObject_Call(callback, args, NULL) == NULL) {
+			PyErr_Print();
+		}
 		Py_DECREF(args);
-		free(image_dims);
-		Py_DECREF(out);
+		PyGILState_Release(gstate);
+	};
+	EventSource::data_callback_type handler2 = [callback](sitk::Image& map, int idx) {
+		cout << "HANDLER2" << endl;
+		PyGILState_STATE gstate = PyGILState_Ensure();
+		if (PyObject_CallFunction(callback, "(i)", idx) == NULL) {
+		}
 		PyGILState_Release(gstate);
 	};
 	self->mMinimalSurfaceEstimator->HookStageUpdatedEvent(eStageEnum(stage), handler, eDataEnum(data_type));
