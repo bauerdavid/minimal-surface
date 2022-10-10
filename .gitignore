@@ -5,3 +5,4 @@
 /x64/
 /MinArea.dir/
 /build/*
+*.egg-info/
