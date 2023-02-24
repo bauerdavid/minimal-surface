@@ -6,3 +6,5 @@
 /MinArea.dir/
 /build/*
 *.egg-info/
+venv/
+.idea/
