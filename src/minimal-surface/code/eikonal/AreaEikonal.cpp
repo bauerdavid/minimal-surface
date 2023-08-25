@@ -7,6 +7,11 @@
 #include <vector>
 #include <sitkImageOperators.h>
 #include "FMSigned.h"
+
+#ifdef DEBUG_CURVATURE
+#include "Debug.h"
+#include <string>
+#endif
 #define MAX_THREADS 32
 //							x  210210210210210210210210210
 //							y  222111000222111000222111000
@@ -669,10 +674,10 @@ OMP_CRITICAL(maxS_selection)
 #ifdef DEBUG_CURVATURE
 	{
 		if (current_iteration % 50 == 0) {
-			save_image("Y:/BIOMAG/shortest path/curv_debug/dbg_" + std::to_string(i) + "_" + std::to_string(current_iteration) + "_curv.tif", mCurvatureMap[i]);
-			save_image("Y:/BIOMAG/shortest path/curv_debug/dbg_" + std::to_string(i) + "_" + std::to_string(current_iteration) + "_dist.tif", m_distance[i]);
-			save_image("Y:/BIOMAG/shortest path/curv_debug/dbg_" + std::to_string(i) + "_" + std::to_string(current_iteration) + "_field.tif", field);
-			//save_image("Y:/BIOMAG/shortest path/curv_debug/dbg_" + std::to_string(i) + "_" + std::to_string(current_iteration) + "_sdist.tif", temp_sdist);
+			save_image(debug_curvature_folder + "dbg_" + std::to_string(i) + "_" + std::to_string(current_iteration) + "_curv.tif", mCurvatureMap[i]);
+			save_image(debug_curvature_folder + "dbg_" + std::to_string(i) + "_" + std::to_string(current_iteration) + "_dist.tif", m_distance[i]);
+			save_image(debug_curvature_folder + "dbg_" + std::to_string(i) + "_" + std::to_string(current_iteration) + "_field.tif", field);
+			save_image(debug_curvature_folder + "dbg_" + std::to_string(i) + "_" + std::to_string(current_iteration) + "_sdist.tif", temp_sdist);
 		}
 	}
 #endif
@@ -729,7 +734,7 @@ OMP_CRITICAL_NO_TAG
 OMP_CRITICAL_NO_TAG
 	{
 		if (current_iteration % 50 == 0)
-			save_image("Y:/BIOMAG/shortest path/curv_debug/dbg_" + std::to_string(idx) + "_" + std::to_string(current_iteration) + "_updated_pos.tif", m_new_update[idx]);
+			save_image(debug_curvature_folder + "dbg_" + std::to_string(idx) + "_" + std::to_string(current_iteration) + "_updated_pos.tif", m_new_update[idx]);
 		if (idx)
 			current_iteration++;
 	}
