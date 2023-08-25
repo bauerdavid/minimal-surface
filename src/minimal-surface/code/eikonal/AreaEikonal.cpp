@@ -7,7 +7,6 @@
 #include <vector>
 #include <sitkImageOperators.h>
 #include "FMSigned.h"
-#define BIG_NUMBER 1e11
 #define MAX_THREADS 32
 //							x  210210210210210210210210210
 //							y  222111000222111000222111000
@@ -62,21 +61,15 @@ void AreaEikonal::CombineDistance() {
 OMP_PARALLEL_FOR
 	for (int zyx = 0; zyx < zs * ys * xs; zyx++)
 	{
-		int zz = zyx / (ys * xs);
-		{
-			int yy = (zyx / xs) % ys;
-			{
-				int xx = zyx % xs;
-				double d0 = distance0_buffer[xx + xs * (yy + ys * zz)];
-				double d1 = distance1_buffer[xx + xs * (yy + ys * zz)];
-				double newval;
-				if (d1 < 0 || d0 < d1 && d0 >= -1e-5)
-					newval = d0;
-				else
-					newval = d1;
-				combined_buffer[xx + xs * (yy + ys * zz)] = newval;
-			}
-		}
+		int xx = zyx % xs;
+		double d0 = distance0_buffer[zyx];
+		double d1 = distance1_buffer[zyx];
+		double newval;
+		if (d1 < 0 || d0 < d1 && d0 >= -1e-5)
+			newval = d0;
+		else
+			newval = d1;
+		combined_buffer[zyx] = newval;
 	}
 }
 
@@ -112,10 +105,10 @@ OMP_FOR
 							sample_z = 1;
 						else if (zz == zs - 1)
 							sample_z = zs - 2;
-						distance0_buffer[xx + xs * (yy + ys * zz)] = distance0_buffer[sample_x + xs * (sample_y + ys * sample_z)];
-						distance1_buffer[xx + xs * (yy + ys * zz)] = distance1_buffer[sample_x + xs * (sample_y + ys * sample_z)];
+						distance0_buffer[zyx] = distance0_buffer[sample_x + xs * (sample_y + ys * sample_z)];
+						distance1_buffer[zyx] = distance1_buffer[sample_x + xs * (sample_y + ys * sample_z)];
 					}
-					if (meeting_plane_buffer[xx + xs * (yy + ys * zz)] > 0)
+					if (meeting_plane_buffer[zyx] > 0)
 						temp.push_back(point_to_representation(xx, yy, zz));
 
 
@@ -294,17 +287,41 @@ int AreaEikonal::GetSmallestPlaneSize() {
 		xs * zs < ys* zs ? xs * zs : ys * zs;
 }
 
+void AreaEikonal::InitializeMeetingPlaneFromInitPoints(){
+    mMeetingPlaneCenter = (mStartPoint+mEndPoint)/2;
+    mPlaneFinalized = true;
+    mMeetingPlaneNormal = mEndPoint - mStartPoint;
+    mMeetingPlaneNormal /= mMeetingPlaneNormal.Norm();
+
+    double max_norm_val = abs(mMeetingPlaneNormal.x());
+	int max_norm_sign = sgn(mMeetingPlaneNormal.x());
+	if (abs(mMeetingPlaneNormal.y()) > max_norm_val) {
+		max_norm_val = abs(mMeetingPlaneNormal.y());
+		max_norm_sign = sgn(mMeetingPlaneNormal.y());
+	}
+	if (abs(mMeetingPlaneNormal.z()) > max_norm_val) {
+		max_norm_val = abs(mMeetingPlaneNormal.z());
+		max_norm_sign = sgn(mMeetingPlaneNormal.z());
+	}
+	mMeetingPlaneNormal *= max_norm_sign;
+	mMeetingPlaneOffset = -(mMeetingPlaneCenter*mMeetingPlaneNormal).Sum();
+}
+
 void AreaEikonal::Initialize(const sitk::Image& image, Vec3<double>& startPoint, Vec3<double>& endPoint, double beta, double alpha) {
 	_PROFILING;
 	mMeetingPointsCount = 0;
+    mStartPoint = startPoint;
+	mEndPoint = endPoint;
+#ifdef MEETING_PLANE_FROM_INIT_POINTS
+    InitializeMeetingPlaneFromInitPoints();
+#else
 	mMeetingPlaneCenter = Vec3<double>({ -1, -1, -1 });
-	mIterationCount = 0;
-	mPlaneFinalized = false;
+    mPlaneFinalized = false;
 	mMeetingPlaneOffset = 1e11;
+#endif
+	mIterationCount = 0;
 	mPhiMap = CalculatePhi(image, beta, alpha);
 	InitializeContainers(image);
-	mStartPoint = startPoint;
-	mEndPoint = endPoint;
 	mActivePoints[0].clear();
 	mActivePoints[1].clear();
 	mInactivePoints[0].clear();
@@ -332,15 +349,24 @@ AreaEikonal AreaEikonal::Rotate(vector<double>& rotation_matrix, bool inverse) c
 	rotated.mMeetingPlaneOffset = 1e11;
 	rotated.mUsesCorrection = mUsesCorrection;
 	resample_img<sitk::sitkNearestNeighbor>(mMeetingPointsMap, rotated.mMeetingPointsMap, rotation_matrix, inverse);
-
+	sitk::Image mask = sitk::Image(mMeetingPointsMap.GetSize(), mDistanceMap[0].GetPixelID());
+	sitk::Image rotated_mask = sitk::Image();
+	resample_img<sitk::sitkNearestNeighbor>(mask, rotated_mask, rotation_matrix, inverse);
+	rotated_mask = sitk::Cast(sitk::BinaryErode(sitk::Cast(rotated_mask+1, sitk::sitkUInt8)), mDistanceMap[0].GetPixelID());
 	resample_img(mPhaseFieldMap[0], rotated.mPhaseFieldMap[0], rotation_matrix, inverse);
 	neg_to_minus1(rotated.mPhaseFieldMap[0]);
 	resample_img(mPhaseFieldMap[1], rotated.mPhaseFieldMap[1], rotation_matrix, inverse);
 	neg_to_minus1(rotated.mPhaseFieldMap[1]);
-	resample_img(mDistanceMap[0], rotated.mDistanceMap[0], rotation_matrix, inverse, true);
+	resample_img<sitk::sitkLinear>(mDistanceMap[0], rotated.mDistanceMap[0], rotation_matrix, inverse);
 	neg_to_minus1(rotated.mDistanceMap[0]);
-	resample_img(mDistanceMap[1], rotated.mDistanceMap[1], rotation_matrix, inverse, true);
+	sitk::Image frozen = sitk::Cast(sitk::Greater(rotated_mask * rotated.mDistanceMap[0], 0), sitk::sitkUInt8);
+	vector<POINT3D> boundary_points = GetBoundaryPixels<sitk::sitkUInt8>(frozen, 1);
+	FMSigned::build(0, rotated.mDistanceMap[0], frozen, rotated.mDistanceMap[0], boundary_points);
+	resample_img<sitk::sitkLinear>(mDistanceMap[1], rotated.mDistanceMap[1], rotation_matrix, inverse);
 	neg_to_minus1(rotated.mDistanceMap[1]);
+	frozen = sitk::Cast(sitk::Greater(rotated_mask * rotated.mDistanceMap[1], 0), sitk::sitkUInt8);
+	boundary_points = GetBoundaryPixels<sitk::sitkUInt8>(frozen, 1);
+	FMSigned::build(1, rotated.mDistanceMap[1], frozen, rotated.mDistanceMap[1], boundary_points);
 	rotated.mSampleImage = resample_img(mCombinedDistanceMap, rotated.mCombinedDistanceMap, rotation_matrix, inverse, true);
 	neg_to_minus1(rotated.mCombinedDistanceMap);
 
@@ -400,7 +426,7 @@ void AreaEikonal::UpdateCurvature(int i) {
 	auto& act_set = mActivePoints[i];
 	const vector<unsigned>& size = mPhaseFieldMap[i].GetSize();
 	int xs = size[0], ys = size[1], zs = size[2]; 
-	sitk::Image& temp_sdist = FMSigned::build_for_neighbors(i, field, 2, 1, act_set);
+	sitk::Image& temp_sdist = FMSigned::build_for_neighbors(i, field, act_set, 2, 1);
 	double* sdist_buffer = temp_sdist.GetBufferAsDouble();
 	double* curvature_buffer = mCurvatureMap[i].GetBufferAsDouble();
 	memset(curvature_buffer, 0, xs * ys * zs * sizeof(double));
@@ -419,33 +445,26 @@ OMP_PARALLEL_FOR_NUM_THREADS(n_threads/2)
 			{
 
 				auto [xx, yy, zz] = representation_to_point<int>(pn);
-				if (zz > 0 && zz < zs - 1)
-				{
-					if (yy > 0 && yy < ys - 1)
-					{
-						if (xx > 0 && xx < xs - 1)
-							//for (int zz = 1; zz < zs - 1; ++zz) {
-							//	for (int yy = 1; yy < ys - 1; ++yy) {
-							//		for (int xx = 1; xx < xs - 1; ++xx) {
-						{
-							int zp = zz + 1, zm = zz - 1;
-							int yp = yy + 1, ym = yy - 1;
-							int xp = xx + 1, xm = xx - 1;
-
-
-							realnum sumcur =
-								BUF_IDX3D(sdist_buffer, xs, ys, zs, xp, yy, zz) +
-								BUF_IDX3D(sdist_buffer, xs, ys, zs, xm, yy, zz) +
-								BUF_IDX3D(sdist_buffer, xs, ys, zs, xx, yp, zz) +
-								BUF_IDX3D(sdist_buffer, xs, ys, zs, xx, ym, zz) +
-								BUF_IDX3D(sdist_buffer, xs, ys, zs, xx, yy, zp) +
-								BUF_IDX3D(sdist_buffer, xs, ys, zs, xx, yy, zm) -
-								6 * BUF_IDX3D(sdist_buffer, xs, ys, zs, xx, yy, zz);
-							//if (sumcur < -2) sumcur == -2;
-							BUF_IDX3D(curvature_buffer, xs, ys, zs, xx, yy, zz) = sumcur;
-						}
-					} 
-				} 
+				if (zz < 0 || zz >= zs) continue;
+				if (yy < 0 || yy >= ys) continue;
+				if (xx < 0 || xx >= xs) continue;
+				
+				int zp = zz < zs - 1 ? zz + 1: zs - 1;
+				int zm = zz > 0 ? zz - 1 : 0;
+				int yp = yy < ys - 1 ? yy + 1 : ys - 1;
+				int ym = yy > 0 ? yy - 1 : 0;
+				int xp = xx < xs - 1 ? xx + 1 : xs - 1;
+				int xm = xx > 0 ? xx - 1 : 0;
+				realnum sumcur =
+					BUF_IDX3D(sdist_buffer, xs, ys, zs, xp, yy, zz) +
+					BUF_IDX3D(sdist_buffer, xs, ys, zs, xm, yy, zz) +
+					BUF_IDX3D(sdist_buffer, xs, ys, zs, xx, yp, zz) +
+					BUF_IDX3D(sdist_buffer, xs, ys, zs, xx, ym, zz) +
+					BUF_IDX3D(sdist_buffer, xs, ys, zs, xx, yy, zp) +
+					BUF_IDX3D(sdist_buffer, xs, ys, zs, xx, yy, zm) -
+					6 * BUF_IDX3D(sdist_buffer, xs, ys, zs, xx, yy, zz);
+				//if (sumcur < -2) sumcur == -2;
+				BUF_IDX3D(curvature_buffer, xs, ys, zs, xx, yy, zz) = sumcur;
 			}
 		} 
 	}
@@ -489,39 +508,32 @@ OMP_FOR_REDUCTION(+, n_outliers)
 				POINT3D pn = *bi;
 #endif
 				{
-
 					auto [xx, yy, zz] = representation_to_point<int>(pn);
-					if (zz > 0 && zz < zs - 1)
+					if (zz < 0 || zz >= zs) continue;
+					if (yy < 0 || yy >= ys) continue;
+					if (xx < 0 || xx >= xs) continue;
+					
+					int zp = zz < zs - 1 ? zz + 1 : zs - 1;
+					int zm = zz > 0 ? zz - 1 : 0;
+					int yp = yy < ys - 1 ? yy + 1 : ys - 1;
+					int ym = yy > 0 ? yy - 1 : 0;
+					int xp = xx < xs - 1 ? xx + 1 : xs - 1;
+					int xm = xx > 0 ? xx - 1 : 0;
+
+					realnum phi = phi_buffer[xx + xs * (yy + ys * zz)];
+					if (phi < 1e-33) phi = 1e-33;
+					double sumcur = BUF_IDX3D(curvature_buffer, xs, ys, zs, xx, yy, zz);
+					realnum&& xn = field_buffer[xp + xs * (yy + ys * zz)] - field_buffer[xm + xs * (yy + ys * zz)];
+					realnum&& yn = field_buffer[xx + xs * (yp + ys * zz)] - field_buffer[xx + xs * (ym + ys * zz)];
+					realnum&& zn = field_buffer[xx + xs * (yy + ys * zp)] - field_buffer[xx + xs * (yy + ys * zm)];
+					realnum gradlen = sqrt(xn * xn + yn * yn + zn * zn + 1e-99);
+
+					if (is_outlier(sumcur, 2/gradlen))
 					{
-						if (yy > 0 && yy < ys - 1)
-						{
-							if (xx > 0 && xx < xs - 1)
-								//for (int zz = 1; zz < zs - 1; ++zz) {
-								//	for (int yy = 1; yy < ys - 1; ++yy) {
-								//		for (int xx = 1; xx < xs - 1; ++xx) {
-							{
-								int zp = zz + 1, zm = zz - 1;
-								int yp = yy + 1, ym = yy - 1;
-								int xp = xx + 1, xm = xx - 1;
-
-								realnum phi = phi_buffer[xx + xs * (yy + ys * zz)];
-								if (phi < 1e-33) phi = 1e-33;
-								double sumcur = BUF_IDX3D(curvature_buffer, xs, ys, zs, xx, yy, zz);
-								realnum&& xn = field_buffer[xp + xs * (yy + ys * zz)] - field_buffer[xm + xs * (yy + ys * zz)];
-								realnum&& yn = field_buffer[xx + xs * (yp + ys * zz)] - field_buffer[xx + xs * (ym + ys * zz)];
-								realnum&& zn = field_buffer[xx + xs * (yy + ys * zp)] - field_buffer[xx + xs * (yy + ys * zm)];
-								realnum gradlen = sqrt(xn * xn + yn * yn + zn * zn + 1e-99);
-
-								if (is_outlier(sumcur, 2/gradlen))
-								{
-									n_outliers++;
-								}
-								realnum S = calculate_S(sumcur, phi, 2/gradlen);
-								temp.push_back(S);
-								//loop body
-							}
-						} //for xx
-					} // for yy
+						n_outliers++;
+					}
+					realnum S = calculate_S(sumcur, phi, 2/gradlen);
+					temp.push_back(S);
 				}
 			} // for zz
 		}
@@ -608,50 +620,44 @@ OMP_FOR
 				{
 
 					auto [xx, yy, zz] = representation_to_point<int>(pn);
-					if (zz > 0 && zz < zs - 1)
-					{
-						if (yy > 0 && yy < ys - 1)
-						{
-							if (xx > 0 && xx < xs - 1)
-								//for (int zz = 1; zz < zs - 1; ++zz) {
-								//	for (int yy = 1; yy < ys - 1; ++yy) {
-								//		for (int xx = 1; xx < xs - 1; ++xx) {
-							{
-								int zp = zz + 1, zm = zz - 1;
-								int yp = yy + 1, ym = yy - 1;
-								int xp = xx + 1, xm = xx - 1;
+					if (zz < 0 || zz >= zs) continue;
+					if (yy < 0 || yy >= ys) continue;
+					if (xx < 0 || xx >= xs) continue;
 
-								realnum&& xn = field_buffer[xp + xs * (yy + ys * zz)] - field_buffer[xm + xs * (yy + ys * zz)];
-								realnum&& yn = field_buffer[xx + xs * (yp + ys * zz)] - field_buffer[xx + xs * (ym + ys * zz)];
-								realnum&& zn = field_buffer[xx + xs * (yy + ys * zp)] - field_buffer[xx + xs * (yy + ys * zm)];
-								realnum gradlen = sqrt(xn * xn + yn * yn + zn * zn + 1e-99);
+					int zp = zz < zs - 1 ? zz + 1 : zs - 1;
+					int zm = zz > 0 ? zz - 1 : 0;
+					int yp = yy < ys - 1 ? yy + 1 : ys - 1;
+					int ym = yy > 0 ? yy - 1 : 0;
+					int xp = xx < xs - 1 ? xx + 1 : xs - 1;
+					int xm = xx > 0 ? xx - 1 : 0;
+
+					realnum&& xn = field_buffer[xp + xs * (yy + ys * zz)] - field_buffer[xm + xs * (yy + ys * zz)];
+					realnum&& yn = field_buffer[xx + xs * (yp + ys * zz)] - field_buffer[xx + xs * (ym + ys * zz)];
+					realnum&& zn = field_buffer[xx + xs * (yy + ys * zp)] - field_buffer[xx + xs * (yy + ys * zm)];
+					realnum gradlen = sqrt(xn * xn + yn * yn + zn * zn + 1e-99);
 
 
-								realnum eikon;
+					realnum eikon;
 
-								realnum phi = phi_buffer[xx + xs * (yy + ys * zz)];
-								if (phi < 1e-33) phi = 1e-33;
-								if (mUsesCorrection) {
-									realnum sumcur = BUF_IDX3D(curvature_buffer, xs, ys, zs, xx, yy, zz);
-									eikon = calculate_speed(sumcur, phi, S);
-								}
-								else {
-									eikon = 1 / phi;
-								}
-								eikon *= gradlen; // normalize
-								if (eikon < 1e-11) eikon = 1e-11;
+					realnum phi = phi_buffer[xx + xs * (yy + ys * zz)];
+					if (phi < 1e-33) phi = 1e-33;
+					if (mUsesCorrection) {
+						realnum sumcur = BUF_IDX3D(curvature_buffer, xs, ys, zs, xx, yy, zz);
+						eikon = calculate_speed(sumcur, phi, S);
+					}
+					else {
+						eikon = 1 / phi;
+					}
+					eikon *= gradlen; // normalize
+					if (eikon < 1e-11) eikon = 1e-11;
 
 #ifdef USE_VECTOR_AS_SET
-								changed_velo[i] = make_pair(pn, eikon);
+					changed_velo[i] = make_pair(pn, eikon);
 #else
 OMP_CRITICAL_NO_TAG
-								changed_velo[pn] = eikon;
+					changed_velo[pn] = eikon;
 #endif
-								if (eikon > temp_maxv) temp_maxv = eikon;
-								//loop body
-							}
-						} //for xx
-					} // for yy
+					if (eikon > temp_maxv) temp_maxv = eikon;
 				}
 			} // for zz
 		}
@@ -766,42 +772,35 @@ OMP_FOR_NOWAIT
 
 #endif
 				auto [xx, yy, zz] = representation_to_point<int>(pn);
-				if (zz == 0 || zz >= zs - 1) continue;
-				{
-					if (yy == 0 || yy >= ys - 1) continue;
-					{
-						if (xx == 0 || xx >= xs - 1) continue;
-						/*for (int zz = 1; zz < zs - 1; ++zz) {
-							for (int yy = 0 + 1; yy < ys - 1; ++yy) {
-								for (int xx = 0 + 1; xx < xs - 1; ++xx) {*/
-						if (field_buffer[xx + xs * (yy + ys * zz)] > 0 && distance_buffer[xx + xs * (yy + ys * zz)] < -0.5f) {
-							distance_buffer[xx + xs * (yy + ys * zz)] = current_distance;
-							for (int k = -1; k <= 1; k++) {
-								for (int j = -1; j <= 1; j++) {
-									for (int i = -1; i <= 1; i++) {
-										if ((i + 1) % 2 + (j + 1) % 2 + (k + 1) % 2 == 2) {
-											if (BUF_IDX3D(field_buffer, xs, ys, zs, xx + i, yy + j, zz + k) < MAX_FIELD_VAL
-												&& (mMeetingPlaneCenter.x() < -0.5 || -sgn((mMeetingPlaneNormal * origin_point).Sum() + mMeetingPlaneOffset) * ((mMeetingPlaneNormal * Vec3<double>({(double)xx+i, (double)yy+j, (double)zz+k})).Sum() + mMeetingPlaneOffset) < MAX_DIST_FROM_PLANE))
-											{
-												if (xx + i > 0 && xx + i < xs - 1 && yy + j > 0 && yy + j < ys - 1 && zz + k > 0 && zz + k < zs - 1) {
+				if (field_buffer[xx + xs * (yy + ys * zz)] > 0 && distance_buffer[xx + xs * (yy + ys * zz)] < -0.5f) {
+					distance_buffer[xx + xs * (yy + ys * zz)] = current_distance;
+					for (int k = -1; k <= 1; k++) {
+						if (zz + k >= zs || zz + k < 0) continue;
+						for (int j = -1; j <= 1; j++) {
+							if (yy + j >= ys || yy + j < 0) continue;
+							for (int i = -1; i <= 1; i++) {
+								if (xx + i >= xs || xx + i < 0) continue;
+								if ((i + 1) % 2 + (j + 1) % 2 + (k + 1) % 2 == 2) {
+									if (BUF_IDX3D(field_buffer, xs, ys, zs, xx + i, yy + j, zz + k) < MAX_FIELD_VAL
+										&& (mMeetingPlaneCenter.x() < -0.5 || -sgn((mMeetingPlaneNormal * origin_point).Sum() + mMeetingPlaneOffset) * ((mMeetingPlaneNormal * Vec3<double>({ (double)xx + i, (double)yy + j, (double)zz + k })).Sum() + mMeetingPlaneOffset) < MAX_DIST_FROM_PLANE))
+									{
+										if (xx + i > 0 && xx + i < xs - 1 && yy + j > 0 && yy + j < ys - 1 && zz + k > 0 && zz + k < zs - 1) {
 
 #ifdef USE_VECTOR_AS_SET
-													temp.push_back(point_to_representation(xx + i, yy + j, zz + k));
+											temp.push_back(point_to_representation(xx + i, yy + j, zz + k));
 #else
-													temp.insert(point_to_representation(xx + i, yy + j, zz + k));
+											temp.insert(point_to_representation(xx + i, yy + j, zz + k));
 #endif
-												}
-												else {
-													temp_inact.push_back(point_to_representation(xx + i, yy + j, zz + k));
-												}
-											} // end if
-										} // end if
-									} // end for i
-								} // end for j
-							} // end for k
-						} // end if xx
-					} // end if yy
-				} // end if zz
+										}
+										else {
+											temp_inact.push_back(point_to_representation(xx + i, yy + j, zz + k));
+										}
+									} // end if
+								} // end if
+							} // end for i
+						} // end for j
+					} // end for k
+				}
 		} // end for i
 OMP_CRITICAL_NO_TAG
 		{
@@ -831,13 +830,10 @@ bool AreaEikonal::IsDone() const {
 	int xs = size[0], ys = size[1], zs = size[2];
 	const double* dist0_buffer = mDistanceMap[0].GetBufferAsDouble();
 	const double* dist1_buffer = mDistanceMap[1].GetBufferAsDouble();
-	for (int zz = 1; zz < zs - 1; zz++) {
-		for (int yy = 1; yy < ys - 1; yy++) {
-			for (int xx = 1; xx < xs - 1; xx++) {
-				if (BUF_IDX3D(dist0_buffer, xs, ys, zs, xx, yy, zz) < 0 && BUF_IDX3D(dist1_buffer, xs, ys, zs, xx, yy, zz) < 0)
-					return false;
-			}
-		}
+OMP_PARALLEL_FOR
+	for (int zyx = 0; zyx < zs*ys*xs; zyx++) {
+		if (dist0_buffer[zyx] < 0 && dist1_buffer[zyx] < 0)
+			return false;
 	}
 	return true;
 }
@@ -845,10 +841,11 @@ void AreaEikonal::Iterate()
 {
 	_PROFILING;
 	// mAreaEikonal.m_field[i]
+#ifndef MEETING_PLANE_FROM_INIT_POINTS
 	if (++mIterationCount % REFRESH_ITERS == 0 && !mPlaneFinalized) {
 		UpdateMeetingPlane();
 	}
-
+#endif
 	//Calculate the value of capital S
 	realnum min_capital_s = 1e-11;
 	vector<double> min_capital_s_vals(2);
@@ -901,23 +898,20 @@ void AreaEikonal::CombineDistance(int slice, double p0_x, double p1_x) {
 	double* dist0_buffer = mDistanceMap[0].GetBufferAsDouble();
 	double* dist1_buffer = mDistanceMap[1].GetBufferAsDouble();
 	double* combined_dist_buffer = mCombinedDistanceMap.GetBufferAsDouble();
-
-	for (int zz = 0; zz < zs; zz++) {
-		for (int yy = 0; yy < ys; yy++) {
-			for (int xx = 0; xx < xs; xx++) {
-				int xx_sgn = sgn(slice - xx);
-				int p0_sgn = sgn(slice - p0_x);
-				int p1_sgn = sgn(slice - p1_x);
-				if (abs(slice - xx) < 0.5) {
-					combined_dist_buffer[xx + xs * (yy + ys * zz)] = (dist0_buffer[xx + p0_sgn + xs * (yy + ys * zz)] + dist1_buffer[xx + p1_sgn + xs * (yy + ys * zz)]);
-				}
-				else if (p0_sgn == xx_sgn) {
-					combined_dist_buffer[xx + xs * (yy + ys * zz)] = dist0_buffer[xx + xs * (yy + ys * zz)];
-				}
-				else if (p1_sgn == xx_sgn) {
-					combined_dist_buffer[xx + xs * (yy + ys * zz)] = dist1_buffer[xx + xs * (yy + ys * zz)];
-				}
-			}
+OMP_PARALLEL_FOR
+	for (int zyx = 0; zyx < zs*ys*xs; zyx++) {
+		int xx = zyx % xs;
+		int xx_sgn = sgn(slice - xx);
+		int p0_sgn = sgn(slice - p0_x);
+		int p1_sgn = sgn(slice - p1_x);
+		if (abs(slice - xx) < 0.5) {
+			combined_dist_buffer[zyx] = (dist0_buffer[zyx + p0_sgn] + dist1_buffer[zyx + p1_sgn]);
+		}
+		else if (p0_sgn == xx_sgn) {
+			combined_dist_buffer[zyx] = dist0_buffer[zyx];
+		}
+		else if (p1_sgn == xx_sgn) {
+			combined_dist_buffer[zyx] = dist1_buffer[zyx];
 		}
 	}
 }

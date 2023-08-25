@@ -15,6 +15,8 @@
 #define DEBUG_STATES
 #define ITERATE_ROTATED
 
+#define MEETING_PLANE_FROM_INIT_POINTS
+
 namespace sitk = itk::simple;
 
 #define MAXMINPATH 500 
@@ -77,6 +79,7 @@ protected:
 
 public:
 	virtual void Initialize(const sitk::Image& image, Vec3<double>& start_point, Vec3<double>& end_point, double beta, double alpha);
+	void InitializeMeetingPlaneFromInitPoints();
 	AreaEikonal Rotate(std::vector<double>& rotation_matrix, bool inverse = false) const;
 	bool IsDone() const;
 	virtual void UpdateMeetingPlane();
