@@ -1,5 +1,4 @@
 #include "PlanePhaseField.h"
-#include "Utils.h"
 #include "sitkImageOperators.h"
 
 using namespace std;

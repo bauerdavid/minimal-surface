@@ -3,6 +3,7 @@
 #include <unordered_set>
 #include "szevent.h"
 #include "EventSource.h"
+#include "Utils.h"
 namespace sitk = itk::simple;
 
 class PlanePhaseField
