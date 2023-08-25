@@ -80,6 +80,7 @@ template<typename KeyT, typename ValueT,
         template <typename RandomIt>
         IndexedPriorityQueue(RandomIt first, RandomIt last, ValueT default_val) {
             clear();
+            v.reserve(std::distance(first, last));
             std::transform(first, last, back_inserter(v), [default_val](KeyT key) { return std::make_pair(key, default_val); });
             size_t i = 0;
             std::transform(v.begin(), v.end(), inserter(m, m.end()),
@@ -92,6 +93,7 @@ template<typename KeyT, typename ValueT,
         template<class KeyIt, class ValueIt>
         IndexedPriorityQueue(KeyIt keys_first, KeyIt keys_last, ValueIt vals_first, bool fix_heap=true) {
             clear();
+            v.reserve(std::distance(keys_first, keys_last));
             std::transform(keys_first, keys_last, vals_first, back_inserter(v), [](KeyT key, ValueT val) { return std::make_pair(key, val); });
             if(fix_heap)
                 std::make_heap(v.begin(), v.end(), [this](pair<KeyT, ValueT> l, pair<KeyT, ValueT> r) {return comp(l.second, r.second); });
