@@ -10,3 +10,4 @@ venv/
 .idea/
 /dist/
 **/.vs/
+src/minimal-surface/code/eikonal/Debug.h
