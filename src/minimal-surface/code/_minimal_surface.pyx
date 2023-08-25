@@ -97,7 +97,7 @@ cdef extern from "MinimalSurfaceEstimator.h":
         void HookImageTransformCalculatedEvent(image_transform_callback_type&)
         void HookPlaneCenterCalculatedEvent(vector_callback_type&)
         void SetUsesCorrection(bool)
-        void Calculate(Image image, Vec3[double] point1, Vec3[double] point2, double beta, double alpha) nogil
+        void Calculate(Image image, Vec3[double] point1, Vec3[double] point2, double beta, double alpha, int maxIterations) nogil
         void SetInitialContourCalculatorFunc(init_contour_callback_type)
         const TransportFunctionES& GetTransportFunctionCalculator() nogil const
     cdef vector[Vec3[int]] ResolvePath(Vec3[int], const Image&) nogil
@@ -188,7 +188,8 @@ cdef class MinimalSurfaceCalculator:
             np.ndarray[np.float_t, ndim=1] point2,
             bool use_correction,
             double beta,
-            double alpha
+            double alpha,
+            int max_iterations=10000
     ):
         cdef int i
         cdef vector[unsigned int] im_size
@@ -206,7 +207,7 @@ cdef class MinimalSurfaceCalculator:
             point2_data[i] = point2[i]
         self.calculator.SetUsesCorrection(use_correction)
         with nogil:
-            self.calculator.Calculate(sitk_image, point1_vec, point2_vec, beta, alpha)
+            self.calculator.Calculate(sitk_image, point1_vec, point2_vec, beta, alpha, max_iterations)
         cdef const double* transport_buffer = self.calculator.GetTransportFunctionCalculator().GetTransportFunction().GetBufferAsDouble()
         cdef np.ndarray[np.float_t, ndim=3] output = np.empty((image.shape[0], image.shape[1], image.shape[2]), dtype=float)
         cdef double[:, :, :] out_view = output
