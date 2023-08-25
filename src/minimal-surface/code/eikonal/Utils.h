@@ -15,6 +15,8 @@
 #include <stack>
 #include <utility>
 
+#define BIG_NUMBER 1e11
+
 //#define SINGLE_THREAD
 #ifdef SINGLE_THREAD
 #define OMP_PARALLEL_FOR
@@ -274,6 +276,11 @@ struct CType<sitk::sitkInt32> {
 template<>
 struct CType<sitk::sitkFloat64> {
 	typedef double Type;
+};
+
+template<>
+struct CType<sitk::sitkUInt8> {
+	typedef uint8_t Type;
 };
 
 template<typename T>
@@ -614,3 +621,47 @@ std::vector<Vec3<int>> ResolvePath(Vec3<int> point, const sitk::Image& distanceM
 double ImageQuantile(const sitk::Image& image, double Q);
 
 sitk::Image SmartSigmoid(const sitk::Image& image, double qMax = 0.95, double qMin = 0.01, double eps = 0.1);
+
+template<sitk::PixelIDValueEnum pixelIdValueEnum>
+std::vector<POINT3D> GetBoundaryPixels(const sitk::Image& image, typename CType<pixelIdValueEnum>::Type foreground_value = 1) {
+	auto buffer = PixelManagerTrait<pixelIdValueEnum>::GetBuffer(image);
+	vector<unsigned> size = image.GetSize();
+	int xs(size[0]), ys(size[1]), zs(size[2]);
+	std::vector<POINT3D> bound_points;
+OMP_PARALLEL
+	{
+		std::vector<POINT3D> temp;
+OMP_FOR_NOWAIT
+		for (int zyx = 0; zyx < zs * ys * xs; zyx++) {
+			int zz = zyx / (ys * xs);
+			int yy = (zyx / xs) % ys;
+			int xx = zyx % xs;
+			bool&& inside = BUF_IDX3D(buffer, xs, ys, zs, xx, yy, zz) == foreground_value;
+			if (!inside) continue;
+			bool&& xp_outside = xx + 1 < xs && BUF_IDX3D(buffer, xs, ys, zs, xx + 1, yy, zz) != foreground_value;
+			bool&& yp_outside = yy + 1 < ys && BUF_IDX3D(buffer, xs, ys, zs, xx, yy + 1, zz) != foreground_value;
+			bool&& zp_outside = zz + 1 < zs && BUF_IDX3D(buffer, xs, ys, zs, xx, yy, zz + 1) != foreground_value;
+			bool&& xn_outside = xx - 1 >= 0 && BUF_IDX3D(buffer, xs, ys, zs, xx - 1, yy, zz) != foreground_value;
+			bool&& yn_outside = yy - 1 >= 0 && BUF_IDX3D(buffer, xs, ys, zs, xx, yy - 1, zz) != foreground_value;
+			bool&& zn_outside = zz - 1 >= 0 && BUF_IDX3D(buffer, xs, ys, zs, xx, yy, zz - 1) != foreground_value;
+			if (xp_outside || xn_outside || yp_outside || yn_outside || zp_outside || zn_outside) {
+				POINT3D point = point_to_representation(xx, yy, zz);
+				temp.push_back(point);
+			}
+		}
+OMP_CRITICAL(bound_points_search)
+		bound_points.insert(bound_points.end(), temp.begin(), temp.end());
+	}
+
+return bound_points;
+
+}
+
+const std::vector<int> NEIGH6_OFFSET[] = {
+	std::vector<int>({-1, 0, 0}),
+	std::vector<int>({1, 0, 0}),
+	std::vector<int>({0, -1, 0}),
+	std::vector<int>({0, 1, 0}),
+	std::vector<int>({0, 0, -1}),
+	std::vector<int>({0, 0, 1})
+};
