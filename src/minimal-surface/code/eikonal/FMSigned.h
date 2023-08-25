@@ -11,14 +11,6 @@
 #define INF 2*m_max_dist//0x1.f7f7f7f7f7f7fp+1016
 
 namespace sitk = itk::simple;
-const std::vector<int> NEIGH6_OFFSET[] = {
-	std::vector<int>({-1, 0, 0}),
-	std::vector<int>({1, 0, 0}),
-	std::vector<int>({0, -1, 0}),
-	std::vector<int>({0, 1, 0}),
-	std::vector<int>({0, 0, -1}),
-	std::vector<int>({0, 0, 1})
-};
 class FMSigned
 {
 	static FMSigned& getInstance(int id){
@@ -52,7 +44,31 @@ class FMSigned
 	bool finished();
 	void initialize(sitk::Image& input_map, double max_distance, double velo);
 	template<class RandIt>
-	void initialize(sitk::Image& input_map, const RandIt& bound_points, double max_distance, double velo, bool fix_heap=true) {
+	void initialize(const sitk::Image& distance_map, const sitk::Image& frozen, const RandIt& bound_points, double max_distance = DBL_MAX, double velo = 1., bool fix_heap = true) {
+		_PROFILING;
+		m_max_dist = max_distance;
+		mVelocityMap = velo;
+		m_distance_map = sitk::Image(distance_map);
+		m_frozen = sitk::Image(frozen);
+		vector<uint32_t> input_size = m_distance_map.GetSize();
+		xs = input_size[0];
+		ys = input_size[1];
+		zs = input_size[2];
+		m_distance_buffer = m_distance_map.GetBufferAsDouble();
+		m_frozen_buffer = m_frozen.GetBufferAsUInt8();
+		vector<double> values;
+		values.reserve(bound_points.size());
+		//OMP_PARALLEL_FOR
+		for (auto it = bound_points.begin(); it != bound_points.end(); it++) {
+			auto [xx, yy, zz] = representation_to_point<int>(*it);
+			double val = BUF_IDX3D(m_distance_buffer, xs, ys, zs, xx, yy, zz);
+			BUF_IDX3D(m_frozen_buffer, xs, ys, zs, xx, yy, zz) = 1;
+			values.push_back(val);
+		}
+		m_narrow_band = IndexedPriorityQueue<POINT3D_MAP(double), std::greater<double>>(bound_points.begin(), bound_points.end(), values.begin(), fix_heap);
+	}
+	template<class RandIt>
+	void initialize(sitk::Image& input_map, const RandIt& bound_points, double max_distance = DBL_MAX, double velo = 1., bool fix_heap=true) {
 		_PROFILING;
 		vector<uint32_t> input_size = input_map.GetSize();
 		xs = input_size[0];
@@ -129,7 +145,7 @@ OMP_PARALLEL_FOR
 		_END_SUBPROFILE(fill_narrowband);
 	}
 
-	void FMSigned::initialize_for_neighbors(const sitk::Image& input_map, const std::vector<POINT3D>& bound_points, double max_distance, double velo) {
+	void FMSigned::initialize_for_neighbors(const sitk::Image& input_map, const std::vector<POINT3D>& bound_points, double max_distance = DBL_MAX, double velo=1.) {
 		_PROFILING;
 		m_input_buffer = input_map.GetBufferAsDouble();
 		std::vector<uint32_t> input_size = input_map.GetSize();
@@ -172,9 +188,9 @@ OMP_PARALLEL_FOR
 	void calculateForNeighbors();
 	void smooth_distances();
 public:
-	static void build(int id, sitk::Image& input_map, sitk::Image& output, double max_distance=DBL_MAX, double velo=1);
+	static void build(int id, sitk::Image& input_map, sitk::Image& output, double max_distance=DBL_MAX, double velo=1.);
 	template<class RandIt>
-	static void build(int id, sitk::Image& input_map, sitk::Image& output, double max_distance, double velo, RandIt& bound_points) {
+	static void build(int id, sitk::Image& input_map, sitk::Image& output, RandIt& bound_points, double max_distance = DBL_MAX, double velo = 1.) {
 		_PROFILING;
 			FMSigned& signedDistMap = getInstance(id);
 		signedDistMap.initialize(input_map, bound_points, max_distance, velo);
@@ -187,8 +203,23 @@ public:
 
 		output = signedDistMap.m_distance_map * signs;
 	}
+
+	template<class RandIt>
+	static void build(int id, sitk::Image& distance_map, sitk::Image& frozen, sitk::Image& output, RandIt& bound_points, double max_distance = DBL_MAX, double velo = 1.) {
+		_PROFILING;
+		FMSigned& signedDistMap = getInstance(id);
+		signedDistMap.initialize(distance_map, frozen, bound_points, max_distance, velo);
+
+		while (!signedDistMap.finished()) {
+			signedDistMap.iterate();
+		}
+
+
+		output = signedDistMap.m_distance_map;
+	}
+
 	template <class RandIt>
-	static sitk::Image& build_for_neighbors(int id, sitk::Image& input_map, double max_distance, double velo, RandIt& bound_points, bool smooth=false) {
+	static sitk::Image& build_for_neighbors(int id, sitk::Image& input_map, RandIt& bound_points, double max_distance = DBL_MAX, double velo = 1., bool smooth=false) {
 		_PROFILING;
 		FMSigned& signedDistMap = getInstance(id);
 		signedDistMap.initialize_for_neighbors(input_map, bound_points, max_distance, velo);
