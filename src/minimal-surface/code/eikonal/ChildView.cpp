@@ -16,6 +16,9 @@
 #include <sitkAdditionalProcedures.h>
 #include "FMSigned.h"
 #include <thread>
+#ifdef DEBUG_STATES
+#include "Debug.h"
+#endif
 
 #define EXPCOEF_RANGE 100
 using namespace std;
@@ -392,7 +395,7 @@ UINT BackgroundThread(LPVOID params)
 	GetDispSliceFromTransportFunction(view->mEstimator.GetTransportFunctionCalculator(), Taloy, view->m_ysee, view->m_dispd1);
 	GetDispSliceFromTransportFunction(view->mEstimator.GetTransportFunctionCalculator(), Taloz, view->m_zsee, view->m_disp);
 	view->Invalidate();
-	_DUMP_PROFILE_INFO("Y:/BIOMAG/shortest path/profiling.txt");
+	_DUMP_PROFILE_INFO(debug_profiling_folder + "profiling.txt");
 	return 0;
 }
 
@@ -423,19 +426,19 @@ void CChildView::InitThread()
 	};
 #ifdef DEBUG_STATES
 	//save initial maps
-	save_image("Y:/BIOMAG/shortest path/interm_imgs/ph0_testimage.tif", mInputImage);
+	save_image(debug_states_folder + "ph0_testimage.tif", mInputImage);
 	EventSource::data_callback_type dist_init_debug_cb = [](const sitk::Image& map, int idx) {
-		save_image("Y:/BIOMAG/shortest path/interm_imgs/ph0_dist" + std::to_string(idx)+".tif", map);
+		save_image(debug_states_folder + "ph0_dist" + std::to_string(idx)+".tif", map);
 	};
 	mEstimator.HookStageDataInitializedEvent(AreaEikonalStage, dist_init_debug_cb, Distance);
 
 	EventSource::data_callback_type phase_init_debug_cb = [](const sitk::Image& map, int idx) {
-		save_image("Y:/BIOMAG/shortest path/interm_imgs/ph0_field" + std::to_string(idx) + ".tif", map);
+		save_image(debug_states_folder + "ph0_field" + std::to_string(idx) + ".tif", map);
 	};
 	mEstimator.HookStageDataInitializedEvent(AreaEikonalStage, phase_init_debug_cb, PhaseField);
 
 	EventSource::data_callback_type phi_init_debug_cb = [](const sitk::Image& map, int) {
-		save_image("Y:/BIOMAG/shortest path/interm_imgs/ph0_phi.tif", map);
+		save_image(debug_states_folder + "ph0_phi.tif", map);
 	};
 	mEstimator.HookCalculatedPhiMapEvent(phi_init_debug_cb);
 
@@ -444,14 +447,14 @@ void CChildView::InitThread()
 		final_distmap[idx] = &map;
 	};
 	EventSource::basic_callback_type finished_eikonal_debug_cb = [&final_distmap]() {
-		save_image("Y:/BIOMAG/shortest path/interm_imgs/ph1_distance_0.tif", *final_distmap[0]);
-		//save_image("Y:/BIOMAG/shortest path/interm_imgs/ph1_distance_1.tif", *final_distmap[1]);
+		save_image(debug_states_folder + "ph1_distance_0.tif", *final_distmap[0]);
+		//save_image(debug_states_folder + "ph1_distance_1.tif", *final_distmap[1]);
 	};
 	mEstimator.HookStageUpdatedEvent(AreaEikonalStage, distmap_update_debug_cb, Distance);
 	mEstimator.HookStageFinishedEvent(AreaEikonalStage, finished_eikonal_debug_cb);
 
 	EventSource::data_callback_type init_rot_distmap_debug_cb = [](const sitk::Image& map, int idx) {
-		save_image("Y:/BIOMAG/shortest path/interm_imgs/ph1_r_distance_" + to_string(idx) + ".tif", map);
+		save_image(debug_states_folder + "ph1_r_distance_" + to_string(idx) + ".tif", map);
 	};
 	mEstimator.HookStageDataInitializedEvent(RotatedAreaEikonalStage, init_rot_distmap_debug_cb, Distance);
 
@@ -459,19 +462,19 @@ void CChildView::InitThread()
 		final_distmap[idx] = &map;
 	};
 	EventSource::basic_callback_type rot_finished_eikonal_debug_cb = [&final_distmap]() {
-		save_image("Y:/BIOMAG/shortest path/interm_imgs/ph1.5_r_distance_0.tif", *final_distmap[0]);
-		save_image("Y:/BIOMAG/shortest path/interm_imgs/ph1.5_r_distance_1.tif", *final_distmap[1]);
+		save_image(debug_states_folder + "ph1.5_r_distance_0.tif", *final_distmap[0]);
+		save_image(debug_states_folder + "ph1.5_r_distance_1.tif", *final_distmap[1]);
 	};
 	mEstimator.HookStageUpdatedEvent(RotatedAreaEikonalStage, rot_distmap_update_debug_cb, Distance);
 	mEstimator.HookStageFinishedEvent(RotatedAreaEikonalStage, rot_finished_eikonal_debug_cb);
 
 	/*EventSource::data_callback_type grad_x_init_debug_cb = [](const sitk::Image& map, int) {
-		save_image("Y:/BIOMAG/shortest path/interm_imgs/ph2_slice_gx.tif", map);
+		save_image(debug_states_folder + "ph2_slice_gx.tif", map);
 	};
 	mEstimator.mInitialContourCalculator.HookInitializeGradXEvent(grad_x_init_debug_cb);
 
 	EventSource::data_callback_type grad_y_init_debug_cb = [](const sitk::Image& map, int) {
-		save_image("Y:/BIOMAG/shortest path/interm_imgs/ph2_slice_gy.tif", map);
+		save_image(debug_states_folder + "ph2_slice_gy.tif", map);
 	};
 	mEstimator.mInitialContourCalculator.HookInitializeGradYEvent(grad_y_init_debug_cb);*/
 
@@ -481,15 +484,15 @@ void CChildView::InitThread()
 	};
 	mEstimator.HookStageUpdatedEvent(TransportFunctionStage, transport_updated_debug_cb);
 	EventSource::basic_callback_type transport_finished_debug_cb = [&final_transport]() {
-		save_image("Y:/BIOMAG/shortest path/interm_imgs/ph4_transport0.tif", *final_transport);
+		save_image(debug_states_folder + "ph4_transport0.tif", *final_transport);
 	};
 	mEstimator.HookStageFinishedEvent(TransportFunctionStage, transport_finished_debug_cb);
 
 	EventSource::basic_callback_type calculation_finished_debug_cb = [this]() {
-		save_image("Y:/BIOMAG/shortest path/interm_imgs/ph4_unrot_transportfn.tif", mEstimator.GetTransportFunctionCalculator().GetTransportFunction());
-		save_image("Y:/BIOMAG/shortest path/interm_imgs/ph3_transport_gx.tif", mEstimator.GetTransportFunctionCalculator().GetGradX());
-		save_image("Y:/BIOMAG/shortest path/interm_imgs/ph3_transport_gy.tif", mEstimator.GetTransportFunctionCalculator().GetGradY());
-		save_image("Y:/BIOMAG/shortest path/interm_imgs/ph3_transport_gz.tif", mEstimator.GetTransportFunctionCalculator().GetGradZ()); };
+		save_image(debug_states_folder + "ph4_unrot_transportfn.tif", mEstimator.GetTransportFunctionCalculator().GetTransportFunction(0));
+		save_image(debug_states_folder + "ph3_transport_gx.tif", mEstimator.GetTransportFunctionCalculator().GetGradX());
+		save_image(debug_states_folder + "ph3_transport_gy.tif", mEstimator.GetTransportFunctionCalculator().GetGradY());
+		save_image(debug_states_folder + "ph3_transport_gz.tif", mEstimator.GetTransportFunctionCalculator().GetGradZ()); };
 #endif
 	EventSource::iter_callback_type change_state_cb = [this](int iteration) {
 		mAlgorithmStage = iteration;
@@ -502,7 +505,7 @@ void CChildView::InitThread()
 			break;
 		case TRANSPORT_FUNCTION_ITERATION:
 #ifdef DEBUG_STATES
-			save_image("Y:/BIOMAG/shortest path/interm_imgs/ph3_slice_field.tif", mEstimator.GetInitialContourCalculator().GetPhaseField());
+			save_image(debug_states_folder + "ph3_slice_field.tif", mEstimator.GetInitialContourCalculator().GetPhaseField());
 #endif
 			
 			break;
@@ -564,7 +567,7 @@ void CChildView::PauseThread(int threadstat) // 1-(re-)start 2-suspended
 void CChildView::StopThread()
 {
 	mAlgorithmStage = 0;
-	_DUMP_PROFILE_INFO("Y:/BIOMAG/shortest path/profiling.txt")
+	_DUMP_PROFILE_INFO(debug_profiling_folder + "profiling.txt")
 	Invalidate();
 }
 
@@ -1160,7 +1163,7 @@ void GetDispSliceFromTransportFunction(const TransportFunction& transportFunctio
 	if (!transportFunction.m_active) return;
 	realnum zlim(1e-22);
 	int bcol(0);
-	const sitk::Image& trf = transportFunction.GetTransportFunction();
+	const sitk::Image& trf = transportFunction.GetTransportFunction(0);
 	const double* trf_buffer = trf.GetBufferAsDouble();
 	const int* bound_buffer = transportFunction.GetReadOnlyMap().GetBufferAsInt32();
 	std::vector<uint32_t> size = trf.GetSize();
