@@ -170,31 +170,20 @@ vector<Vec3<int>> ResolvePath(Vec3<int> point, const sitk::Image& distanceMap)
 double ImageQuantile(const sitk::Image& image, double Q)
 {
 	int n_pixels = image.GetNumberOfPixels();
-	cout << "n_pixels " << n_pixels << endl;
 	double* vals_buffer = (double*)malloc(n_pixels * sizeof(double));
-	cout << "buffer"<< endl;
 	memcpy(vals_buffer, image.GetBufferAsDouble(), n_pixels * sizeof(double));
-	cout << "copy" << endl;
 	std::nth_element(vals_buffer, vals_buffer + (int)(n_pixels * Q), vals_buffer + n_pixels);
-	cout << "nth_element" << endl;
 	double val = vals_buffer[(int)(n_pixels * Q)];
-	cout << "val " <<val << endl;
 	free(vals_buffer);
-	cout << "free" << endl;
 	return val;
 }
 
 sitk::Image SmartSigmoid(const sitk::Image& image, double qMax, double qMin, double eps)
 {
-	cout << "starting" << endl;
 	double q_maxval = ImageQuantile(image, qMax);
-	cout << "q_maxval " << q_maxval << endl;
 	double q_minval = ImageQuantile(image, qMin);
-	cout << "q_minval " << q_minval << endl;
 	double alpha = (q_maxval - q_minval) / log((1 / eps - 1) / (1 / 0.95 - 1));
-	cout << "alpha " << alpha << endl;
 	double beta = log(1 / eps - 1) * alpha + q_minval;
-	cout << "beta " << beta << endl;
 	return sitk::Sigmoid(image, alpha, beta, 1., 0.);
 }
 
