@@ -6,10 +6,12 @@
 
 template<typename VecType, size_t N, typename T>
 class OperableVec {
-	typedef VecType vec_type;
 protected:
 	T data[N]; 
 public:
+    typedef VecType vec_type;
+	static const size_t size = N;
+	typedef T type;
 	template<typename VecT>
 	friend VecType operator+(const OperableVec& l, const OperableVec<VecT, N, T>& r);
 
@@ -27,7 +29,7 @@ public:
 	friend VecType operator-(const OperableVec& l, Scalar r);
 
 	template<typename Scalar, typename>
-	friend VecType operator-(Scalar r, const OperableVec& l);
+	friend VecType operator-(Scalar l, const OperableVec& r);
 
 
 	template<typename VecT>
@@ -37,7 +39,7 @@ public:
 	friend VecType operator*(const OperableVec& l, Scalar r);
 
 	template<typename Scalar, typename>
-	friend VecType operator*(Scalar r, const OperableVec& l);
+	friend VecType operator*(Scalar l, const OperableVec& r);
 
 
 	template<typename VecT>
@@ -47,7 +49,7 @@ public:
 	friend VecType operator/(const OperableVec& l, Scalar r);
 
 	template<typename Scalar, typename>
-	friend VecType operator/(Scalar r, const OperableVec& l);
+	friend VecType operator/(Scalar l, const OperableVec& r);
 	
 	OperableVec() {
 		std::fill(data, data + N, T(0));
@@ -94,7 +96,7 @@ public:
 	}
 	template<typename Scalar, typename = typename std::enable_if<std::is_arithmetic<Scalar>::value, Scalar>::type>
 	OperableVec& operator+=(Scalar s) {
-		std::transform(data, data + N, data, std::bind2nd(std::plus<T>(), s));
+		std::transform(data, data + N, data, [s](T val) {return val + s;});
 		return *this;
 	}
 
@@ -107,7 +109,7 @@ public:
 	}
 	template<typename Scalar, typename = typename std::enable_if<std::is_arithmetic<Scalar>::value, Scalar>::type>
 	OperableVec& operator-=(Scalar s) {
-		std::transform(data, data + N, data, std::bind2nd(std::minus<T>(), s));
+		std::transform(data, data + N, data, [s](T val) {return val - s;});
 		return *this;
 	}
 
@@ -133,7 +135,7 @@ public:
 	}
 	template<typename Scalar, typename = typename std::enable_if<std::is_arithmetic<Scalar>::value, Scalar>::type>
 	OperableVec& operator/=(Scalar s) {
-		std::transform(data, data + N, data, std::bind2nd(std::divides<T>(), s));
+		std::transform(data, data + N, data, [s](T val) {return val / s;});
 		return *this;
 	}
 
@@ -141,6 +143,12 @@ public:
 		T sum(0);
 		std::for_each(data, data + N, [&sum](T val) {sum += val; });
 		return sum;
+	}
+
+	T Norm() {
+	    T square_sum(0);
+	    std::for_each(data, data + N, [&square_sum](T val) {square_sum += val*val; });
+	    return sqrt(square_sum);
 	}
 
 	T* end() {
@@ -156,95 +164,95 @@ public:
 	}
 };
 
-template<typename VecType1, typename VecType2, size_t N, typename T>
-VecType1 operator+(const OperableVec<VecType1, N, T>& l, const OperableVec<VecType2, N, T>& r) {
-	VecType1 v;
-	for (int i = 0; i < N; i++) {
+template<typename OperableVecType, typename VecType2>
+typename OperableVecType::vec_type operator+(const OperableVecType& l, const OperableVec<VecType2, OperableVecType::size, typename OperableVecType::type>& r) {
+	typename OperableVecType::vec_type v;
+	for (int i = 0; i < OperableVecType::size; i++) {
 		v[i] = l[i] + r[i];
 	}
 	return v;
 }
 
-template<typename VecType, typename Scalar, size_t N, typename T, typename = typename std::enable_if<std::is_arithmetic<Scalar>::value, Scalar>::type>
-VecType operator+(const OperableVec<VecType, N, T>& l, Scalar r) {
-	VecType v;
-	std::transform(l.data, l.data + N, v.data, std::bind2nd(std::plus<T>(), r));
+template<typename OperableVecType, typename Scalar, typename = typename std::enable_if<std::is_arithmetic<Scalar>::value, Scalar>::type>
+typename OperableVecType::vec_type operator+(const OperableVecType& l, Scalar r) {
+	typename OperableVecType::vec_type v;
+	std::transform(l.data, l.data + OperableVecType::size, v.data, [r](typename OperableVecType::type val) {return val + r;});
 	return v;
 }
 
-template<typename VecType, typename Scalar, size_t N, typename T, typename = typename std::enable_if<std::is_arithmetic<Scalar>::value, Scalar>::type>
-VecType operator+(Scalar r,  const OperableVec<VecType, N, T>& l) {
-	VecType v;
-	std::transform(l.data, l.data + N, v.data, std::bind1st(std::plus<T>(), r));
+template<typename OperableVecType, typename Scalar, typename = typename std::enable_if<std::is_arithmetic<Scalar>::value, Scalar>::type>
+typename OperableVecType::vec_type operator+(Scalar l,  const OperableVecType& r) {
+	typename OperableVecType::vec_type v;
+	std::transform(r.data, r.data + OperableVecType::size, v.data, [l](typename OperableVecType::type val) {return l + val;});
 	return v;
 }
 
-template<typename VecType1, typename VecType2, size_t N, typename T>
-VecType1 operator-(const OperableVec<VecType1, N, T>& l, const OperableVec<VecType2, N, T>& r) {
-	VecType1 v;
-	for (int i = 0; i < N; i++) {
+template<typename OperableVecType, typename VecType2>
+typename OperableVecType::vec_type operator-(const OperableVecType& l, const OperableVec<VecType2, OperableVecType::size, typename OperableVecType::type>& r) {
+	typename OperableVecType::vec_type v;
+	for (int i = 0; i < OperableVecType::size; i++) {
 		v[i] = l[i] - r[i];
 	}
 	return v;
 }
 
-template<typename VecType, typename Scalar, size_t N, typename T, typename = typename std::enable_if<std::is_arithmetic<Scalar>::value, Scalar>::type>
-VecType operator-(const OperableVec<VecType, N, T>& l, Scalar r) {
-	VecType v;
-	std::transform(l.data, l.data + N, v.data, std::bind2nd(std::minus<T>(), r));
+template<typename OperableVecType, typename Scalar, typename = typename std::enable_if<std::is_arithmetic<Scalar>::value, Scalar>::type>
+typename OperableVecType::vec_type operator-(const OperableVecType& l, Scalar r) {
+	typename OperableVecType::vec_type v;
+	std::transform(l.data, l.data + OperableVecType::size, v.data, [r](typename OperableVecType::type val) {return val - r;});
 	return v;
 }
 
-template<typename VecType, typename Scalar, size_t N, typename T, typename = typename std::enable_if<std::is_arithmetic<Scalar>::value, Scalar>::type>
-VecType operator-(Scalar r, const OperableVec<VecType, N, T>& l) {
-	VecType v;
-	std::transform(l.data, l.data + N, v.data, std::bind1st(std::minus<T>(), r));
+template<typename OperableVecType, typename Scalar, typename = typename std::enable_if<std::is_arithmetic<Scalar>::value, Scalar>::type>
+typename OperableVecType::vec_type operator-(Scalar l, const OperableVecType& r) {
+	typename OperableVecType::vec_type v;
+	std::transform(r.data, r.data + OperableVecType::size, v.data, [l](typename OperableVecType::type val) {return l - val;});
 	return v;
 }
 
-template<typename VecType1, typename VecType2, size_t N, typename T>
-VecType1 operator*(const OperableVec<VecType1, N, T>& l, const OperableVec<VecType2, N, T>& r) {
-	VecType1 v;
-	for (int i = 0; i < N; i++) {
+template<typename OperableVecType, typename VecType2>
+typename OperableVecType::vec_type operator*(const OperableVecType& l, const OperableVec<VecType2, OperableVecType::size, typename OperableVecType::type>& r) {
+	typename OperableVecType::vec_type v;
+	for (int i = 0; i < OperableVecType::size; i++) {
 		v[i] = l[i] * r[i];
 	}
 	return v;
 }
 
-template<typename VecType, typename Scalar, size_t N, typename T, typename = typename std::enable_if<std::is_arithmetic<Scalar>::value, Scalar>::type>
-VecType operator*(const OperableVec<VecType, N, T>& l, Scalar r) {
-	VecType v;
-	std::transform(l.data, l.data + N, v.data, std::bind2nd(std::multiplies<T>(), r));
+template<typename OperableVecType, typename Scalar, typename = typename std::enable_if<std::is_arithmetic<Scalar>::value, Scalar>::type>
+typename OperableVecType::vec_type operator*(const OperableVecType& l, Scalar r) {
+	typename OperableVecType::vec_type v;
+	std::transform(l.data, l.data + OperableVecType::size, v.data, [r](typename OperableVecType::type val) {return val * r;});
 	return v;
 }
 
-template<typename VecType, typename Scalar, size_t N, typename T, typename = typename std::enable_if<std::is_arithmetic<Scalar>::value, Scalar>::type>
-VecType operator*(Scalar r, const OperableVec<VecType, N, T>& l) {
-	VecType v;
-	std::transform(l.data, l.data + N, v.data, std::bind1st(std::multiplies<T>(), r));
+template<typename OperableVecType, typename Scalar, typename = typename std::enable_if<std::is_arithmetic<Scalar>::value, Scalar>::type>
+typename OperableVecType::vec_type operator*(Scalar l, const OperableVecType& r) {
+	typename OperableVecType::vec_type v;
+	std::transform(r.data, r.data + OperableVecType::size, v.data, [l](typename OperableVecType::type val) {return l * val;});
 	return v;
 }
 
-template<typename VecType1, typename VecType2, size_t N, typename T>
-VecType1 operator/(const OperableVec<VecType1, N, T>& l, const OperableVec<VecType2, N, T>& r) {
-	VecType1 v;
-	for (int i = 0; i < N; i++) {
+template<typename OperableVecType, typename VecType2>
+typename OperableVecType::vec_type operator/(const OperableVecType& l, const OperableVec<VecType2, OperableVecType::size, typename OperableVecType::type>& r) {
+	typename OperableVecType::vec_type v;
+	for (int i = 0; i < OperableVecType::size; i++) {
 		v[i] = l[i] / r[i];
 	}
 	return v;
 }
 
-template<typename VecType, typename Scalar, size_t N, typename T, typename = typename std::enable_if<std::is_arithmetic<Scalar>::value, Scalar>::type>
-VecType operator/(const OperableVec<VecType, N, T>& l, Scalar r) {
-	VecType v;
-	std::transform(l.data, l.data + N, v.data, std::bind2nd(std::divides<T>(), r));
+template<typename OperableVecType, typename Scalar, typename = typename std::enable_if<std::is_arithmetic<Scalar>::value, Scalar>::type>
+typename OperableVecType::vec_type operator/(const OperableVecType& l, Scalar r) {
+	typename OperableVecType::vec_type v;
+	std::transform(l.data, l.data + OperableVecType::size, v.data, [r](typename OperableVecType::type val) {return val / r;});
 	return v;
 }
 
-template<typename VecType, typename Scalar, size_t N, typename T, typename = typename std::enable_if<std::is_arithmetic<Scalar>::value, Scalar>::type>
-VecType operator/(Scalar r, const OperableVec<VecType, N, T>& l) {
-	VecType v;
-	std::transform(l.data, l.data + N, v.data, std::bind1st(std::divides<T>(), r));
+template<typename OperableVecType, typename Scalar, typename = typename std::enable_if<std::is_arithmetic<Scalar>::value, Scalar>::type>
+typename OperableVecType::vec_type operator/(Scalar r, const OperableVecType& l) {
+	tzpename OperableVecType::vec_type v;
+	std::transform(l.data, l.data + OperableVecType::size, v.data, [l](typename OperableVecType::type val) {return l / val;});
 	return v;
 }
 
