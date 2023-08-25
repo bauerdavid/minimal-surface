@@ -21,9 +21,11 @@ MinimalSurfaceEstimator::~MinimalSurfaceEstimator()
 }
 
 
-void MinimalSurfaceEstimator::Calculate(sitk::Image image, Vec3<double> point1, Vec3<double> point2, double beta, double alpha) {
+void MinimalSurfaceEstimator::Calculate(sitk::Image image, Vec3<double> point1, Vec3<double> point2, double beta, double alpha, int maxIterations) {
 	mAreaEikonal.Calculate(image, point1, point2, beta, alpha);
+#ifndef MEETING_PLANE_FROM_INIT_POINTS
 	mAreaEikonal.UpdateMeetingPlane();
+#endif
 	mAreaEikonal.CombineDistance();
 	vector<double> meeting_plane_normal(mAreaEikonal.GetMeetingPlaneNormal());
 	vector<double> rotation_matrix = rotation_matrix_from_vectors<double>(vector<double>({ 1, 0, 0 }), meeting_plane_normal);
@@ -35,15 +37,14 @@ void MinimalSurfaceEstimator::Calculate(sitk::Image image, Vec3<double> point1, 
 	vector<double> plane_center_transformed = mRotatedAreaEikonal.TransformPhysicalPointToContinuousIndex(plane_center_physical);
 	double plane_slice = plane_center_transformed[0];
 	PlaneCenterCalculatedEvent(plane_center_transformed);
-	mRotatedAreaEikonal.Calculate();
+	//mRotatedAreaEikonal.Calculate();
 
 	vector<double> start_point = mAreaEikonal.TransformContinuousIndexToPhysicalPoint(point1);
 	start_point = mRotatedAreaEikonal.TransformPhysicalPointToContinuousIndex(start_point);
 	vector<double> end_point = mAreaEikonal.TransformContinuousIndexToPhysicalPoint(point2);
 	end_point = mRotatedAreaEikonal.TransformPhysicalPointToContinuousIndex(end_point);
-	mRotatedAreaEikonal.CombineDistance(plane_slice, start_point[0], end_point[0]);
 	mRotatedAreaEikonal.SmoothDistances();
-
+	mRotatedAreaEikonal.CombineDistance(plane_slice, start_point[0], end_point[0]);
 	IterationEvent(DISTANCE_MEAN_ITERATION);
 	//calculate slice distance
 	sitk::Image distanceSlice = GetImageSlice<sitk::sitkFloat64>(mRotatedAreaEikonal.GetCombinedDistanceMap(), 0, plane_slice);
@@ -68,7 +69,7 @@ void MinimalSurfaceEstimator::Calculate(sitk::Image image, Vec3<double> point1, 
 	realnum maxdist = mRotatedAreaEikonal.GetCurrentDistance();
 	IterationEvent(TRANSPORT_FUNCTION_ITERATION);
 
-	mTransportFunctionCalculator.Calculate(mRotatedAreaEikonal.GetCombinedDistanceMap(), initial_slice, plane_slice, maxdist);
+	mTransportFunctionCalculator.Calculate(mRotatedAreaEikonal.GetCombinedDistanceMap(), initial_slice, plane_slice, maxdist, maxIterations);
 
 	//rotate transport function to original position
 	vector<unsigned int> sample_size = mAreaEikonal.GetPhiMap().GetSize();

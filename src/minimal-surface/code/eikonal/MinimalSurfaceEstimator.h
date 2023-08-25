@@ -45,7 +45,7 @@ public:
 	MinimalSurfaceEstimator();
 	~MinimalSurfaceEstimator();
 	std::vector<std::vector<Vec3<int>>> mMinimalPaths[2];
-	void Calculate(sitk::Image, Vec3<double> point1, Vec3<double> point2, double beta, double alpha = 0.01);
+	void Calculate(sitk::Image, Vec3<double> point1, Vec3<double> point2, double beta, double alpha = 0.01, int maxIterations=10000);
 	void HookStageInitializationEvent(eStageEnum stage, basic_callback_type& handler);
 	void HookStageFinishedEvent(eStageEnum stage, basic_callback_type& handler);
 	void HookStageIterationEvent(eStageEnum stage, iter_callback_type& handler);
