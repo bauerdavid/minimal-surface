@@ -5,3 +5,11 @@
 /x64/
 /MinArea.dir/
 /build/*
+*.egg-info/
+venv/
+.idea/
+/dist/
+**/.vs/
+*.pyd
+src/minimal-surface/code/eikonal/Debug.h
+src/minimal-surface/code/_minimal_surface.cpp
