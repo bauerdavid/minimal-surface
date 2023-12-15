@@ -33,8 +33,10 @@ if "SIMPLEITK_PATH" in os.environ:
 else:
     if sys.platform == "win32":
         sitk_path = "C:\\SimpleITK-build"
+        extra_build_args = ["/Zc:externC"]
     else:
         sitk_path = "/SimpleITK-build"
+        extra_build_args = []
 
 
 extension = Extension(
@@ -224,7 +226,7 @@ extension = Extension(
         r"comdlg32.lib",
         r"advapi32.lib",
     ],
-    extra_compile_args=["/std:c++17"],
+    extra_compile_args=["/std:c++17"] + extra_build_args,
     language="c++"
 )
 
