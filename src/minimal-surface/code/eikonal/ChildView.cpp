@@ -162,7 +162,7 @@ void CChildView::OnPaint()
 		if (m_dispd2.xs) {
 			DispImage(dc,m_dispd2,offx,offy);
 			std::vector<POINT3D> &bound = mBoundaryContour;
-			int si = bound.size();
+			int si = (int)bound.size();
 			if (si) {
 				for (int ii = 0; ii < si; ++ii) {
 					auto [x, y, z] = representation_to_point<int>(bound[ii]);
@@ -277,7 +277,7 @@ void CChildView::OnPaint()
 					for(int ii=0; ii<2; ii++)
 						for (int jj = 0; jj < mEstimator.mMinimalPaths[ii].size(); ++jj) {
 							std::vector<Vec3<int>>& minpath = mEstimator.mMinimalPaths[ii][jj];
-							int point_count = minpath.size();
+							int point_count = (int)minpath.size();
 							if (!point_count) break;
 							for (int p = 0; p < point_count; ++p) {
 								if(BUF_IDX3D(path_z_buffer, xs, ys, zs, (int)minpath[p].x(), (int)minpath[p].y(), m_zsee) < 1)
@@ -304,7 +304,7 @@ void CChildView::OnPaint()
 					for (int ii = 0; ii < 2; ii++)
 						for (int jj = 0; jj < mEstimator.mMinimalPaths[ii].size(); ++jj) {
 							std::vector<Vec3<int>>& minpath = mEstimator.mMinimalPaths[ii][jj];
-							int point_count = minpath.size();
+							int point_count = (int)minpath.size();
 							if (!point_count) break;
 							for (int p = 0; p < point_count; ++p) {
 								if (BUF_IDX3D(path_y_buffer, xs, ys, zs, (int)minpath[p].x(), m_ysee, (int)minpath[p].z()) < 1)
@@ -331,7 +331,7 @@ void CChildView::OnPaint()
 					for (int ii = 0; ii < 2; ii++)
 						for (int jj = 0; jj < mEstimator.mMinimalPaths[ii].size(); ++jj) {
 							std::vector<Vec3<int>>& minpath = mEstimator.mMinimalPaths[ii][jj];
-							int point_count = minpath.size();
+							int point_count = (int)minpath.size();
 							if (!point_count) break;
 							for (int p = 0; p < point_count; ++p) {
 								if (BUF_IDX3D(path_x_buffer, xs, ys, zs, m_xsee, (int)minpath[p].y(), (int)minpath[p].z()) < 1)
@@ -371,14 +371,14 @@ void CChildView::OnPaint()
 
 	if (m_disp.xs) {
 		if (m_bispoint > 0) {
-			if (abs(m_zsee-mStartPoint.z()) < 3) dc.FillSolidRect(mStartPoint.x() -1, mStartPoint.y() -1,3,3,0xff);
-			if (abs(m_ysee- mStartPoint.y()) < 3) dc.FillSolidRect(mStartPoint.x() +m_disp.xs, mStartPoint.z() -1,3,3,0xff);
-			if (abs(m_xsee- mStartPoint.x()) < 3) dc.FillSolidRect(mStartPoint.y() +2*m_disp.xs+1, mStartPoint.z() -1,3,3,0xff);
+			if (abs(m_zsee-mStartPoint.z()) < 3) dc.FillSolidRect((int)mStartPoint.x() -1, (int)mStartPoint.y() -1,3,3,0xff);
+			if (abs(m_ysee- mStartPoint.y()) < 3) dc.FillSolidRect((int)mStartPoint.x() +m_disp.xs, (int)mStartPoint.z() -1,3,3,0xff);
+			if (abs(m_xsee- mStartPoint.x()) < 3) dc.FillSolidRect((int)mStartPoint.y() +2*m_disp.xs+1, (int)mStartPoint.z() -1,3,3,0xff);
 		}
 		if (m_bispoint > 1) {
-			if (abs(m_zsee- mEndPoint.z()) < 3) dc.FillSolidRect(mEndPoint.x() -1, mEndPoint.y() -1,3,3,0xffff00);
-			if (abs(m_ysee- mEndPoint.y()) < 3) dc.FillSolidRect(mEndPoint.x() +m_disp.xs, mEndPoint.z() -1,3,3,0xffff00);
-			if (abs(m_xsee- mEndPoint.x()) < 3) dc.FillSolidRect(mEndPoint.y() +2*m_disp.xs+1, mEndPoint.z() -1,3,3,0xffff00);
+			if (abs(m_zsee- mEndPoint.z()) < 3) dc.FillSolidRect((int)mEndPoint.x() -1, (int)mEndPoint.y() -1,3,3,0xffff00);
+			if (abs(m_ysee- mEndPoint.y()) < 3) dc.FillSolidRect((int)mEndPoint.x() +m_disp.xs, (int)mEndPoint.z() -1,3,3,0xffff00);
+			if (abs(m_xsee- mEndPoint.x()) < 3) dc.FillSolidRect((int)mEndPoint.y() +2*m_disp.xs+1, (int)mEndPoint.z() -1,3,3,0xffff00);
 		}
 	}
 
@@ -389,7 +389,7 @@ void CChildView::OnPaint()
 UINT BackgroundThread(LPVOID params)
 {
 	CChildView* view = (CChildView*)params;
-	view->mEstimator.Calculate(view->mInputImage, view->mStartPoint, view->mEndPoint, view->m_expfac, 0.01);
+	view->mEstimator.Calculate(view->mInputImage, view->mStartPoint, view->mEndPoint);
 
 	GetDispSliceFromTransportFunction(view->mEstimator.GetTransportFunctionCalculator(), Talox, view->m_xsee, view->m_dispd2); // TaloX - enum
 	GetDispSliceFromTransportFunction(view->mEstimator.GetTransportFunctionCalculator(), Taloy, view->m_ysee, view->m_dispd1);
@@ -577,7 +577,7 @@ void CChildView::GetAllPathX()
 	vector<double> plane_center_transformed = mEstimator.GetRotatedAreaEikonal().TransformPhysicalPointToContinuousIndex(plane_center_physical);
 	double plane_slice = plane_center_transformed[0];
 	vector<unsigned> size = mEstimator.GetRotatedAreaEikonal().GetDistanceMap(0).GetSize();
-	unsigned int xs(size[0]), ys(size[1]), zs(size[2]);
+	int xs(size[0]), ys(size[1]), zs(size[2]);
 	unordered_set<unsigned long> boundary_points = mEstimator.GetInitialContourCalculator().RetrieveBound();
 	mBoundaryContour.clear();
 	for (auto& it = boundary_points.begin(); it != boundary_points.end(); it++) {
@@ -586,10 +586,10 @@ void CChildView::GetAllPathX()
 		vector<double> rotated;
 		rotated = mEstimator.GetRotatedAreaEikonal().TransformContinuousIndexToPhysicalPoint({plane_slice, (double)y, (double)z});
 		rotated = mEstimator.GetAreaEikonal().TransformPhysicalPointToContinuousIndex(rotated);
-		mBoundaryContour.push_back(point_to_representation(round(rotated[0]), round(rotated[1]), round(rotated[2])));
+		mBoundaryContour.push_back(point_to_representation((int)round(rotated[0]), (int)round(rotated[1]), (int)round(rotated[2])));
 	}
 	std::vector<POINT3D>& bound = mBoundaryContour;
-	int si = bound.size();
+	int si = (int)bound.size();
 	if (si > MAXMINPATH) si = MAXMINPATH;
 	for (int jj = 0; jj < MAXMINPATH; ++jj) {
 		mEstimator.mMinimalPaths[0].clear();
@@ -1185,9 +1185,9 @@ void GetDispSliceFromTransportFunction(const TransportFunction& transportFunctio
 					r[zz][yy] = (0xff << 16) + (0xff << 8) + 0xff;
 				else { //if (mReadOnlyMap[zz][yy][xx] == 1) // boundary or internal
 					if (BUF_IDX3D(trf_buffer, xs, ys, zs, xx, yy, zz) < -zlim) // -mMin: maximal value
-						r[zz][yy] = (bcol << 16) + (bcol << 0) + (int)256 * (127 + 0xff * ((0.5 * BUF_IDX3D(trf_buffer, xs, ys, zs, xx, yy, zz) / min_val)));
+						r[zz][yy] = (bcol << 16) + (bcol << 0) + (int)256 * (127 + 0xff * (int)((0.5 * BUF_IDX3D(trf_buffer, xs, ys, zs, xx, yy, zz) / min_val)));
 					else if (BUF_IDX3D(trf_buffer, xs, ys, zs, xx, yy, zz) > zlim)
-						r[zz][yy] = ((int)(127 - 0xff * (0.5 * BUF_IDX3D(trf_buffer, xs, ys, zs, xx, yy, zz) / min_val)) << 16) + (bcol << 8) + bcol;
+						r[zz][yy] = ((int)(127 - 0xff * (int)(0.5 * BUF_IDX3D(trf_buffer, xs, ys, zs, xx, yy, zz) / min_val)) << 16) + (bcol << 8) + bcol;
 					else
 						r[zz][yy] = (0xff << 16) + (0xff << 8) + 0xff;
 				}
@@ -1211,9 +1211,9 @@ void GetDispSliceFromTransportFunction(const TransportFunction& transportFunctio
 					r[zz][xx] = (0xff << 16) + (0xff << 8) + 0xff;
 				else { //if (mReadOnlyMap[zz][yy][xx] == 1) // boundary or internal
 					if (BUF_IDX3D(trf_buffer, xs, ys, zs, xx, yy, zz) < -zlim) // -mMin: maximal value
-						r[zz][xx] = (bcol << 16) + (bcol << 0) + (int)256 * (127 + 0xff * ((0.5 * BUF_IDX3D(trf_buffer, xs, ys, zs, xx, yy, zz) / min_val)));
+						r[zz][xx] = (bcol << 16) + (bcol << 0) + 256 * (int)(127 + 0xff * ((0.5 * BUF_IDX3D(trf_buffer, xs, ys, zs, xx, yy, zz) / min_val)));
 					else if (BUF_IDX3D(trf_buffer, xs, ys, zs, xx, yy, zz) > zlim)
-						r[zz][xx] = ((int)(127 - 0xff * (0.5 * BUF_IDX3D(trf_buffer, xs, ys, zs, xx, yy, zz) / min_val)) << 16) + (bcol << 8) + bcol;
+						r[zz][xx] = ((int)(127 - 0xff * (int)(0.5 * BUF_IDX3D(trf_buffer, xs, ys, zs, xx, yy, zz) / min_val)) << 16) + (bcol << 8) + bcol;
 					else
 						r[zz][xx] = (0xff << 16) + (0xff << 8) + 0xff;
 				}
@@ -1236,9 +1236,9 @@ void GetDispSliceFromTransportFunction(const TransportFunction& transportFunctio
 					r[yy][xx] = (0xff << 16) + (0xff << 8) + 0xff;
 				else { //if (mReadOnlyMap[zz][yy][xx] == 1) // boundary or internal
 					if (BUF_IDX3D(trf_buffer, xs, ys, zs, xx, yy, zz) < -zlim) // -mMin: maximal value
-						r[yy][xx] = (bcol << 16) + (bcol << 0) + (int)256 * (127 + 0xff * ((0.5 * BUF_IDX3D(trf_buffer, xs, ys, zs, xx, yy, zz) / min_val)));
+						r[yy][xx] = (bcol << 16) + (bcol << 0) + 256 * (int)(127 + 0xff * ((0.5 * BUF_IDX3D(trf_buffer, xs, ys, zs, xx, yy, zz) / min_val)));
 					else if (BUF_IDX3D(trf_buffer, xs, ys, zs, xx, yy, zz) > zlim)
-						r[yy][xx] = ((int)(127 - 0xff * (0.5 * BUF_IDX3D(trf_buffer, xs, ys, zs, xx, yy, zz) / min_val)) << 16) + (bcol << 8) + bcol;
+						r[yy][xx] = ((int)(127 - 0xff * (int)(0.5 * BUF_IDX3D(trf_buffer, xs, ys, zs, xx, yy, zz) / min_val)) << 16) + (bcol << 8) + bcol;
 					else
 						r[yy][xx] = (0xff << 16) + (0xff << 8) + 0xff;
 				}

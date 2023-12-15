@@ -159,7 +159,7 @@ void FMSigned::iterate() {
 void FMSigned::calculateForNeighbors() {
 	_PROFILING;
 	auto& v = m_narrow_band_v;
-	int n = v.size();
+	int n = (int)v.size();
 OMP_PARALLEL
 	{
 		vector< std::pair<POINT3D, double>> temp;
