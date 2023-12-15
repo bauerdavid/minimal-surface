@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <functional>
 #include <utility>
+#include <iostream>
 
 template<typename VecType, size_t N, typename T>
 class OperableVec {
@@ -139,14 +140,26 @@ public:
 		return *this;
 	}
 
+	friend std::ostream& operator<<(std::ostream& os, const OperableVec& vec){
+        os << "{";
+        for(int i=0; i<N; i++){
+            os << vec.data[i];
+            if(i<N-1){
+                os << ", ";
+            }
+        }
+        os << "}";
+    return os;
+}
+
 	T Sum() {
 		T sum(0);
 		std::for_each(data, data + N, [&sum](T val) {sum += val; });
 		return sum;
 	}
 
-	T Norm() {
-	    T square_sum(0);
+	double Norm() {
+	    double square_sum(0);
 	    std::for_each(data, data + N, [&square_sum](T val) {square_sum += val*val; });
 	    return sqrt(square_sum);
 	}
@@ -162,6 +175,8 @@ public:
 	operator std::vector<T>() {
 		return std::vector<T>(begin(), end());
 	}
+
+
 };
 
 template<typename OperableVecType, typename VecType2>
