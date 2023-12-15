@@ -85,8 +85,8 @@ void neg_to_minus1(sitk::Image& img) {
 }
 
 
-sitk::Image CalculatePhi(const sitk::Image& image, double beta, double alpha){
-	sitk::Image phi = sitk::Cast(sitk::GradientMagnitude(image, false), sitk::sitkFloat64);
+sitk::Image CalculatePhi(const sitk::Image& image, double beta, double alpha, bool useGradient){
+	sitk::Image phi = sitk::Cast((useGradient ? sitk::GradientMagnitude(image, false) : image), sitk::sitkFloat64);
 	vector<unsigned> size = image.GetSize();
 	int xs(size[0]), ys(size[1]), zs(size[2]);
 	double* phi_buffer = phi.GetBufferAsDouble();
@@ -201,4 +201,20 @@ std::vector<double> calculateOffsetFromRotation(std::vector<double> rotationMatr
 	std::vector<double> sample_origin;
 	std::transform(data_center.begin(), data_center.end(), sample_center.begin(), std::back_inserter(sample_origin), std::minus<double>());
 	return sample_origin;
+}
+
+Vec3<double> StandardizeVector(Vec3<double> vec){ //the element with the highest absolute value will be positive
+
+    double max_norm_val = abs(vec.x());
+	int max_norm_sign = sgn(vec.x());
+	if (abs(vec.y()) > max_norm_val) {
+		max_norm_val = abs(vec.y());
+		max_norm_sign = sgn(vec.y());
+	}
+	if (abs(vec.z()) > max_norm_val) {
+		max_norm_val = abs(vec.z());
+		max_norm_sign = sgn(vec.z());
+	}
+	vec *= max_norm_sign;
+	return vec;
 }

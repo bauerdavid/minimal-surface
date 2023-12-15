@@ -249,9 +249,9 @@ inline POINT3D point_to_representation(int x, int y, int z) {
 template<typename T>
 inline std::tuple<T, T, T> representation_to_point(POINT3D representation) {
 #ifdef STORE_POINT_AS_INTEGER
-	T x = representation >> (2 * 21);
-	T y = (representation >> 21) & 0b111111111111111111111;
-	T z = representation & 0b111111111111111111111;
+	T x = (T)(representation >> (2 * 21));
+	T y = (T)((representation >> 21) & 0b111111111111111111111);
+	T z = (T)(representation & 0b111111111111111111111);
 	return { x, y, z };
 #else
 	return { representation.x, representation.y, representation.z };
@@ -441,7 +441,7 @@ void cross_product(const std::vector<T> vec1, const std::vector<T> vec2, std::ve
 }
 
 template<typename T>
-std::vector<double> rotation_matrix_from_vectors(std::vector<T>& vec1, std::vector<T>& vec2) {
+std::vector<double> rotation_matrix_from_vectors(std::vector<T> vec1, std::vector<T> vec2) {
 	std::vector<T> vec1_sqr;
 	transform(vec1.begin(), vec1.end(), back_inserter(vec1_sqr), [](T& v) { return v * v; });
 	std::vector<T> vec2_sqr;
@@ -560,7 +560,7 @@ sitk::Image create_19_neighbors_SE() {
 	return se;
 }
 
-sitk::Image CalculatePhi(const sitk::Image& image, double beta = 14., double alpha = 0.01);
+sitk::Image CalculatePhi(const sitk::Image& image, double beta = 14., double alpha = 0.01, bool useGradient=true);
 
 template<sitk::PixelIDValueEnum pixelID>
 sitk::Image GetImageSlice(const sitk::Image& image, int direction, int slice) {
@@ -656,6 +656,8 @@ OMP_CRITICAL(bound_points_search)
 return bound_points;
 
 }
+
+Vec3<double> StandardizeVector(Vec3<double> vec);
 
 const std::vector<int> NEIGH6_OFFSET[] = {
 	std::vector<int>({-1, 0, 0}),
