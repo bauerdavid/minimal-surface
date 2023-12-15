@@ -10,12 +10,10 @@
 #include "szevent.h"
 #include "Utils.h"
 
-
+//#define ROTATED_DISTMAP_W_FM
 //#define DEBUG_CURVATURE
 #define DEBUG_STATES
 #define ITERATE_ROTATED
-
-#define MEETING_PLANE_FROM_INIT_POINTS
 
 namespace sitk = itk::simple;
 
@@ -60,8 +58,10 @@ protected:
 	int mMeetingPointsMin;
 	bool mPlaneFinalized;
 	double mMeetingPlaneOffset;
+	std::vector<double> mRotationMatrix;
 	bool mUsesCorrection;
 	double mCurrentDistance;
+	bool mInitialized = false;
 #ifdef DEBUG_CURVATURE
 	sitk::Image m_new_update[2];
 #endif
@@ -76,9 +76,10 @@ protected:
 	virtual void UpdateDistance(int i, double current_distance);
 	virtual void UpdateMeetPoints();
 	virtual void FitMeetingPlane();
-
+    bool mUseMeetingPoints = true;
 public:
-	virtual void Initialize(const sitk::Image& image, Vec3<double>& start_point, Vec3<double>& end_point, double beta, double alpha);
+	virtual void Initialize(const sitk::Image& image, Vec3<double>& start_point, Vec3<double>& end_point);
+	bool IsInitialized();
 	void InitializeMeetingPlaneFromInitPoints();
 	AreaEikonal Rotate(std::vector<double>& rotation_matrix, bool inverse = false) const;
 	bool IsDone() const;
@@ -87,12 +88,18 @@ public:
 	void CombineDistance(int slice, double p1_x, double p2_x);
 	void SmoothDistances();
 	virtual void Iterate();
-	void Calculate(const sitk::Image& image, Vec3<double>& point1, Vec3<double>& point2, double beta, double alpha);
+	void Calculate(const sitk::Image& image, Vec3<double>& point1, Vec3<double>& point2);
 	virtual void Calculate();
 	Vec3<double> GetMeetingPlaneCenter() const;
+	void SetMeetingPlaneCenter(Vec3<double>);
 	Vec3<double> GetMeetingPlaneNormal() const;
-	double GetMeetingPlaneOffset() const;
+    void SetMeetingPlaneNormal(Vec3<double>);
+    double GetMeetingPlaneOffset() const;
+    void UpdateMeetingPlaneOffset();
+    void UpdateRotationMatrix();
+    void UpdateMeetingPlaneInfo();
 	double GetCurrentDistance() const;
+	std::vector<double> GetRotationMatrix();
 	const sitk::Image& GetDistanceMap(int i) const;
 	const sitk::Image& GetCombinedDistanceMap() const;
 	const sitk::Image& GetPhiMap() const;
@@ -102,6 +109,8 @@ public:
 	std::vector<double> TransformPhysicalPointToContinuousIndex(const std::vector<double>& point) const;
 	std::vector<double> TransformContinuousIndexToPhysicalPoint(const std::vector<double>& point) const;
 	void SetUsesCorrection(bool useCorrection);
+	bool IsUsingMeetingPoints();
+	void SetUsingMeetingPoints(bool);
 	std::vector<Vec3<int>> ResolvePath(Vec3<int> point, int idx) const;
 };
 
@@ -177,8 +186,8 @@ public:
 			mPlaneFinalized = true;
 		}
 	}
-	void Initialize(const sitk::Image& image, Vec3<double>& start_point, Vec3<double>& end_point, double beta, double alpha) override {
-		AreaEikonal::Initialize(image, start_point, end_point, beta, alpha);
+	void Initialize(const sitk::Image& image, Vec3<double>& start_point, Vec3<double>& end_point) override {
+		AreaEikonal::Initialize(image, start_point, end_point);
 		CalculatedPhiMapEvent(mPhiMap, 0);
 		InitializedPhaseFieldMapEvent(mPhaseFieldMap[0], 0);
 		InitializedPhaseFieldMapEvent(mPhaseFieldMap[1], 1);

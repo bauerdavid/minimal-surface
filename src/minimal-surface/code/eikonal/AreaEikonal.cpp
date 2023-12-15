@@ -155,7 +155,7 @@ OMP_CRITICAL(fill_meeting_plane)
 		max_norm_sign = sgn(mMeetingPlaneNormal.z());
 	}
 	mMeetingPlaneNormal *= max_norm_sign;
-	mMeetingPlaneOffset = -(mMeetingPlaneCenter*mMeetingPlaneNormal).Sum();
+	UpdateMeetingPlaneInfo();
 
 	vector<double> sample_plane_normal = { 1, 0, 0 };
 	// calculate rotation between the two normals
@@ -218,6 +218,10 @@ void AreaEikonal::UpdateMeetingPlane() {
 	}
 }
 
+bool AreaEikonal::IsInitialized(){
+    return mInitialized;
+}
+
 void AreaEikonal::InitializeContainers(const sitk::Image& image) {
 	vector<uint32_t> size = image.GetSize();
 	mMeetingPointsMap = sitk::Image(size, sitk::sitkInt32);
@@ -238,25 +242,26 @@ void AreaEikonal::InitializeContainers(const sitk::Image& image) {
 	m_new_update[0] = sitk::Image(size, sitk::sitkUInt8);
 	m_new_update[1] = sitk::Image(size, sitk::sitkUInt8);
 #endif
+    mInitialized = true;
 }
 
 void AreaEikonal::InitializeDistanceMap(int idx, Vec3<double> center, int initialRadius) {
 	vector<uint32_t> size = mPhaseFieldMap[0].GetSize();
-	unsigned int spacex(size[0]), spacey(size[1]), spacez(size[2]); 
+	int spacex(size[0]), spacey(size[1]), spacez(size[2]);
 	int hs = initialRadius + 2;
 	mCurrentDistance = 0;
 	double* field_buffer = mPhaseFieldMap[idx].GetBufferAsDouble();
 	double* distance_buffer = mDistanceMap[idx].GetBufferAsDouble();
-	for (int zz = center.z() - hs; zz < center.z() + hs; ++zz) {
+	for (int zz = (int)center.z() - hs; zz < (int)center.z() + hs; ++zz) {
 		if (zz < 0 || zz >= spacez) continue;
-		for (int yy = center.y() - hs; yy < center.y() + hs; ++yy) {
+		for (int yy = (int)center.y() - hs; yy < (int)center.y() + hs; ++yy) {
 			if (yy < 0 || yy >= spacey) continue;
-			for (int xx = center.x() - hs; xx < center.x() + hs; ++xx) {
+			for (int xx = (int)center.x() - hs; xx < (int)center.x() + hs; ++xx) {
 				if (xx < 0 || xx >= spacex) continue;
-				int dx = xx - center.x(), dy = yy - center.y();
-				int dz = zz - center.z();
+				int dx = xx - (int)center.x(), dy = yy - (int)center.y();
+				int dz = zz - (int)center.z();
 				int dd = dx * dx + dy * dy + dz * dz;
-				if ((int)dd <= initialRadius * initialRadius) {
+				if (dd <= initialRadius * initialRadius) {
 					double dd_sqrt = sqrt(dd);
 					if (dd > (initialRadius - 1) * (initialRadius - 1)) {
 						field_buffer[xx + spacex * (yy + spacey * zz)] = initialRadius - dd_sqrt;
@@ -297,36 +302,26 @@ void AreaEikonal::InitializeMeetingPlaneFromInitPoints(){
     mPlaneFinalized = true;
     mMeetingPlaneNormal = mEndPoint - mStartPoint;
     mMeetingPlaneNormal /= mMeetingPlaneNormal.Norm();
-
-    double max_norm_val = abs(mMeetingPlaneNormal.x());
-	int max_norm_sign = sgn(mMeetingPlaneNormal.x());
-	if (abs(mMeetingPlaneNormal.y()) > max_norm_val) {
-		max_norm_val = abs(mMeetingPlaneNormal.y());
-		max_norm_sign = sgn(mMeetingPlaneNormal.y());
-	}
-	if (abs(mMeetingPlaneNormal.z()) > max_norm_val) {
-		max_norm_val = abs(mMeetingPlaneNormal.z());
-		max_norm_sign = sgn(mMeetingPlaneNormal.z());
-	}
-	mMeetingPlaneNormal *= max_norm_sign;
+    mMeetingPlaneNormal = StandardizeVector(mMeetingPlaneNormal);
 	mMeetingPlaneOffset = -(mMeetingPlaneCenter*mMeetingPlaneNormal).Sum();
 }
 
-void AreaEikonal::Initialize(const sitk::Image& image, Vec3<double>& startPoint, Vec3<double>& endPoint, double beta, double alpha) {
+void AreaEikonal::Initialize(const sitk::Image& phi, Vec3<double>& startPoint, Vec3<double>& endPoint) {
 	_PROFILING;
 	mMeetingPointsCount = 0;
     mStartPoint = startPoint;
 	mEndPoint = endPoint;
-#ifdef MEETING_PLANE_FROM_INIT_POINTS
-    InitializeMeetingPlaneFromInitPoints();
-#else
-	mMeetingPlaneCenter = Vec3<double>({ -1, -1, -1 });
-    mPlaneFinalized = false;
-	mMeetingPlaneOffset = 1e11;
-#endif
+    if(mUseMeetingPoints){
+        mMeetingPlaneCenter = Vec3<double>({ -1, -1, -1 });
+        mMeetingPlaneNormal = Vec3<double>({ -2, -2, -2 });
+        mPlaneFinalized = false;
+	    mMeetingPlaneOffset = 1e11;
+    } else {
+        InitializeMeetingPlaneFromInitPoints();
+    }
 	mIterationCount = 0;
-	mPhiMap = CalculatePhi(image, beta, alpha);
-	InitializeContainers(image);
+	mPhiMap = phi;
+	InitializeContainers(phi);
 	mActivePoints[0].clear();
 	mActivePoints[1].clear();
 	mInactivePoints[0].clear();
@@ -354,14 +349,15 @@ AreaEikonal AreaEikonal::Rotate(vector<double>& rotation_matrix, bool inverse) c
 	rotated.mMeetingPlaneOffset = 1e11;
 	rotated.mUsesCorrection = mUsesCorrection;
 	resample_img<sitk::sitkNearestNeighbor>(mMeetingPointsMap, rotated.mMeetingPointsMap, rotation_matrix, inverse);
-	sitk::Image mask = sitk::Image(mMeetingPointsMap.GetSize(), mDistanceMap[0].GetPixelID());
-	sitk::Image rotated_mask = sitk::Image();
-	resample_img<sitk::sitkNearestNeighbor>(mask, rotated_mask, rotation_matrix, inverse);
-	rotated_mask = sitk::Cast(sitk::BinaryErode(sitk::Cast(rotated_mask+1, sitk::sitkUInt8)), mDistanceMap[0].GetPixelID());
 	resample_img(mPhaseFieldMap[0], rotated.mPhaseFieldMap[0], rotation_matrix, inverse);
 	neg_to_minus1(rotated.mPhaseFieldMap[0]);
 	resample_img(mPhaseFieldMap[1], rotated.mPhaseFieldMap[1], rotation_matrix, inverse);
 	neg_to_minus1(rotated.mPhaseFieldMap[1]);
+#ifdef ROTATED_DISTMAP_W_FM
+    sitk::Image mask = sitk::Image(mMeetingPointsMap.GetSize(), mDistanceMap[0].GetPixelID());
+	sitk::Image rotated_mask = sitk::Image();
+	resample_img<sitk::sitkNearestNeighbor>(mask, rotated_mask, rotation_matrix, inverse);
+	rotated_mask = sitk::Cast(sitk::BinaryErode(sitk::Cast(rotated_mask+1, sitk::sitkUInt8)), mDistanceMap[0].GetPixelID());
 	resample_img<sitk::sitkLinear>(mDistanceMap[0], rotated.mDistanceMap[0], rotation_matrix, inverse);
 	neg_to_minus1(rotated.mDistanceMap[0]);
 	sitk::Image frozen = sitk::Cast(sitk::Greater(rotated_mask * rotated.mDistanceMap[0], 0), sitk::sitkUInt8);
@@ -372,6 +368,12 @@ AreaEikonal AreaEikonal::Rotate(vector<double>& rotation_matrix, bool inverse) c
 	frozen = sitk::Cast(sitk::Greater(rotated_mask * rotated.mDistanceMap[1], 0), sitk::sitkUInt8);
 	boundary_points = GetBoundaryPixels<sitk::sitkUInt8>(frozen, 1);
 	FMSigned::build(1, rotated.mDistanceMap[1], frozen, rotated.mDistanceMap[1], boundary_points);
+#else
+    resample_img<sitk::sitkLinear>(mDistanceMap[0], rotated.mDistanceMap[0], rotation_matrix, inverse, true);
+    neg_to_minus1(rotated.mDistanceMap[0]);
+	resample_img<sitk::sitkLinear>(mDistanceMap[1], rotated.mDistanceMap[1], rotation_matrix, inverse, true);
+	neg_to_minus1(rotated.mDistanceMap[1]);
+#endif
 	rotated.mSampleImage = resample_img(mCombinedDistanceMap, rotated.mCombinedDistanceMap, rotation_matrix, inverse, true);
 	neg_to_minus1(rotated.mCombinedDistanceMap);
 
@@ -396,7 +398,7 @@ AreaEikonal AreaEikonal::Rotate(vector<double>& rotation_matrix, bool inverse) c
 			pos = mPhiMap.TransformContinuousIndexToPhysicalPoint(pos);
 			pos = rotated.mSampleImage.TransformPhysicalPointToContinuousIndex(pos);
 #ifdef USE_VECTOR_AS_SET
-			rotated.mActivePoints[ii].push_back(point_to_representation(pos[0], pos[1], pos[2]));
+			rotated.mActivePoints[ii].push_back(point_to_representation((int)pos[0], (int)pos[1], (int)pos[2]));
 #else
 			mActivePoints[ii].insert(point_to_representation(pos[0], pos[1], pos[2]));
 #endif
@@ -407,7 +409,7 @@ AreaEikonal AreaEikonal::Rotate(vector<double>& rotation_matrix, bool inverse) c
 			pos = mPhiMap.TransformContinuousIndexToPhysicalPoint(pos);
 			pos = rotated.mSampleImage.TransformPhysicalPointToContinuousIndex(pos);
 #ifdef USE_VECTOR_AS_SET
-			rotated.mActivePoints[ii].push_back(point_to_representation(pos[0], pos[1], pos[2]));
+			rotated.mActivePoints[ii].push_back(point_to_representation((int)pos[0], (int)pos[1], (int)pos[2]));
 #else
 			mActivePoints[ii].insert(point_to_representation(pos[0], pos[1], pos[2]));
 #endif
@@ -846,11 +848,10 @@ void AreaEikonal::Iterate()
 {
 	_PROFILING;
 	// mAreaEikonal.m_field[i]
-#ifndef MEETING_PLANE_FROM_INIT_POINTS
-	if (++mIterationCount % REFRESH_ITERS == 0 && !mPlaneFinalized) {
+	if (mUseMeetingPoints && !mPlaneFinalized && ++mIterationCount > REFRESH_ITERS) {
+		mIterationCount = 0;
 		UpdateMeetingPlane();
 	}
-#endif
 	//Calculate the value of capital S
 	realnum min_capital_s = 1e-11;
 	vector<double> min_capital_s_vals(2);
@@ -886,8 +887,8 @@ OMP_PARALLEL_FOR_NUM_THREADS(2)
 	}
 	_UNBLOCK_PROFILING;
 }
-void AreaEikonal::Calculate(const sitk::Image& image, Vec3<double>& point1, Vec3<double>& point2, double beta, double alpha) {
-	Initialize(image, point1, point2, beta, alpha);
+void AreaEikonal::Calculate(const sitk::Image& image, Vec3<double>& point1, Vec3<double>& point2) {
+	Initialize(image, point1, point2);
 	Calculate();
 }
 void AreaEikonal::Calculate() {
@@ -924,16 +925,55 @@ OMP_PARALLEL_FOR
 void AreaEikonal::SetUsesCorrection(bool useCorrection) {
 	mUsesCorrection = useCorrection;
 }
+
+void AreaEikonal::SetUsingMeetingPoints(bool useMeetingPoints){
+    mUseMeetingPoints = useMeetingPoints;
+}
+
+bool AreaEikonal::IsUsingMeetingPoints(){
+    return mUseMeetingPoints;
+}
+
 Vec3<double> AreaEikonal::GetMeetingPlaneCenter() const {
 	return mMeetingPlaneCenter;
+}
+
+void AreaEikonal::SetMeetingPlaneCenter(Vec3<double> center){
+    mMeetingPlaneCenter = center;
+    if(mMeetingPlaneNormal.x() < -1){
+        return;
+    }
+    UpdateMeetingPlaneInfo();
 }
 
 Vec3<double> AreaEikonal::GetMeetingPlaneNormal() const {
 	return mMeetingPlaneNormal;
 }
 
+void AreaEikonal::SetMeetingPlaneNormal(Vec3<double> normal){
+    mMeetingPlaneNormal = normal;
+    if(mMeetingPlaneCenter.x() < 0){
+        return;
+    }
+    UpdateMeetingPlaneInfo();
+}
+
 double AreaEikonal::GetMeetingPlaneOffset() const {
 	return mMeetingPlaneOffset;
+}
+
+void AreaEikonal::UpdateMeetingPlaneOffset(){
+    mMeetingPlaneOffset = -(mMeetingPlaneCenter*mMeetingPlaneNormal).Sum();
+}
+
+void AreaEikonal::UpdateRotationMatrix(){
+    vector<double> meeting_plane_normal(mMeetingPlaneNormal);
+    mRotationMatrix = rotation_matrix_from_vectors<double>(vector<double>({ 1, 0, 0 }), meeting_plane_normal);
+}
+
+void AreaEikonal::UpdateMeetingPlaneInfo(){
+    UpdateMeetingPlaneOffset();
+    UpdateRotationMatrix();
 }
 
 const sitk::Image& AreaEikonal::GetPhiMap() const {
@@ -952,6 +992,14 @@ const sitk::Image& AreaEikonal::GetSampleImage() const
 double AreaEikonal::GetCurrentDistance() const {
 	return mCurrentDistance;
 }
+
+vector<double> AreaEikonal::GetRotationMatrix() {
+    if(mRotationMatrix.size() == 0){
+        cout << "Rotation matrix missing!!!" << endl;
+    }
+    return mRotationMatrix;
+}
+
 const sitk::Image& AreaEikonal::GetDistanceMap(int i) const {
 	return mDistanceMap[i];
 }

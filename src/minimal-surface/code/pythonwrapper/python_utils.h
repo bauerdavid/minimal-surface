@@ -1,3 +1,4 @@
+#pragma once
 #include <Python.h>
 #include "arg_format_string.h"
 #include "c_npy_type.h"
@@ -55,12 +56,11 @@ PyObject* sitk_2_np(sitk::Image& img){
 		import_array();
 	}
     std::vector<unsigned> size = img.GetSize();
-    int ndims = size.size();
+    int ndims = int(size.size());
     if (ndims == 0) {
         std::cout << "empty image" << std::endl;
         return NULL;
     }
-    int n_pixels = 1;
     npy_intp* image_dims = (npy_intp*)malloc(3 * sizeof(npy_intp));
     if (image_dims == NULL) {
         PyErr_NoMemory();
@@ -68,7 +68,6 @@ PyObject* sitk_2_np(sitk::Image& img){
     }
     for (int i = 0; i < ndims; i++) {
         image_dims[i] = size[ndims - i - 1];
-        n_pixels *= image_dims[i];
     }
     if (ndims < 3)
         image_dims[2] = 1;
@@ -87,7 +86,7 @@ PyObject* sitk_2_np(const sitk::Image& img){
 		import_array();
 	}
     std::vector<unsigned> size = img.GetSize();
-    int ndims = size.size();
+    int ndims = (int)size.size();
     if (ndims == 0) {
         std::cout << "empty image" << std::endl;
         return NULL;
@@ -100,7 +99,7 @@ PyObject* sitk_2_np(const sitk::Image& img){
     }
     for (int i = 0; i < ndims; i++) {
         image_dims[i] = size[ndims - i - 1];
-        n_pixels *= image_dims[i];
+        n_pixels *= (int)image_dims[i];
     }
     if (ndims < 3)
         image_dims[2] = 1;
@@ -117,7 +116,6 @@ PyObject* sitk_2_np(const sitk::Image& img){
 
 template<sitk::PixelIDValueEnum pixelID>
 sitk::Image np_2_sitk(PyObject* arr_obj){
-    std::cout << "getting array info" << std::endl;
     int ndim = PyArray_NDIM(arr_obj);
     npy_intp* dims = PyArray_DIMS(arr_obj);
     int type = PyArray_TYPE(arr_obj);
@@ -126,15 +124,11 @@ sitk::Image np_2_sitk(PyObject* arr_obj){
     int n_pixels = 1;
     for(int i=0; i< ndim; i++){
         im_size.push_back(dims[ndim-1-i]);
-        n_pixels *= dims[ndim-1-i];
+        n_pixels *= (int)dims[ndim-1-i];
     }
-    std::cout << "constructing image" << std::endl;
     sitk::Image img(im_size, pixelID);
-    std::cout << "getting buffer" << std::endl;
     CType<pixelID>::Type* buffer = PixelManagerTrait<pixelID>::GetBuffer(img);
-    std::cout << "copying data" << std::endl;
     memcpy(buffer, data, n_pixels*sizeof(CType<pixelID>::Type));
-    std::cout << "array converted into image" << std::endl;
     return img;
 }
 

@@ -5,6 +5,7 @@
 #include "SimpleITK.h"
 #include "szevent.h"
 #include <functional>
+#include <memory>
 
 
 
@@ -37,6 +38,9 @@ class MinimalSurfaceEstimator: public EventSource
 	PlanePhaseFieldES mInitialContourCalculator;
 	TransportFunctionES mTransportFunctionCalculator;
 	std::function<sitk::Image(sitk::Image&, sitk::Image&)> mInitialContourCalculatorFunc;
+	std::unique_ptr<sitk::Image> mTempInitContour;
+	int mTransportInitPlaneSlice = -1;
+	std::vector<double> mRotationMatrix;
 public:
 	DEFINE_EVENT_TYPE(image_transform, std::vector<double>&, std::vector<double>&);
 	DEFINE_EVENT_TYPE(vector, std::vector<double>&);
@@ -45,7 +49,14 @@ public:
 	MinimalSurfaceEstimator();
 	~MinimalSurfaceEstimator();
 	std::vector<std::vector<Vec3<int>>> mMinimalPaths[2];
-	void Calculate(sitk::Image, Vec3<double> point1, Vec3<double> point2, double beta, double alpha = 0.01, int maxIterations=10000);
+	sitk::Image GetTransportSliceFromPoints(sitk::Image, Vec3<double>, Vec3<double>);
+	void CalculateEikonal(sitk::Image, Vec3<double>, Vec3<double>);
+	sitk::Image CalculateEikonalAndTransportInit(sitk::Image, sitk::Image, Vec3<double>, Vec3<double>);
+    sitk::Image CalculateEikonalAndTransportInit(sitk::Image, Vec3<double>, Vec3<double>);
+    void CalculateTransportFunction(sitk::Image& initial_contour, int maxIterations);
+	void SetTransportInitSlice(const sitk::Image&);
+    void Calculate(sitk::Image, sitk::Image, Vec3<double> point1, Vec3<double> point2, int maxIterations=10000);
+    void Calculate(sitk::Image, Vec3<double> point1, Vec3<double> point2, int maxIterations=10000);
 	void HookStageInitializationEvent(eStageEnum stage, basic_callback_type& handler);
 	void HookStageFinishedEvent(eStageEnum stage, basic_callback_type& handler);
 	void HookStageIterationEvent(eStageEnum stage, iter_callback_type& handler);
@@ -54,10 +65,13 @@ public:
 	void HookCalculatedPhiMapEvent(data_callback_type& handler);
 	void HookUpdateMeetingPlaneEvent(AreaEikonalES::plane_update_callback_type& handler);
 	void SetUsesCorrection(bool useCorrection);
+	void SetUsingMeetingPoints(bool);
 	const AreaEikonalES& GetAreaEikonal() const;
 	const AreaEikonalES& GetRotatedAreaEikonal() const;
 	const PlanePhaseFieldES& GetInitialContourCalculator() const;
 	const TransportFunctionES& GetTransportFunctionCalculator() const;
+	const sitk::Image& GetCombinedDistanceMap() const;
+	sitk::Image GetTempInitContour() const;
 	DEFINE_HOOK(ImageTransformCalculatedEvent, image_transform);
 	DEFINE_HOOK(PlaneCenterCalculatedEvent, vector);
 	sitk::Image CalculateInitialContourFromPhaseField(sitk::Image&, sitk::Image&);

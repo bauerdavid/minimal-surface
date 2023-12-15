@@ -40,11 +40,17 @@ cdef extern from "Vec.h":
 cdef extern from "SimpleITK.h" namespace "itk::simple":
     cdef enum PixelIDValueEnum:
         sitkFloat64 = 9
+    ctypedef PixelIDValueEnum sitkFloat64_ "sitk::sitkFloat64"
     cdef cppclass Image:
         Image()
         Image(int, int, PixelIDValueEnum)
         Image(vector[unsigned int], PixelIDValueEnum)
         double* GetBufferAsDouble()
+    cdef Image Cast(Image, PixelIDValueEnum)
+
+cdef extern from "python_utils.h":
+    cdef Image np_2_sitk[PID](object)
+    cdef object sitk_2_np(Image)
 
 cdef extern from "pythonwrapper/PyCallableWrapper.hpp":
     cdef cppclass CallbackWrapper_0A:
@@ -96,16 +102,32 @@ cdef extern from "MinimalSurfaceEstimator.h":
         void HookStageUpdatedEvent(eStageEnum, data_callback_type&, eDataEnum)
         void HookImageTransformCalculatedEvent(image_transform_callback_type&)
         void HookPlaneCenterCalculatedEvent(vector_callback_type&)
+        void HookIterationEvent(iter_callback_type&)
         void SetUsesCorrection(bool)
-        void Calculate(Image image, Vec3[double] point1, Vec3[double] point2, double beta, double alpha, int maxIterations) nogil
+        void SetUsingMeetingPoints(bool)
+        void Calculate(Image, Image, Vec3[double], Vec3[double], int) nogil
+        void Calculate(Image, Vec3[double], Vec3[double], int) nogil
         void SetInitialContourCalculatorFunc(init_contour_callback_type)
         const TransportFunctionES& GetTransportFunctionCalculator() nogil const
+        Image GetTransportSliceFromPoints(Image, Vec3[double], Vec3[double]) nogil
+        Image CalculateEikonalAndTransportInit(Image, Image, Vec3[double], Vec3[double]) nogil
+        void SetTransportInitSlice(Image) nogil
+        Image GetCombinedDistanceMap() nogil
+        Image GetTempInitContour() nogil
     cdef vector[Vec3[int]] ResolvePath(Vec3[int], const Image&) nogil
 
 cdef class MinimalSurfaceCalculator:
     cdef MinimalSurfaceEstimator calculator
     def __cinit__(self):
         ...
+
+    cpdef void hook_iteration_event(self, object callback):
+        if not callable(callback):
+            print("callback is not callable!")
+            return
+        cdef iter_callback_wrapper wrapper = iter_callback_wrapper(callback)
+        self.calculator.HookIterationEvent(<iter_callback_type>wrapper)
+
     cpdef void hook_stage_init_event(self, int stage, object callback):
         if not callable(callback):
             print("callback is not callable!")
@@ -183,18 +205,40 @@ cdef class MinimalSurfaceCalculator:
 
     cpdef np.ndarray[np.float_t, ndim=3] calculate(
             self,
+            np.ndarray[np.float_t, ndim=3] phi,
             np.ndarray[np.float_t, ndim=3] image,
             np.ndarray[np.float_t, ndim=1] point1,
             np.ndarray[np.float_t, ndim=1] point2,
             bool use_correction,
-            double beta,
-            double alpha,
-            int max_iterations=10000
+            int max_iterations=10000,
     ):
+        cdef int i
+        cdef Image sitk_image = np_2_sitk[sitkFloat64_](image)
+        cdef Image sitk_phi = np_2_sitk[sitkFloat64_](phi)
+        cdef Vec3[double] point1_vec
+        cdef Vec3[double] point2_vec
+        cdef double* point1_data = point1_vec.begin()
+        cdef double* point2_data = point2_vec.begin()
+        for i in range(3):
+            point1_data[i] = point1[i]
+            point2_data[i] = point2[i]
+        self.calculator.SetUsesCorrection(use_correction)
+        with nogil:
+            self.calculator.Calculate(sitk_phi, sitk_image, point1_vec, point2_vec, max_iterations)
+        cdef const double* transport_buffer = self.calculator.GetTransportFunctionCalculator().GetTransportFunction().GetBufferAsDouble()
+        cdef np.ndarray[np.float_t, ndim=3] output = np.empty((image.shape[0], image.shape[1], image.shape[2]), dtype=float)
+        cdef double[:, :, :] out_view = output
+        memcpy(&out_view[0, 0, 0], transport_buffer, image.size * sizeof(double))
+        return output
+
+    cpdef void init_transport_slice(self,
+            np.ndarray[np.float_t, ndim=3] image,
+            np.ndarray[np.float_t, ndim=1] point1,
+            np.ndarray[np.float_t, ndim=1] point2):
         cdef int i
         cdef vector[unsigned int] im_size
         for i in range(3):
-            im_size.push_back(image.shape[2-i])
+            im_size.push_back(<unsigned int>image.shape[2-i])
         cdef Image sitk_image = Image(im_size, sitkFloat64)
         cdef double[:, :, :] image_data = image
         memcpy(sitk_image.GetBufferAsDouble(), &image_data[0, 0, 0], image.size*sizeof(double))
@@ -205,11 +249,46 @@ cdef class MinimalSurfaceCalculator:
         for i in range(3):
             point1_data[i] = point1[i]
             point2_data[i] = point2[i]
+        cdef Image transport_slice
+        with nogil:
+            transport_slice = self.calculator.GetTransportSliceFromPoints(sitk_image, point1_vec, point2_vec)
+            self.calculator.SetTransportInitSlice(transport_slice)
+
+    cpdef void calc_eikonal_and_transport_init(
+            self,
+            np.ndarray[np.float_t, ndim=3] phi,
+            np.ndarray[np.float_t, ndim=3] image,
+            np.ndarray[np.float_t, ndim=1] point1,
+            np.ndarray[np.float_t, ndim=1] point2,
+            bool use_correction,
+    ):
+        cdef int i
+        cdef Image sitk_phi = np_2_sitk[sitkFloat64_](phi)
+        cdef Image sitk_image = np_2_sitk[sitkFloat64_](image) if image is not None else sitk_phi
+        cdef Vec3[double] point1_vec
+        cdef Vec3[double] point2_vec
+        cdef double* point1_data = point1_vec.begin()
+        cdef double* point2_data = point2_vec.begin()
+        for i in range(3):
+            point1_data[i] = point1[i]
+            point2_data[i] = point2[i]
+        cdef Image transport_slice
         self.calculator.SetUsesCorrection(use_correction)
         with nogil:
-            self.calculator.Calculate(sitk_image, point1_vec, point2_vec, beta, alpha, max_iterations)
-        cdef const double* transport_buffer = self.calculator.GetTransportFunctionCalculator().GetTransportFunction().GetBufferAsDouble()
-        cdef np.ndarray[np.float_t, ndim=3] output = np.empty((image.shape[0], image.shape[1], image.shape[2]), dtype=float)
-        cdef double[:, :, :] out_view = output
-        memcpy(&out_view[0, 0, 0], transport_buffer, image.size * sizeof(double))
-        return output
+            transport_slice = self.calculator.CalculateEikonalAndTransportInit(sitk_phi, sitk_image, point1_vec, point2_vec)
+            self.calculator.SetTransportInitSlice(transport_slice)
+
+    cpdef void set_using_meeting_points(self, bool use_meeting_points):
+        self.calculator.SetUsingMeetingPoints(use_meeting_points)
+
+    cpdef object get_distance_map(self):
+        cdef Image distance_map = self.calculator.GetCombinedDistanceMap()
+        cdef object arr = sitk_2_np(distance_map).copy()
+        return arr
+
+    cpdef object get_init_plane(self):
+        cdef Image init_plane = Cast(self.calculator.GetTempInitContour(), sitkFloat64)
+        print("init_plane")
+        cdef object arr = sitk_2_np(init_plane).copy()
+        print("arr")
+        return arr
