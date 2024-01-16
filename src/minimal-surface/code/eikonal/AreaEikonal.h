@@ -1,7 +1,5 @@
 #pragma once
 #include "commontype.h"
-#include "ImageOp.h"
-
 #include <vector>
 #include <sitkImage.h>
 #include <stack>
@@ -22,7 +20,7 @@ namespace sitk = itk::simple;
 
 #ifndef PI
 #define PI 3.1415926536
-#endif PI
+#endif
 
 
 class AreaEikonal

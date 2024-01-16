@@ -1,4 +1,3 @@
-#include "stdafx.h"
 #include "AreaEikonal.h"
 #include "Utils.h"
 #include "math.h"
@@ -504,7 +503,7 @@ OMP_PARALLEL_NUM_THREADS(n_threads/2)
 		temp.reserve(act_set.size()/(n_threads/2));
 OMP_FOR_REDUCTION(+, n_outliers)
 #ifdef USE_VECTOR_AS_SET
-		for (int i = 0; i < act_set.size(); i++)
+		for (int i = 0; i < (int)act_set.size(); i++)
 		{
 			{
 				POINT3D pn = act_set[i];
@@ -550,9 +549,9 @@ OMP_FOR_REDUCTION(+, n_outliers)
 	for (int i = 0; i < n_top; i++) {
 		double next_elem(DBL_MAX);
 		int heap_idx;
-		for (int h = 0; h < heaps.size(); h++) {
+		for (size_t h = 0; h < heaps.size(); h++) {
 			int idx = indices[h];
-			if (idx >= heaps[h].size()) continue;
+			if (idx >= (int)heaps[h].size()) continue;
 			double top = heaps[h][idx];
 			if (top < next_elem) {
 				heap_idx = h;
@@ -605,8 +604,6 @@ realnum AreaEikonal::UpdateVelo(int i, double S) {
 #else
 	changed_velo.reserve(act_set.size());
 #endif
-	int c = 0;
-
 	double maxv(0);
 
 OMP_PARALLEL_NUM_THREADS(n_threads/2)
@@ -614,7 +611,7 @@ OMP_PARALLEL_NUM_THREADS(n_threads/2)
 		double temp_maxv(0);
 OMP_FOR
 #ifdef USE_VECTOR_AS_SET
-		for (int i = 0; i < act_set.size(); i++)
+		for (int i = 0; i < (int)act_set.size(); i++)
 		{
 			{
 				POINT3D pn = act_set[i];
@@ -702,7 +699,7 @@ OMP_PARALLEL_NUM_THREADS(n_threads/2)
 	{
 OMP_FOR
 #ifdef USE_VECTOR_AS_SET
-		for (int i = 0; i < changed_velo.size(); i++) {
+		for (int i = 0; i < (int)changed_velo.size(); i++) {
 
 			POINT3D pn = changed_velo[i].first;
 			double velo = changed_velo[i].second;
@@ -754,7 +751,6 @@ void AreaEikonal::UpdateDistance(int idx, realnum current_distance) {
 	double* distance_buffer = mDistanceMap[idx].GetBufferAsDouble();
 
 	// mAreaEikonal.m_distance[(i+1)&1]
-	double* counterd_buffer = mDistanceMap[(idx + 1) & 1].GetBufferAsDouble();
 	//unsigned int* connectivity_buffer = m_distance_connectivity.GetBufferAsUInt32();
 	vector<unsigned> size = mPhaseFieldMap[idx].GetSize();
 	int xs = size[0], ys = size[1], zs = size[2];
@@ -770,7 +766,7 @@ OMP_PARALLEL_NUM_THREADS(n_threads/2)
 
 OMP_FOR_NOWAIT
 #ifdef USE_VECTOR_AS_SET
-		for (int i = 0; i < changed_velo.size(); i++) {
+		for (int i = 0; i < (int)changed_velo.size(); i++) {
 			POINT3D pn = changed_velo[i].first;
 #else
 		for (int b = 0; b < changed_velo.bucket_count(); b++)
@@ -837,12 +833,20 @@ bool AreaEikonal::IsDone() const {
 	int xs = size[0], ys = size[1], zs = size[2];
 	const double* dist0_buffer = mDistanceMap[0].GetBufferAsDouble();
 	const double* dist1_buffer = mDistanceMap[1].GetBufferAsDouble();
-OMP_PARALLEL_FOR
+	bool is_done = true;
+OMP_PARALLEL
+{
+	OMP_FOR
 	for (int zyx = 0; zyx < zs*ys*xs; zyx++) {
-		if (dist0_buffer[zyx] < 0 && dist1_buffer[zyx] < 0)
-			return false;
+		#pragma omp cancellation point for
+		if (dist0_buffer[zyx] < 0 && dist1_buffer[zyx] < 0){
+			is_done = false;
+			#pragma omp cancel for
+		}
 	}
-	return true;
+}
+	
+	return is_done;
 }
 void AreaEikonal::Iterate()
 {

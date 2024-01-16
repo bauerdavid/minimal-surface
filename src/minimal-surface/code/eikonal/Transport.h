@@ -18,7 +18,7 @@ struct abs_comparator {
 	typedef _Ty _SECOND_ARGUMENT_TYPE_NAME;
 	typedef bool _RESULT_TYPE_NAME;
 	static constexpr Comparator comp{};
-	_NODISCARD constexpr bool operator()(const _Ty& _Left, const _Ty& _Right) const {
+	[[nodiscard]] constexpr bool operator()(const _Ty& _Left, const _Ty& _Right) const {
 		return abs_comparator::comp(abs(_Left), abs(_Right));
 	}
 };

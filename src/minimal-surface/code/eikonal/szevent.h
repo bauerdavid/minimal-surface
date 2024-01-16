@@ -23,6 +23,12 @@ namespace sz
 			m_handlerId = ++m_handlerIdCounter;
 		}
 
+		explicit event_handler(handler_func_type&& handlerFunc)
+			: m_handlerFunc(handlerFunc)
+		{
+			m_handlerId = ++m_handlerIdCounter;
+		}
+
 		// copy constructor
 		event_handler(const event_handler& src)
 			: m_handlerFunc(src.m_handlerFunc), m_handlerId(src.m_handlerId)
@@ -141,7 +147,21 @@ namespace sz
 			return handler.id();
 		}
 
+		typename handler_type::handler_id_type add(handler_type&& handler)
+		{
+			std::lock_guard<std::mutex> lock(m_handlersLocker);
+
+			m_handlers.push_back(handler);
+
+			return handler.id();
+		}
+
 		inline typename handler_type::handler_id_type add(const typename handler_type::handler_func_type& handler)
+		{
+			return add(handler_type(handler));
+		}
+
+		inline typename handler_type::handler_id_type add(const typename handler_type::handler_func_type&& handler)
 		{
 			return add(handler_type(handler));
 		}
@@ -197,7 +217,17 @@ namespace sz
 			return add(handler);
 		}
 
+		inline typename handler_type::handler_id_type operator+=(handler_type&& handler)
+		{
+			return add(handler);
+		}
+
 		inline typename handler_type::handler_id_type operator+=(const typename handler_type::handler_func_type& handler)
+		{
+			return add(handler);
+		}
+
+		inline typename handler_type::handler_id_type operator+=(typename handler_type::handler_func_type&& handler)
 		{
 			return add(handler);
 		}
@@ -239,6 +269,6 @@ namespace sz
 #define EVENT_TYPE(ev) ev##_event_type
 #define CALLBACK_TYPE(ev) ev##_callback_type
 #define DEFINE_EVENT_TYPE(ev, ...) typedef sz::event<__VA_ARGS__> ev##_event_type; typedef ev##_event_type::handler_type::handler_func_type ev##_callback_type;
-#define DEFINE_HOOK(event_name, event_type) void Hook##event_name(CALLBACK_TYPE(event_type)& handler) {event_name += handler;}
+#define DEFINE_HOOK(event_name, event_type) void Hook##event_name(const CALLBACK_TYPE(event_type)& handler) {event_name += handler;} void Hook##event_name(CALLBACK_TYPE(event_type)&& handler) {event_name += handler;}
 
 #endif // __SZEVENT_H__

@@ -14,6 +14,10 @@
 #include <unordered_set>
 #include <stack>
 #include <utility>
+#include <omp.h>
+#include <functional>
+#include <vector>
+#include <cfloat>
 
 #define BIG_NUMBER 1e11
 
@@ -31,6 +35,7 @@
 #define OMP_FOR_REDUCTION(op, operand)
 #define OMP_PARALLEL_FOR_REDUCTION(op, operand)
 #else
+#ifdef _MSC_VER
 #define OMP_PARALLEL_FOR __pragma(omp parallel for)
 #define OMP_PARALLEL __pragma(omp parallel)
 #define OMP_FOR __pragma(omp for)
@@ -42,6 +47,20 @@
 #define OMP_PARALLEL_NUM_THREADS(n_threads) __pragma(omp parallel num_threads(n_threads))
 #define OMP_FOR_REDUCTION(op, operand) __pragma(omp for reduction(op: operand))
 #define OMP_PARALLEL_FOR_REDUCTION(op, operand) __pragma(omp parallel for reduction(op: operand))
+#else
+#define STRINGIFY(str) #str
+#define OMP_PARALLEL_FOR _Pragma(STRINGIFY(omp parallel for))
+#define OMP_PARALLEL _Pragma(STRINGIFY(omp parallel))
+#define OMP_FOR _Pragma(STRINGIFY(omp for))
+#define OMP_FOR_NOWAIT _Pragma(STRINGIFY(omp for nowait))
+#define OMP_CRITICAL(section_name) _Pragma(STRINGIFY(omp critical(section_name)))
+#define OMP_ATOMIC _Pragma(STRINGIFY(omp atomic))
+#define OMP_CRITICAL_NO_TAG _Pragma(STRINGIFY(omp critical))
+#define OMP_PARALLEL_FOR_NUM_THREADS(n_threads) _Pragma(STRINGIFY(omp parallel for num_threads(n_threads)))
+#define OMP_PARALLEL_NUM_THREADS(n_threads) _Pragma(STRINGIFY(omp parallel num_threads(n_threads)))
+#define OMP_FOR_REDUCTION(op, operand) _Pragma(STRINGIFY(omp for reduction(op: operand)))
+#define OMP_PARALLEL_FOR_REDUCTION(op, operand) _Pragma(STRINGIFY(omp parallel for reduction(op: operand)))
+#endif
 #endif
 
 #define USE_VECTOR_AS_SET
@@ -127,7 +146,7 @@ public:
 			<< (info.mean_execution() / 1e6) << "|" << std::endl;
 
 		auto& child_names = info.children;
-		for (auto& it = child_names.begin(); it != child_names.end(); it++) {
+		for (auto it = child_names.begin(); it != child_names.end(); it++) {
 			std::string child_name = *it;
 			if (child_name == "__BLOCK__") continue;
 			print_children(os, child_name, offset + 1);
@@ -209,6 +228,10 @@ static inline std::string methodName(const std::string& prettyFunction)
 
 	return no_template.substr(begin, end) + "()";
 }
+
+#ifndef __FUNCSIG__
+#define __FUNCSIG__ __PRETTY_FUNCTION__
+#endif
 
 #define __METHOD_NAME__ methodName(__FUNCSIG__)
 #define _SUB_PROFILE(name) profiler name##_profiler(#name, !profile_manager::is_blocked())
@@ -465,21 +488,11 @@ std::vector<double> rotation_matrix_from_vectors(std::vector<T> vec1, std::vecto
 					   (v[0] * v[2]),				 (v[1] * v[2]), (-v[0] * v[0] - v[1] * v[1]) });
 	transform(kmat_2.begin(), kmat_2.end(), kmat_2.begin(), [c, norm](T& val) {return val * ((1 - c) / (norm * norm)); });
 	std::vector<double> rotation_matrix = std::vector<double>(9);
-	transform(kmat_plus_eye.begin(), kmat_plus_eye.end(), kmat_2.begin(), rotation_matrix.begin(), plus<double>());
+	transform(kmat_plus_eye.begin(), kmat_plus_eye.end(), kmat_2.begin(), rotation_matrix.begin(), std::plus<double>());
 	return rotation_matrix;
 }
 
 std::vector<unsigned> find_rotated_size(const std::vector<unsigned int>& original_size, const std::vector<double>& rotation_matrix);
-
-template
-<sitk::InterpolatorEnum interpolator = sitk::sitkLinear>
-sitk::Image resample_img(sitk::Image src, sitk::Image& dst, const std::vector<double>& rotation_matrix, bool inverse = false, bool useNearestNeighborExtrapolator = false) {
-	std::vector<unsigned> data_size = src.GetSize();
-	std::vector<unsigned> sample_size = find_rotated_size(data_size, rotation_matrix);
-	return resample_img<interpolator>(src, dst, rotation_matrix, sample_size, inverse, useNearestNeighborExtrapolator);
-}
-
-std::vector<double> calculateOffsetFromRotation(std::vector<double> rotationMatrix, std::vector<unsigned> imageSize);
 
 template
 <sitk::InterpolatorEnum interpolator = sitk::sitkLinear>
@@ -507,6 +520,16 @@ sitk::Image resample_img(sitk::Image src, sitk::Image& dst, const std::vector<do
 	dst = sitk::Resample(src, sample_img, sitk::Transform(), interpolator, -1.0, sitk::sitkUnknown, useNearestNeighborExtrapolator);
 	return sample_img;
 }
+
+template
+<sitk::InterpolatorEnum interpolator = sitk::sitkLinear>
+sitk::Image resample_img(sitk::Image src, sitk::Image& dst, const std::vector<double>& rotation_matrix, bool inverse = false, bool useNearestNeighborExtrapolator = false) {
+	std::vector<unsigned> data_size = src.GetSize();
+	std::vector<unsigned> sample_size = find_rotated_size(data_size, rotation_matrix);
+	return resample_img<interpolator>(src, dst, rotation_matrix, sample_size, inverse, useNearestNeighborExtrapolator);
+}
+
+std::vector<double> calculateOffsetFromRotation(std::vector<double> rotationMatrix, std::vector<unsigned> imageSize);
 
 
 void save_image(std::string filename, const sitk::Image& img);
@@ -564,17 +587,17 @@ sitk::Image CalculatePhi(const sitk::Image& image, double beta = 14., double alp
 
 template<sitk::PixelIDValueEnum pixelID>
 sitk::Image GetImageSlice(const sitk::Image& image, int direction, int slice) {
-	vector<unsigned> size = image.GetSize();
+	std::vector<unsigned> size = image.GetSize();
 	int idxs[3];
 	idxs[direction] = slice;
 	int loop_direction1 = direction == 0 ? 1 : 0;
 	int loop_direction2 = direction == 2 ? 1 : 2;
 	sitk::Image slice_image(size[loop_direction1], size[loop_direction2], image.GetPixelID());
-	const CType<pixelID>::Type* input_buffer = PixelManagerTrait<pixelID>::GetBuffer(image);
-	CType<pixelID>::Type* slice_buffer = PixelManagerTrait<pixelID>::GetBuffer(slice_image);
+	const typename CType<pixelID>::Type* input_buffer = PixelManagerTrait<pixelID>::GetBuffer(image);
+	typename CType<pixelID>::Type* slice_buffer = PixelManagerTrait<pixelID>::GetBuffer(slice_image);
 
-	for (int i = 0; i < size[loop_direction2]; i++) {
-		for (int j = 0; j < size[loop_direction1]; j++) {
+	for (int i = 0; i < (int)size[loop_direction2]; i++) {
+		for (int j = 0; j < (int)size[loop_direction1]; j++) {
 			idxs[loop_direction1] = j;
 			idxs[loop_direction2] = i;
 			BUF_IDX2D(slice_buffer, size[loop_direction1], size[loop_direction2], j, i) = BUF_IDX3D(input_buffer, size[0], size[1], size[2], idxs[0], idxs[1], idxs[2]);
@@ -587,7 +610,7 @@ template<sitk::PixelIDValueEnum pixelID>
 void DrawEllipse(sitk::Image& image, int radiusX, int radiusY, int eCenterX, int eCenterY, typename CType<pixelID>::Type value) {
 	int height = image.GetHeight();
 	int width = image.GetWidth();
-	CType<pixelID>::Type* image_buffer = PixelManagerTrait<pixelID>::GetBuffer(image);
+	typename CType<pixelID>::Type* image_buffer = PixelManagerTrait<pixelID>::GetBuffer(image);
 	int hh = radiusY * radiusY;
 	int ww = radiusX * radiusX;
 	int hhww = hh * ww;
@@ -625,7 +648,7 @@ sitk::Image SmartSigmoid(const sitk::Image& image, double qMax = 0.95, double qM
 template<sitk::PixelIDValueEnum pixelIdValueEnum>
 std::vector<POINT3D> GetBoundaryPixels(const sitk::Image& image, typename CType<pixelIdValueEnum>::Type foreground_value = 1) {
 	auto buffer = PixelManagerTrait<pixelIdValueEnum>::GetBuffer(image);
-	vector<unsigned> size = image.GetSize();
+	std::vector<unsigned> size = image.GetSize();
 	int xs(size[0]), ys(size[1]), zs(size[2]);
 	std::vector<POINT3D> bound_points;
 OMP_PARALLEL

@@ -1,6 +1,7 @@
 #pragma once
 #include "PlanePhaseField.h"
 #include "AreaEikonal.h"
+#include "Transport.h"
 #include "Vec.h"
 #include "SimpleITK.h"
 #include "szevent.h"
@@ -57,13 +58,20 @@ public:
 	void SetTransportInitSlice(const sitk::Image&);
     void Calculate(sitk::Image, sitk::Image, Vec3<double> point1, Vec3<double> point2, int maxIterations=10000);
     void Calculate(sitk::Image, Vec3<double> point1, Vec3<double> point2, int maxIterations=10000);
-	void HookStageInitializationEvent(eStageEnum stage, basic_callback_type& handler);
-	void HookStageFinishedEvent(eStageEnum stage, basic_callback_type& handler);
-	void HookStageIterationEvent(eStageEnum stage, iter_callback_type& handler);
-	void HookStageUpdatedEvent(eStageEnum stage, data_callback_type& handler, eDataEnum dataType = Default);
-	void HookStageDataInitializedEvent(eStageEnum stage, data_callback_type& handler, eDataEnum dataType = Default);
-	void HookCalculatedPhiMapEvent(data_callback_type& handler);
-	void HookUpdateMeetingPlaneEvent(AreaEikonalES::plane_update_callback_type& handler);
+	void HookStageInitializationEvent(eStageEnum stage, const basic_callback_type& handler);
+	void HookStageInitializationEvent(eStageEnum stage, basic_callback_type&& handler);
+	void HookStageFinishedEvent(eStageEnum stage, const basic_callback_type& handler);
+	void HookStageFinishedEvent(eStageEnum stage, basic_callback_type&& handler);
+	void HookStageIterationEvent(eStageEnum stage, const iter_callback_type& handler);
+	void HookStageIterationEvent(eStageEnum stage, iter_callback_type&& handler);
+	void HookStageUpdatedEvent(eStageEnum stage, const data_callback_type& handler, eDataEnum dataType = Default);
+	void HookStageUpdatedEvent(eStageEnum stage, data_callback_type&& handler, eDataEnum dataType = Default);
+	void HookStageDataInitializedEvent(eStageEnum stage, const data_callback_type& handler, eDataEnum dataType = Default);
+	void HookStageDataInitializedEvent(eStageEnum stage, data_callback_type&& handler, eDataEnum dataType = Default);
+	void HookCalculatedPhiMapEvent(const data_callback_type& handler);
+	void HookCalculatedPhiMapEvent(data_callback_type&& handler);
+	void HookUpdateMeetingPlaneEvent(const AreaEikonalES::plane_update_callback_type& handler);
+	void HookUpdateMeetingPlaneEvent(AreaEikonalES::plane_update_callback_type&& handler);
 	void SetUsesCorrection(bool useCorrection);
 	void SetUsingMeetingPoints(bool);
 	const AreaEikonalES& GetAreaEikonal() const;

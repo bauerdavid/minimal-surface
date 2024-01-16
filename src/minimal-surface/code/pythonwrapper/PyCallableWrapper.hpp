@@ -35,7 +35,7 @@ public:
     PyCallableWrapperBase& operator=(const PyCallableWrapperBase& other) {
         Py_XDECREF(callable);
         PyCallableWrapperBase tmp = other;
-        *this = std::move(tmp)
+        *this = std::move(tmp);
         Py_INCREF(this->callable);
         return *this;
     }

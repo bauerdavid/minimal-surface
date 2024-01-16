@@ -89,7 +89,7 @@ public:
 	}
 	template<typename VecType2>
 	friend OperableVec& operator+=(OperableVec<VecType, N, T>& v1, OperableVec<VecType2, N, T>& v2) {
-		for (int i = 0; i < N; i++) {
+		for (size_t i = 0; i < N; i++) {
 			v1[i] += v2[i];
 		}
 		//std::transform(v1.data, v1.data + N, v2.data, v1.data, std::plus<T>());
@@ -103,7 +103,7 @@ public:
 
 	template<typename VecType2>
 	friend OperableVec& operator-=(OperableVec<VecType, N, T>& v1, OperableVec<VecType2, N, T>& v2) {
-		for (int i = 0; i < N; i++) {
+		for (size_t i = 0; i < N; i++) {
 			v1[i] -= v2[i];
 		}
 		return v1;
@@ -116,7 +116,7 @@ public:
 
 	template<typename VecType2>
 	friend OperableVec& operator*=(OperableVec<VecType, N, T>& v1, OperableVec<VecType2, N, T>& v2) {
-		for (int i = 0; i < N; i++) {
+		for (size_t i = 0; i < N; i++) {
 			v1[i] *= v2[i];
 		}
 		return v1;
@@ -129,7 +129,7 @@ public:
 
 	template<typename VecType2>
 	friend OperableVec& operator/=(OperableVec<VecType, N, T>& v1, OperableVec<VecType2, N, T>& v2) {
-		for (int i = 0; i < N; i++) {
+		for (size_t i = 0; i < N; i++) {
 			v1[i] /= v2[i];
 		}
 		return v1;
@@ -142,7 +142,7 @@ public:
 
 	friend std::ostream& operator<<(std::ostream& os, const OperableVec& vec){
         os << "{";
-        for(int i=0; i<N; i++){
+        for(size_t i=0; i<N; i++){
             os << vec.data[i];
             if(i<N-1){
                 os << ", ";
@@ -182,7 +182,7 @@ public:
 template<typename OperableVecType, typename VecType2>
 typename OperableVecType::vec_type operator+(const OperableVecType& l, const OperableVec<VecType2, OperableVecType::size, typename OperableVecType::type>& r) {
 	typename OperableVecType::vec_type v;
-	for (int i = 0; i < OperableVecType::size; i++) {
+	for (size_t i = 0; i < OperableVecType::size; i++) {
 		v[i] = l[i] + r[i];
 	}
 	return v;
@@ -205,7 +205,7 @@ typename OperableVecType::vec_type operator+(Scalar l,  const OperableVecType& r
 template<typename OperableVecType, typename VecType2>
 typename OperableVecType::vec_type operator-(const OperableVecType& l, const OperableVec<VecType2, OperableVecType::size, typename OperableVecType::type>& r) {
 	typename OperableVecType::vec_type v;
-	for (int i = 0; i < OperableVecType::size; i++) {
+	for (size_t i = 0; i < OperableVecType::size; i++) {
 		v[i] = l[i] - r[i];
 	}
 	return v;
@@ -228,7 +228,7 @@ typename OperableVecType::vec_type operator-(Scalar l, const OperableVecType& r)
 template<typename OperableVecType, typename VecType2>
 typename OperableVecType::vec_type operator*(const OperableVecType& l, const OperableVec<VecType2, OperableVecType::size, typename OperableVecType::type>& r) {
 	typename OperableVecType::vec_type v;
-	for (int i = 0; i < OperableVecType::size; i++) {
+	for (size_t i = 0; i < OperableVecType::size; i++) {
 		v[i] = l[i] * r[i];
 	}
 	return v;
@@ -251,7 +251,7 @@ typename OperableVecType::vec_type operator*(Scalar l, const OperableVecType& r)
 template<typename OperableVecType, typename VecType2>
 typename OperableVecType::vec_type operator/(const OperableVecType& l, const OperableVec<VecType2, OperableVecType::size, typename OperableVecType::type>& r) {
 	typename OperableVecType::vec_type v;
-	for (int i = 0; i < OperableVecType::size; i++) {
+	for (size_t i = 0; i < OperableVecType::size; i++) {
 		v[i] = l[i] / r[i];
 	}
 	return v;
@@ -266,7 +266,7 @@ typename OperableVecType::vec_type operator/(const OperableVecType& l, Scalar r)
 
 template<typename OperableVecType, typename Scalar, typename = typename std::enable_if<std::is_arithmetic<Scalar>::value, Scalar>::type>
 typename OperableVecType::vec_type operator/(Scalar r, const OperableVecType& l) {
-	tzpename OperableVecType::vec_type v;
+	typename OperableVecType::vec_type v;
 	std::transform(l.data, l.data + OperableVecType::size, v.data, [l](typename OperableVecType::type val) {return l / val;});
 	return v;
 }
@@ -276,14 +276,19 @@ class Vec : public OperableVec<Vec<N, T>, N, T> {
 	using OperableVec<Vec<N, T>, N, T>::OperableVec;
 };
 
+template<typename T>
+class Vec3;
+
+template<typename T>
+size_t hash_vec3(const Vec3<T>& p);
+
 
 template<typename T>
 class Vec3 : public OperableVec<Vec3<T>, 3, T> {
 public:
-	using OperableVec<Vec3<T>, 3, T>::OperableVec;
 	using OperableVec<Vec3<T>, 3, T>::data;
-	Vec3() :OperableVec() {}
-	Vec3(T x, T y, T z) : OperableVec({ x, y, z }) {}
+	Vec3() :OperableVec<Vec3<T>, 3, T>() {}
+	Vec3(T x, T y, T z) : OperableVec<Vec3<T>, 3, T>({ x, y, z }) {}
 	T& x() {
 		return data[0];
 	}
