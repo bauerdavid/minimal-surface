@@ -1,4 +1,3 @@
-#include "stdafx.h"
 #include "Transport.h"
 #include "SimpleITK.h"
 #include "Utils.h"

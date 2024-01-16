@@ -1,4 +1,4 @@
-#include "stdafx.h"
+//#include "stdafx.h"
 #include "Utils.h"
 #include <utility>
 #include "AreaEikonal.h"
@@ -134,9 +134,12 @@ vector<Vec3<int>> ResolvePath(Vec3<int> point, const sitk::Image& distanceMap)
 	for (int ii = 0; ii < 11111; ++ii) {
 		auto [ix, iy, iz] = point;
 
-		if (iz < 2) iz = 2; if (iz >= zs - 2) iz = zs - 3;
-		if (ix < 2) ix = 2; if (ix >= xs - 2) ix = xs - 3;
-		if (iy < 2) iy = 2; if (iy >= ys - 2) iy = ys - 3;
+		if (iz < 2) iz = 2;
+		if (iz >= zs - 2) iz = zs - 3;
+		if (ix < 2) ix = 2;
+		if (ix >= xs - 2) ix = xs - 3;
+		if (iy < 2) iy = 2;
+		if (iy >= ys - 2) iy = ys - 3;
 
 		
 		realnum mmin(0);

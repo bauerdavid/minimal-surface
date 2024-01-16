@@ -232,7 +232,7 @@ void FMSigned::smooth_distances() {
 	memcpy(temp_buffer, m_distance_buffer, xs * ys * zs * sizeof(double));
 	auto& v = m_narrow_band_v;
 OMP_PARALLEL_FOR
-	for (int i = 0; i < v.size(); i++) {
+	for (int i = 0; i < (int)v.size(); i++) {
 		POINT3D p;
 		double dist, mean_dist, sum_dist = 0;
 		tie(p, dist) = v[i];
