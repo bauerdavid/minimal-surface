@@ -7,6 +7,9 @@
 /build/*
 *.egg-info/
 venv/
+env/
+env39/
+env31[0-9]/
 .idea/
 /dist/
 **/.vs/
