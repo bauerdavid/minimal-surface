@@ -6,6 +6,7 @@
 #include "Utils.h"
 #include <vector>
 #include <math.h>
+#include <cfloat>
 
 //#define HIGH_ACCURACY
 #define INF 2*m_max_dist//0x1.f7f7f7f7f7f7fp+1016
@@ -50,13 +51,13 @@ class FMSigned
 		mVelocityMap = velo;
 		m_distance_map = sitk::Image(distance_map);
 		m_frozen = sitk::Image(frozen);
-		vector<uint32_t> input_size = m_distance_map.GetSize();
+		std::vector<uint32_t> input_size = m_distance_map.GetSize();
 		xs = input_size[0];
 		ys = input_size[1];
 		zs = input_size[2];
 		m_distance_buffer = m_distance_map.GetBufferAsDouble();
 		m_frozen_buffer = m_frozen.GetBufferAsUInt8();
-		vector<double> values;
+		std::vector<double> values;
 		values.reserve(bound_points.size());
 		//OMP_PARALLEL_FOR
 		for (auto it = bound_points.begin(); it != bound_points.end(); it++) {
@@ -70,14 +71,14 @@ class FMSigned
 	template<class RandIt>
 	void initialize(sitk::Image& input_map, const RandIt& bound_points, double max_distance = DBL_MAX, double velo = 1., bool fix_heap=true) {
 		_PROFILING;
-		vector<uint32_t> input_size = input_map.GetSize();
+		std::vector<uint32_t> input_size = input_map.GetSize();
 		xs = input_size[0];
 		ys = input_size[1];
 		zs = input_size[2];
 		double* input_buffer = input_map.GetBufferAsDouble();
 		m_max_dist = max_distance;
 		mVelocityMap = velo;
-		vector<uint32_t> init_size = m_distance_map.GetSize();
+		std::vector<uint32_t> init_size = m_distance_map.GetSize();
 		if (init_size != input_size) {
 			m_distance_map = sitk::Image(input_size, sitk::sitkFloat64) + INF;
 			m_frozen = sitk::Image(input_size, sitk::sitkUInt8);
@@ -89,7 +90,7 @@ class FMSigned
 
 		m_distance_buffer = m_distance_map.GetBufferAsDouble();
 		m_frozen_buffer = m_frozen.GetBufferAsUInt8();
-		vector<double> values;
+		std::vector<double> values;
 		values.reserve(bound_points.size());
 //OMP_PARALLEL_FOR
 		for (auto it = bound_points.begin(); it != bound_points.end(); it++) {
@@ -102,8 +103,7 @@ class FMSigned
 		m_narrow_band = IndexedPriorityQueue<POINT3D_MAP(double), std::greater<double>>(bound_points.begin(), bound_points.end(), values.begin(), fix_heap);
 	}
 
-	template<>
-	void FMSigned::initialize< std::vector<POINT3D>>(sitk::Image& input_map, const std::vector<POINT3D>& bound_points, double max_distance, double velo, bool fix_heap) {
+	void initialize(sitk::Image& input_map, const std::vector<POINT3D>& bound_points, double max_distance, double velo, bool fix_heap) {
 		_PROFILING;
 		std::vector<uint32_t> input_size = input_map.GetSize();
 		xs = input_size[0];
@@ -132,7 +132,7 @@ class FMSigned
 		_SUB_PROFILE(initmaps);
 		values.reserve(bound_points.size());
 OMP_PARALLEL_FOR
-		for (int i = 0; i < bound_points.size(); i++) {
+		for (int i = 0; i < (int)bound_points.size(); i++) {
 			auto [xx, yy, zz] = representation_to_point<int>(bound_points[i]);
 			double val = -BUF_IDX3D(input_buffer, xs, ys, zs, xx, yy, zz);
 			BUF_IDX3D(m_distance_buffer, xs, ys, zs, xx, yy, zz) = val;
@@ -145,7 +145,7 @@ OMP_PARALLEL_FOR
 		_END_SUBPROFILE(fill_narrowband);
 	}
 
-	void FMSigned::initialize_for_neighbors(const sitk::Image& input_map, const std::vector<POINT3D>& bound_points, double max_distance = DBL_MAX, double velo=1.) {
+	void initialize_for_neighbors(const sitk::Image& input_map, const std::vector<POINT3D>& bound_points, double max_distance = DBL_MAX, double velo=1.) {
 		_PROFILING;
 		m_input_buffer = input_map.GetBufferAsDouble();
 		std::vector<uint32_t> input_size = input_map.GetSize();
@@ -174,7 +174,7 @@ OMP_PARALLEL_FOR
 		_SUB_PROFILE(initmaps);
 		m_narrow_band_v.resize(bound_points.size());
 OMP_PARALLEL_FOR
-		for (int i = 0; i < bound_points.size(); i++) {
+		for (int i = 0; i < (int)bound_points.size(); i++) {
 			auto [xx, yy, zz] = representation_to_point<int>(bound_points[i]);
 			double val = -BUF_IDX3D(m_input_buffer, xs, ys, zs, xx, yy, zz);
 			BUF_IDX3D(m_distance_buffer, xs, ys, zs, xx, yy, zz) = val;

@@ -2,6 +2,7 @@
 #include <Python.h>
 #include "arg_format_string.h"
 #include "c_npy_type.h"
+#include "Utils.h"
 #include <SimpleITK.h>
 #include <numpy/arrayobject.h>
 #include <vector>
@@ -118,7 +119,6 @@ template<sitk::PixelIDValueEnum pixelID>
 sitk::Image np_2_sitk(PyObject* arr_obj){
     int ndim = PyArray_NDIM(arr_obj);
     npy_intp* dims = PyArray_DIMS(arr_obj);
-    int type = PyArray_TYPE(arr_obj);
     void* data = PyArray_DATA(arr_obj);
     std::vector<unsigned> im_size;
     int n_pixels = 1;
@@ -127,8 +127,8 @@ sitk::Image np_2_sitk(PyObject* arr_obj){
         n_pixels *= (int)dims[ndim-1-i];
     }
     sitk::Image img(im_size, pixelID);
-    CType<pixelID>::Type* buffer = PixelManagerTrait<pixelID>::GetBuffer(img);
-    memcpy(buffer, data, n_pixels*sizeof(CType<pixelID>::Type));
+    typename CType<pixelID>::Type* buffer = PixelManagerTrait<pixelID>::GetBuffer(img);
+    memcpy(buffer, data, n_pixels*sizeof(typename CType<pixelID>::Type));
     return img;
 }
 
@@ -196,7 +196,7 @@ typename processed_type<std::vector<double>&>::type process_arg<std::vector<doub
 
 template<typename ...Args>
 PyObject* BuildArgs(Args... args){
-    PyObject* out_args = Py_BuildValue(args_format_string<processed_type<Args>::type...>(), process_arg<Args>(args)...);
+    PyObject* out_args = Py_BuildValue(args_format_string<typename processed_type<Args>::type...>(), process_arg<Args>(args)...);
     return out_args;
 }
 

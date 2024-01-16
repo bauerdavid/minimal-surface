@@ -1,8 +1,9 @@
 #pragma once
-#include "StdAfx.h"
+//#include "stdafx.h"
 #include "Utils.h"
 #include "math.h"
 typedef double realnum;
+typedef unsigned char byte;
 #define PI 3.1415926536
 
 
@@ -664,9 +665,9 @@ OMP_PARALLEL_FOR
 		for (int q = 0; q < ys; ++q) {
 			for (int p = 0; p < xs; ++p) {
 				dat[q*xs+p] = (T)(tc[q+modys][p+modxs]);
-				if (maxval < t) maxval = t;
-				if (minval > t) minval = t;
-				avgval += t;
+				if (maxval < dat[q*xs+p]) maxval = dat[q*xs+p];
+				if (minval > dat[q*xs+p]) minval = dat[q*xs+p];
+				avgval += dat[q*xs+p];
 			}
 		}
 		avgval /= xs*ys;
