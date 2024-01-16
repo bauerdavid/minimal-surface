@@ -95,14 +95,14 @@ cdef extern from "MinimalSurfaceEstimator.h":
         pass
 
     cdef cppclass MinimalSurfaceEstimator:
-        void HookStageInitializationEvent(eStageEnum, basic_callback_type&)
-        void HookStageFinishedEvent(eStageEnum, basic_callback_type&)
-        void HookStageIterationEvent(eStageEnum, iter_callback_type&)
-        void HookStageDataInitializedEvent(eStageEnum, data_callback_type&, eDataEnum)
-        void HookStageUpdatedEvent(eStageEnum, data_callback_type&, eDataEnum)
-        void HookImageTransformCalculatedEvent(image_transform_callback_type&)
-        void HookPlaneCenterCalculatedEvent(vector_callback_type&)
-        void HookIterationEvent(iter_callback_type&)
+        void HookStageInitializationEvent(eStageEnum, basic_callback_type&&)
+        void HookStageFinishedEvent(eStageEnum, basic_callback_type&&)
+        void HookStageIterationEvent(eStageEnum, iter_callback_type&&)
+        void HookStageDataInitializedEvent(eStageEnum, data_callback_type&&, eDataEnum)
+        void HookStageUpdatedEvent(eStageEnum, data_callback_type&&, eDataEnum)
+        void HookImageTransformCalculatedEvent(image_transform_callback_type&&)
+        void HookPlaneCenterCalculatedEvent(vector_callback_type&&)
+        void HookIterationEvent(iter_callback_type&&)
         void SetUsesCorrection(bool)
         void SetUsingMeetingPoints(bool)
         void Calculate(Image, Image, Vec3[double], Vec3[double], int) nogil
@@ -133,7 +133,8 @@ cdef class MinimalSurfaceCalculator:
             print("callback is not callable!")
             return
         cdef basic_callback_wrapper wrapper = basic_callback_wrapper(callback)
-        self.calculator.HookStageInitializationEvent(<eStageEnum>stage, <basic_callback_type>wrapper)
+        cdef basic_callback_type cast_wrapper = <basic_callback_type>wrapper
+        self.calculator.HookStageInitializationEvent(<eStageEnum>stage, cast_wrapper)
 
     cpdef void hook_stage_finished_event(self, int stage, object callback):
         if not callable(callback):

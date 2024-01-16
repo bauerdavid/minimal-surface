@@ -142,7 +142,7 @@ void MinimalSurfaceEstimator::SetTransportInitSlice(const sitk::Image& image){
 }
 
 
-void MinimalSurfaceEstimator::HookStageInitializationEvent(eStageEnum stage, basic_callback_type& handler)
+void MinimalSurfaceEstimator::HookStageInitializationEvent(eStageEnum stage, const basic_callback_type& handler)
 {
 	switch (stage) {
 	case AreaEikonalStage:
@@ -160,7 +160,25 @@ void MinimalSurfaceEstimator::HookStageInitializationEvent(eStageEnum stage, bas
 	}
 }
 
-void MinimalSurfaceEstimator::HookStageFinishedEvent(eStageEnum stage, basic_callback_type& handler)
+void MinimalSurfaceEstimator::HookStageInitializationEvent(eStageEnum stage, basic_callback_type&& handler)
+{
+	switch (stage) {
+	case AreaEikonalStage:
+		mAreaEikonal.HookInitializationEvent(handler);
+		break;
+	case RotatedAreaEikonalStage:
+		mRotatedAreaEikonal.HookInitializationEvent(handler);
+		break;
+	case PlanePhaseFieldStage:
+		mInitialContourCalculator.HookInitializationEvent(handler);
+		break;
+	case TransportFunctionStage:
+		mTransportFunctionCalculator.HookInitializationEvent(handler);
+		break;
+	}
+}
+
+void MinimalSurfaceEstimator::HookStageFinishedEvent(eStageEnum stage, const basic_callback_type& handler)
 {
 	switch (stage) {
 	case AreaEikonalStage:
@@ -178,7 +196,25 @@ void MinimalSurfaceEstimator::HookStageFinishedEvent(eStageEnum stage, basic_cal
 	}
 }
 
-void MinimalSurfaceEstimator::HookStageIterationEvent(eStageEnum stage, iter_callback_type& handler)
+void MinimalSurfaceEstimator::HookStageFinishedEvent(eStageEnum stage, basic_callback_type&& handler)
+{
+	switch (stage) {
+	case AreaEikonalStage:
+		mAreaEikonal.HookFinishedEvent(handler);
+		break;
+	case RotatedAreaEikonalStage:
+		mRotatedAreaEikonal.HookFinishedEvent(handler);
+		break;
+	case PlanePhaseFieldStage:
+		mInitialContourCalculator.HookFinishedEvent(handler);
+		break;
+	case TransportFunctionStage:
+		mTransportFunctionCalculator.HookFinishedEvent(handler);
+		break;
+	}
+}
+
+void MinimalSurfaceEstimator::HookStageIterationEvent(eStageEnum stage, const iter_callback_type& handler)
 {
 	switch (stage) {
 	case AreaEikonalStage:
@@ -196,7 +232,25 @@ void MinimalSurfaceEstimator::HookStageIterationEvent(eStageEnum stage, iter_cal
 	}
 }
 
-void MinimalSurfaceEstimator::HookStageUpdatedEvent(eStageEnum stage, data_callback_type& handler, eDataEnum dataType)
+void MinimalSurfaceEstimator::HookStageIterationEvent(eStageEnum stage, iter_callback_type&& handler)
+{
+	switch (stage) {
+	case AreaEikonalStage:
+		mAreaEikonal.HookIterationEvent(handler);
+		break;
+	case RotatedAreaEikonalStage:
+		mRotatedAreaEikonal.HookIterationEvent(handler);
+		break;
+	case PlanePhaseFieldStage:
+		mInitialContourCalculator.HookIterationEvent(handler);
+		break;
+	case TransportFunctionStage:
+		mTransportFunctionCalculator.HookIterationEvent(handler);
+		break;
+	}
+}
+
+void MinimalSurfaceEstimator::HookStageUpdatedEvent(eStageEnum stage, const data_callback_type& handler, eDataEnum dataType)
 {
 	switch (stage) {
 	case AreaEikonalStage:
@@ -240,7 +294,51 @@ void MinimalSurfaceEstimator::HookStageUpdatedEvent(eStageEnum stage, data_callb
 	}
 }
 
-void MinimalSurfaceEstimator::HookStageDataInitializedEvent(eStageEnum stage, data_callback_type& handler, eDataEnum dataType)
+void MinimalSurfaceEstimator::HookStageUpdatedEvent(eStageEnum stage, data_callback_type&& handler, eDataEnum dataType)
+{
+	switch (stage) {
+	case AreaEikonalStage:
+		switch (dataType) {
+		case Distance:
+			mAreaEikonal.HookUpdatedDistanceMapEvent(handler);
+			break;
+		case PhaseField:
+			mAreaEikonal.HookUpdatedPhaseFieldMapEvent(handler);
+			break;
+		case Curvature:
+			mAreaEikonal.HookUpdatedCurvatureMapEvent(handler);
+			break;
+		case MeetingPoints:
+			mAreaEikonal.HookUpdatedMeetingPointsMapEvent(handler);
+			break;
+		}
+		break;
+	case RotatedAreaEikonalStage:
+		switch (dataType) {
+		case Distance:
+			mRotatedAreaEikonal.HookUpdatedDistanceMapEvent(handler);
+			break;
+		case PhaseField:
+			mRotatedAreaEikonal.HookUpdatedPhaseFieldMapEvent(handler);
+			break;
+		case Curvature:
+			mRotatedAreaEikonal.HookUpdatedCurvatureMapEvent(handler);
+			break;
+		case MeetingPoints:
+			mRotatedAreaEikonal.HookUpdatedMeetingPointsMapEvent(handler);
+			break;
+		}
+		break;
+	case PlanePhaseFieldStage:
+		mInitialContourCalculator.HookUpdatedPhaseFieldMapEvent(handler);
+		break;
+	case TransportFunctionStage:
+		mTransportFunctionCalculator.HookUpdatedTransportFunctionMapEvent(handler);
+		break;
+	}
+}
+
+void MinimalSurfaceEstimator::HookStageDataInitializedEvent(eStageEnum stage, const data_callback_type& handler, eDataEnum dataType)
 {
 	switch (stage) {
 	case AreaEikonalStage:
@@ -284,12 +382,67 @@ void MinimalSurfaceEstimator::HookStageDataInitializedEvent(eStageEnum stage, da
 	}
 }
 
-void MinimalSurfaceEstimator::HookCalculatedPhiMapEvent(data_callback_type& handler)
+void MinimalSurfaceEstimator::HookStageDataInitializedEvent(eStageEnum stage, data_callback_type&& handler, eDataEnum dataType)
+{
+	switch (stage) {
+	case AreaEikonalStage:
+		switch (dataType) {
+		case Distance:
+			mAreaEikonal.HookInitializedDistanceMapEvent(handler);
+			break;
+		case PhaseField:
+			mAreaEikonal.HookInitializedPhaseFieldMapEvent(handler);
+			break;
+		case Curvature:
+			mAreaEikonal.HookInitializedCurvatureMapEvent(handler);
+			break;
+		case MeetingPoints:
+			mAreaEikonal.HookInitializedMeetingPointsMapEvent(handler);
+			break;
+		}
+		break;
+	case RotatedAreaEikonalStage:
+		switch (dataType) {
+		case Distance:
+			mRotatedAreaEikonal.HookInitializedDistanceMapEvent(handler);
+			break;
+		case PhaseField:
+			mRotatedAreaEikonal.HookInitializedPhaseFieldMapEvent(handler);
+			break;
+		case Curvature:
+			mRotatedAreaEikonal.HookInitializedCurvatureMapEvent(handler);
+			break;
+		case MeetingPoints:
+			mRotatedAreaEikonal.HookInitializedMeetingPointsMapEvent(handler);
+			break;
+		}
+		break;
+	case PlanePhaseFieldStage:
+		mInitialContourCalculator.HookInitializedPhaseFieldMapEvent(handler);
+		break;
+	case TransportFunctionStage:
+		mTransportFunctionCalculator.HookInitializedTransportFunctionMapEvent(handler);
+		break;
+	}
+}
+
+void MinimalSurfaceEstimator::HookCalculatedPhiMapEvent(const data_callback_type& handler)
 {
 	mAreaEikonal.HookCalculatedPhiMapEvent(handler);
 }
 
-void MinimalSurfaceEstimator::HookUpdateMeetingPlaneEvent(AreaEikonalES::plane_update_callback_type& handler)
+void MinimalSurfaceEstimator::HookCalculatedPhiMapEvent(data_callback_type&& handler)
+{
+	mAreaEikonal.HookCalculatedPhiMapEvent(handler);
+}
+
+void MinimalSurfaceEstimator::HookUpdateMeetingPlaneEvent(const AreaEikonalES::plane_update_callback_type& handler)
+{
+	mAreaEikonal.HookUpdateMeetingPlaneEvent(handler);
+	mRotatedAreaEikonal.HookUpdateMeetingPlaneEvent(handler);
+}
+
+void MinimalSurfaceEstimator::HookUpdateMeetingPlaneEvent(AreaEikonalES::plane_update_callback_type&& handler)
 {
 	mAreaEikonal.HookUpdateMeetingPlaneEvent(handler);
 	mRotatedAreaEikonal.HookUpdateMeetingPlaneEvent(handler);
