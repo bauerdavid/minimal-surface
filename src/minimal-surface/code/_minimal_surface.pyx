@@ -24,6 +24,11 @@ PHASEFIELD_DATA = 1
 MEETING_POINTS_DATA = 2
 CURVATURE_DATA = 3
 
+def wrap_cast_to_float(func):
+    def cast_to_float(*args, **kwargs):
+        return func(*args, **kwargs).astype(float)
+    return cast_to_float
+
 cdef extern from *:
     ctypedef int Image_ref "itk::simple::Image&" #hack
     ctypedef int init_image_func_header "itk::simple::Image(itk::simple::Image&, itk::simple::Image&)" #hack No. 2
@@ -182,13 +187,14 @@ cdef class MinimalSurfaceCalculator:
         if not callable(func):
             print("func is not callable!")
             return
-        cdef InitialContourCalculatorWrapper wrapper = InitialContourCalculatorWrapper(func)
+        cast_func = wrap_cast_to_float(func)
+        cdef InitialContourCalculatorWrapper wrapper = InitialContourCalculatorWrapper(cast_func)
         self.calculator.SetInitialContourCalculatorFunc(<init_contour_callback_type> wrapper)
 
     cpdef np.ndarray[np.int_t, ndim=2] resolve_shortest_paths(self, np.ndarray[np.int_t, ndim=1] point, np.ndarray[np.float_t, ndim=3] data):
         if len(point) != 3:
             print("point should be a size 3 array")
-        cdef Vec3[int] point_vec = Vec3[int](point[0], point[1], point[2])
+        cdef Vec3[int] point_vec = Vec3[int](point[2], point[1], point[0])
         cdef vector[unsigned int] im_size = [data.shape[0], data.shape[1], data.shape[2]]
         cdef Image img = Image(im_size, sitkFloat64)
         cdef int[::1] temp_view = data
@@ -199,9 +205,9 @@ cdef class MinimalSurfaceCalculator:
         cdef np.ndarray[np.int_t, ndim=2] path_arr = np.ndarray((path.size(), 3), dtype=int)
         cdef int i
         for i in range(path.size()):
-            path_arr[i, 0] = path[i].x()
+            path_arr[i, 2] = path[i].x()
             path_arr[i, 1] = path[i].y()
-            path_arr[i, 2] = path[i].z()
+            path_arr[i, 0] = path[i].z()
         return path_arr
 
     cpdef np.ndarray[np.float_t, ndim=3] calculate(
@@ -210,7 +216,7 @@ cdef class MinimalSurfaceCalculator:
             np.ndarray[np.float_t, ndim=3] image,
             np.ndarray[np.float_t, ndim=1] point1,
             np.ndarray[np.float_t, ndim=1] point2,
-            bool use_correction,
+            bool use_correction=True,
             int max_iterations=10000,
     ):
         cdef int i
@@ -221,8 +227,8 @@ cdef class MinimalSurfaceCalculator:
         cdef double* point1_data = point1_vec.begin()
         cdef double* point2_data = point2_vec.begin()
         for i in range(3):
-            point1_data[i] = point1[i]
-            point2_data[i] = point2[i]
+            point1_data[i] = point1[2-i]
+            point2_data[i] = point2[2-i]
         self.calculator.SetUsesCorrection(use_correction)
         with nogil:
             self.calculator.Calculate(sitk_phi, sitk_image, point1_vec, point2_vec, max_iterations)
@@ -248,8 +254,8 @@ cdef class MinimalSurfaceCalculator:
         cdef double* point1_data = point1_vec.begin()
         cdef double* point2_data = point2_vec.begin()
         for i in range(3):
-            point1_data[i] = point1[i]
-            point2_data[i] = point2[i]
+            point1_data[i] = point1[2-i]
+            point2_data[i] = point2[2-i]
         cdef Image transport_slice
         with nogil:
             transport_slice = self.calculator.GetTransportSliceFromPoints(sitk_image, point1_vec, point2_vec)
@@ -271,8 +277,8 @@ cdef class MinimalSurfaceCalculator:
         cdef double* point1_data = point1_vec.begin()
         cdef double* point2_data = point2_vec.begin()
         for i in range(3):
-            point1_data[i] = point1[i]
-            point2_data[i] = point2[i]
+            point1_data[i] = point1[2-i]
+            point2_data[i] = point2[2-i]
         cdef Image transport_slice
         self.calculator.SetUsesCorrection(use_correction)
         with nogil:
@@ -289,7 +295,5 @@ cdef class MinimalSurfaceCalculator:
 
     cpdef object get_init_plane(self):
         cdef Image init_plane = Cast(self.calculator.GetTempInitContour(), sitkFloat64)
-        print("init_plane")
         cdef object arr = sitk_2_np(init_plane).copy()
-        print("arr")
         return arr
