@@ -128,7 +128,11 @@ void TransportFunction::Initialize(sitk::Image distanceMap, const sitk::Image& i
 	mIterationCount = 0;
 	vector<unsigned> size = distanceMap.GetSize();
 	vector<unsigned> inimap_size = initialSlice.GetSize();
-	if (size[1] != inimap_size[0] && size[2] != inimap_size[1]) return;
+	if (size[1] != inimap_size[0] && size[2] != inimap_size[1]){
+		cout << "TransportFunction::Initialize: size mismatch: (" << size[1] << ", " << size[0]
+				<<") - (" <<inimap_size[0] << ", " << inimap_size[1] << ") between distance map and initial slice." << endl;
+		return;
+	}
 	double* distmap_buffer = distanceMap.GetBufferAsDouble();
 	int xs = size[0], ys = size[1], zs = size[2];
 
@@ -243,7 +247,7 @@ void TransportFunction::Calculate(sitk::Image distanceMap, const sitk::Image& in
 		if (!updated)
 			return;
 	}
-	cout << "transport function did not converge" << endl;
+	cout << "Transport function did not converge." << endl;
 }
 
 #endif
