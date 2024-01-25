@@ -72,13 +72,6 @@ libs = itk_libs+sitk_libs
 libs = map(os.path.basename, libs)
 libs = map(lambda s: s.rsplit(".", 1)[0], libs)
 libs = list(map(lambda s: s[3:] if s.startswith("lib") else s, libs))
-print("libs:")
-for l in libs:
-    print(" - %s" % l)
-print("extra_objects:")
-for l in itk_libs+sitk_libs:
-    print(" - %s" % l)
-print("library dirs: %s, %s" % (sitk_lib_path, itk_lib_path))
 extension = Extension(
     'minimal_surface',
     sources=["src/minimal-surface/code/_minimal_surface.pyx"] + glob.glob("src/minimal-surface/code/eikonal/*.cpp"),
