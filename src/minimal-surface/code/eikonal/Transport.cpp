@@ -1,5 +1,5 @@
 #include "Transport.h"
-#include "SimpleITK.h"
+#include "sitkInclude.h"
 #include "Utils.h"
 #include <sitkImageOperators.h>
 namespace sitk = itk::simple;

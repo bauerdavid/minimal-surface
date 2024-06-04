@@ -27,6 +27,25 @@ CURVATURE_DATA = 3
 cdef extern from *:
     ctypedef int Image_ref "itk::simple::Image&" #hack
     ctypedef int init_image_func_header "itk::simple::Image(itk::simple::Image&, itk::simple::Image&)" #hack No. 2
+    ctypedef int one "1"
+    ctypedef int two "2"
+cdef extern from "vnl_float_2.h":
+    cdef cppclass vnl_vector_fixed[T, unsigned]:
+        void operator()(unsigned)
+        void operator[](unsigned)
+        void data_block()
+
+ctypedef vnl_vector_fixed[float, one] vnl_float_1
+ctypedef vnl_vector_fixed[float, two] vnl_float_2
+
+cdef class Dummy:
+    cdef vnl_float_1 vec
+    cdef vnl_float_2 vec2
+
+cpdef Dummy dummy():
+    cdef Dummy d = Dummy()
+    d.vnl_float_1[0]
+    return d
 
 cdef extern from "Vec.h":
     cdef cppclass Vec3[T]:
@@ -37,7 +56,7 @@ cdef extern from "Vec.h":
         T& z()
         T* begin()
 
-cdef extern from "SimpleITK.h" namespace "itk::simple":
+cdef extern from "sitkInclude.h" namespace "itk::simple":
     cdef enum PixelIDValueEnum:
         sitkFloat64 = 9
     ctypedef PixelIDValueEnum sitkFloat64_ "sitk::sitkFloat64"

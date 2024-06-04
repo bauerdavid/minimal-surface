@@ -1,6 +1,6 @@
 #pragma once
 #include "szevent.h"
-#include "SimpleITK.h"
+#include "sitkInclude.h"
 namespace sitk = itk::simple;
 class EventSource {
 public:

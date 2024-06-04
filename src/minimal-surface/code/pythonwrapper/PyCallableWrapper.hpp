@@ -1,7 +1,7 @@
 #include <Python.h>
 #include <iostream>
 #include "python_utils.h"
-#include <SimpleITK.h>
+#include <sitkInclude.h>
 #include <vector>
 #include <numpy/arrayobject.h>
 namespace sitk = itk::simple;

@@ -1,7 +1,7 @@
 #pragma once
 #include "commontype.h"
 #define _NO_BOU_ 1e11
-#include "SimpleITK.h"
+#include "sitkInclude.h"
 #include "EventSource.h"
 #include "Utils.h"
 #include "IndexedPriorityQueue.h"

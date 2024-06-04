@@ -1,5 +1,5 @@
 #pragma once
-#include <SimpleITK.h>
+#include <sitkInclude.h>
 #include <sitkImageOperators.h>
 #include "IndexedPriorityQueue.h"
 #include "AreaEikonal.h"

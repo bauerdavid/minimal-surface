@@ -3,7 +3,7 @@
 #include "arg_format_string.h"
 #include "c_npy_type.h"
 #include "Utils.h"
-#include <SimpleITK.h>
+#include <sitkInclude.h>
 #include <numpy/arrayobject.h>
 #include <vector>
 #include <type_traits>

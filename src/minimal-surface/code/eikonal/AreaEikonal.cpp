@@ -2,7 +2,7 @@
 #include "Utils.h"
 #include "math.h"
 #include <omp.h>
-#include "SimpleITK.h"
+#include "sitkInclude.h"
 #include <vector>
 #include <sitkImageOperators.h>
 #include "FMSigned.h"

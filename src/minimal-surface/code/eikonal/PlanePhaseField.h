@@ -1,5 +1,5 @@
 #pragma once
-#include "SimpleITK.h"
+#include "sitkInclude.h"
 #include <unordered_set>
 #include "szevent.h"
 #include "EventSource.h"

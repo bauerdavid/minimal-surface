@@ -8,7 +8,7 @@
 #include <sitkAdditionalProcedures.h>
 #include <sitkCastImageFilter.h>
 #include <sitkImageOperators.h>
-#include "SimpleITK.h"
+#include "sitkInclude.h"
 
 using namespace std;
 namespace sitk = itk::simple;

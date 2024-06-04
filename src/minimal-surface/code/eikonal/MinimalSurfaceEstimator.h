@@ -3,7 +3,7 @@
 #include "AreaEikonal.h"
 #include "Transport.h"
 #include "Vec.h"
-#include "SimpleITK.h"
+#include "sitkInclude.h"
 #include "szevent.h"
 #include <functional>
 #include <memory>
