@@ -2,6 +2,8 @@
 
 `minimal-surface` is a Python package which can be utilized for the segmentation of objects in 3D images using as few as 2 points and a 2D slice! This algorithm uses energy minimization to estimate the surface of the object. To achieve fast execution the method was implemented in C++, but can be called from Python through a thin wrapper.
 
+The C++ algorithm was implemented by Jozsef Molnar. Python wrapper was implemented by David Bauer.
+
 ## Citation
 **When the pen is mightier than the sword: semi-automatic 2 and 3D image labelling**<br>
 Réka Hollandi, David Bauer, Akos Diosdi, Bálint Schrettner, Timea Toth, Dominik Hirling, Gábor Hollandi, Maria Harmati, József Molnár, Peter Horvath<br>
