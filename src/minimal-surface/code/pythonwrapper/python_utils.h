@@ -106,7 +106,7 @@ PyObject* sitk_2_np(const sitk::Image& img){
         image_dims[2] = 1;
     const double* img_buffer = img.GetBufferAsDouble();
     PyObject* out = PyArray_SimpleNew(3, image_dims, NPY_DOUBLE);
-    void* arr_data = PyArray_DATA(out);
+    void* arr_data = PyArray_DATA((PyArrayObject*)out);
     memcpy(arr_data, img_buffer, n_pixels*sizeof(double));
     if (out == NULL) {
         std::cout << "Couldn't create numpy array" << std::endl;
@@ -117,9 +117,9 @@ PyObject* sitk_2_np(const sitk::Image& img){
 
 template<sitk::PixelIDValueEnum pixelID>
 sitk::Image np_2_sitk(PyObject* arr_obj){
-    int ndim = PyArray_NDIM(arr_obj);
-    npy_intp* dims = PyArray_DIMS(arr_obj);
-    void* data = PyArray_DATA(arr_obj);
+    int ndim = PyArray_NDIM((PyArrayObject*)arr_obj);
+    npy_intp* dims = PyArray_DIMS((PyArrayObject*)arr_obj);
+    void* data = PyArray_DATA((PyArrayObject*)arr_obj);
     std::vector<unsigned> im_size;
     int n_pixels = 1;
     for(int i=0; i< ndim; i++){
@@ -143,7 +143,7 @@ PyObject* vector_2_np(const std::vector<T>& vec){
     PyGILState_STATE gstate;
     gstate = PyGILState_Ensure();
     PyObject* out = PyArray_SimpleNew(ndims, &dims, npy_type<T>::value);
-    void* data = PyArray_DATA(out);
+    void* data = PyArray_DATA((PyArrayObject*)out);
     memcpy(data, &vec[0], vec.size()*sizeof(T));
 //    Py_XDECREF(out);
     if (out == NULL) {

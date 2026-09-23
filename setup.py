@@ -1,4 +1,4 @@
-from distutils.core import setup, Extension, DEBUG
+from setuptools import setup, Extension
 import glob
 import os
 import sys
@@ -84,6 +84,9 @@ extension = Extension(
         glob.glob(os.path.join(sitk_path, "include", "SimpleITK-*"))[0]
     ],
     depends=["MinimalSurfaceEstimator.h", "SimpleITK.h", "sitkImage.h"],
+    # Compile against the modern NumPy C API only, so that use of the
+    # NumPy 1 legacy API is a build error rather than a silent numpy 1 pin.
+    define_macros=[("NPY_NO_DEPRECATED_API", "NPY_1_7_API_VERSION")],
     library_dirs=[sitk_lib_path, itk_lib_path],
     libraries=libs,
     extra_objects=itk_libs+sitk_libs+os_libs,

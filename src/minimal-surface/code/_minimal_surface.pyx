@@ -191,7 +191,7 @@ cdef class MinimalSurfaceCalculator:
         cdef InitialContourCalculatorWrapper wrapper = InitialContourCalculatorWrapper(cast_func)
         self.calculator.SetInitialContourCalculatorFunc(<init_contour_callback_type> wrapper)
 
-    cpdef np.ndarray[np.int_t, ndim=2] resolve_shortest_paths(self, np.ndarray[np.int_t, ndim=1] point, np.ndarray[np.float_t, ndim=3] data):
+    cpdef np.ndarray[np.int64_t, ndim=2] resolve_shortest_paths(self, np.ndarray[np.int64_t, ndim=1] point, np.ndarray[np.float_t, ndim=3] data):
         if len(point) != 3:
             print("point should be a size 3 array")
         cdef Vec3[int] point_vec = Vec3[int](point[2], point[1], point[0])
@@ -202,7 +202,7 @@ cdef class MinimalSurfaceCalculator:
         cdef vector[Vec3[int]] path
         with nogil:
             path = ResolvePath(point_vec, img)
-        cdef np.ndarray[np.int_t, ndim=2] path_arr = np.ndarray((path.size(), 3), dtype=int)
+        cdef np.ndarray[np.int64_t, ndim=2] path_arr = np.ndarray((path.size(), 3), dtype=np.int64)
         cdef int i
         for i in range(path.size()):
             path_arr[i, 2] = path[i].x()
