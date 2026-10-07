@@ -24,11 +24,6 @@ PHASEFIELD_DATA = 1
 MEETING_POINTS_DATA = 2
 CURVATURE_DATA = 3
 
-def wrap_cast_to_float(func):
-    def cast_to_float(*args, **kwargs):
-        return func(*args, **kwargs).astype(float)
-    return cast_to_float
-
 cdef extern from *:
     ctypedef int Image_ref "itk::simple::Image&" #hack
     ctypedef int init_image_func_header "itk::simple::Image(itk::simple::Image&, itk::simple::Image&)" #hack No. 2
@@ -54,7 +49,9 @@ cdef extern from "SimpleITK.h" namespace "itk::simple":
     cdef Image Cast(Image, PixelIDValueEnum)
 
 cdef extern from "python_utils.h":
-    cdef Image np_2_sitk[PID](object)
+    # np_2_sitk raises if the object is not convertible to an array of the
+    # required pixel type; "except +" turns that into a Python exception.
+    cdef Image np_2_sitk[PID](object) except +
     cdef object sitk_2_np(Image)
 
 cdef extern from "pythonwrapper/PyCallableWrapper.hpp":
@@ -110,12 +107,15 @@ cdef extern from "MinimalSurfaceEstimator.h":
         void HookIterationEvent(iter_callback_type&&)
         void SetUsesCorrection(bool)
         void SetUsingMeetingPoints(bool)
-        void Calculate(Image, Image, Vec3[double], Vec3[double], int) nogil
-        void Calculate(Image, Vec3[double], Vec3[double], int) nogil
+        # These four run the user-supplied initial-contour callback, so a C++
+        # exception can propagate out of them; "except +" turns it into a
+        # Python exception instead of terminating the process.
+        void Calculate(Image, Image, Vec3[double], Vec3[double], int) except + nogil
+        void Calculate(Image, Vec3[double], Vec3[double], int) except + nogil
         void SetInitialContourCalculatorFunc(init_contour_callback_type)
         const TransportFunctionES& GetTransportFunctionCalculator() nogil const
-        Image GetTransportSliceFromPoints(Image, Vec3[double], Vec3[double]) nogil
-        Image CalculateEikonalAndTransportInit(Image, Image, Vec3[double], Vec3[double]) nogil
+        Image GetTransportSliceFromPoints(Image, Vec3[double], Vec3[double]) except + nogil
+        Image CalculateEikonalAndTransportInit(Image, Image, Vec3[double], Vec3[double]) except + nogil
         void SetTransportInitSlice(Image) nogil
         Image GetCombinedDistanceMap() nogil
         Image GetTempInitContour() nogil
@@ -187,8 +187,7 @@ cdef class MinimalSurfaceCalculator:
         if not callable(func):
             print("func is not callable!")
             return
-        cast_func = wrap_cast_to_float(func)
-        cdef InitialContourCalculatorWrapper wrapper = InitialContourCalculatorWrapper(cast_func)
+        cdef InitialContourCalculatorWrapper wrapper = InitialContourCalculatorWrapper(func)
         self.calculator.SetInitialContourCalculatorFunc(<init_contour_callback_type> wrapper)
 
     cpdef np.ndarray[np.int64_t, ndim=2] resolve_shortest_paths(self, np.ndarray[np.int64_t, ndim=1] point, np.ndarray[np.float_t, ndim=3] data):
