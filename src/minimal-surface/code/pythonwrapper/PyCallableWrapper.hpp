@@ -15,17 +15,20 @@ protected:
     PyObject* callable;
 public:
     typedef RetVal result_type;
+    // Takes a new reference to obj, which may be NULL.
     PyCallableWrapperBase(PyObject* obj): callable(obj){
-		Py_INCREF(obj);
+        Py_XINCREF(callable);
     };
 
     PyCallableWrapperBase(const PyCallableWrapperBase& other): callable(other.callable) {
-     	Py_INCREF(callable);
+        Py_XINCREF(callable);
     }
 
-    PyCallableWrapperBase(PyCallableWrapperBase&& other): callable(other.callable) {
-        Py_INCREF(callable);
-        other.callable = 0;
+    // Steals the reference rather than taking a new one. Taking a reference
+    // here and then clearing other.callable - so that the moved-from object
+    // no longer releases anything - leaked one reference per move.
+    PyCallableWrapperBase(PyCallableWrapperBase&& other) noexcept: callable(other.callable) {
+        other.callable = nullptr;
     }
 
     PyCallableWrapperBase(): callable(nullptr) { }
@@ -34,19 +37,24 @@ public:
         Py_XDECREF(callable);
     }
 
+    // Acquires the new reference before releasing the old one, so that
+    // self-assignment through an alias cannot free the object being assigned.
+    // The previous body released this->callable and then let the delegated
+    // move-assignment release it a second time.
     PyCallableWrapperBase& operator=(const PyCallableWrapperBase& other) {
-        Py_XDECREF(callable);
-        PyCallableWrapperBase tmp = other;
-        *this = std::move(tmp);
-        Py_INCREF(this->callable);
+        PyObject* old = callable;
+        callable = other.callable;
+        Py_XINCREF(callable);
+        Py_XDECREF(old);
         return *this;
     }
 
-    PyCallableWrapperBase& operator=(PyCallableWrapperBase&& other) {
-        Py_XDECREF(callable);
-        callable = other.callable;
-        Py_INCREF(callable);
-        other.callable = 0;
+    PyCallableWrapperBase& operator=(PyCallableWrapperBase&& other) noexcept {
+        if (this != &other) {
+            Py_XDECREF(callable);
+            callable = other.callable;
+            other.callable = nullptr;
+        }
         return *this;
     }
     RetVal operator()(Args... args){
