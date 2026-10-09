@@ -78,7 +78,11 @@
 #define POINT3D_MAP(val_type) POINT3D, val_type, POINT3D_HASH
 #define POINT3D_SET POINT3D, POINT3D_HASH
 
-#define PROFILE_FUNCTIONS
+// Function-level profiling is opt-in and is defined by the build system, not
+// here. The collected data is only reachable through profile_manager::dump(),
+// which nothing in this project calls, so it is left out of normal builds.
+// Enable it with MINIMAL_SURFACE_PROFILE=1 when running setup.py, or by
+// defining PROFILE_FUNCTIONS yourself.
 
 #ifdef PROFILE_FUNCTIONS
 class profiler {
