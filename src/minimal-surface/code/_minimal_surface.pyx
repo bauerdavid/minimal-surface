@@ -49,7 +49,9 @@ cdef extern from "SimpleITK.h" namespace "itk::simple":
     cdef Image Cast(Image, PixelIDValueEnum)
 
 cdef extern from "python_utils.h":
-    cdef Image np_2_sitk[PID](object)
+    # np_2_sitk raises if the object is not convertible to an array of the
+    # required pixel type; "except +" turns that into a Python exception.
+    cdef Image np_2_sitk[PID](object) except +
     cdef object sitk_2_np(Image)
 
 cdef extern from "pythonwrapper/PyCallableWrapper.hpp":
@@ -105,12 +107,15 @@ cdef extern from "MinimalSurfaceEstimator.h":
         void HookIterationEvent(iter_callback_type&&)
         void SetUsesCorrection(bool)
         void SetUsingMeetingPoints(bool)
-        void Calculate(Image, Image, Vec3[double], Vec3[double], int) nogil
-        void Calculate(Image, Vec3[double], Vec3[double], int) nogil
+        # These four run the user-supplied initial-contour callback, so a C++
+        # exception can propagate out of them; "except +" turns it into a
+        # Python exception instead of terminating the process.
+        void Calculate(Image, Image, Vec3[double], Vec3[double], int) except + nogil
+        void Calculate(Image, Vec3[double], Vec3[double], int) except + nogil
         void SetInitialContourCalculatorFunc(init_contour_callback_type)
         const TransportFunctionES& GetTransportFunctionCalculator() nogil const
-        Image GetTransportSliceFromPoints(Image, Vec3[double], Vec3[double]) nogil
-        Image CalculateEikonalAndTransportInit(Image, Image, Vec3[double], Vec3[double]) nogil
+        Image GetTransportSliceFromPoints(Image, Vec3[double], Vec3[double]) except + nogil
+        Image CalculateEikonalAndTransportInit(Image, Image, Vec3[double], Vec3[double]) except + nogil
         void SetTransportInitSlice(Image) nogil
         Image GetCombinedDistanceMap() nogil
         Image GetTempInitContour() nogil
@@ -185,10 +190,10 @@ cdef class MinimalSurfaceCalculator:
         cdef InitialContourCalculatorWrapper wrapper = InitialContourCalculatorWrapper(func)
         self.calculator.SetInitialContourCalculatorFunc(<init_contour_callback_type> wrapper)
 
-    cpdef np.ndarray[np.int_t, ndim=2] resolve_shortest_paths(self, np.ndarray[np.int_t, ndim=1] point, np.ndarray[np.float_t, ndim=3] data):
+    cpdef np.ndarray[np.int64_t, ndim=2] resolve_shortest_paths(self, np.ndarray[np.int64_t, ndim=1] point, np.ndarray[np.float_t, ndim=3] data):
         if len(point) != 3:
             print("point should be a size 3 array")
-        cdef Vec3[int] point_vec = Vec3[int](point[0], point[1], point[2])
+        cdef Vec3[int] point_vec = Vec3[int](point[2], point[1], point[0])
         cdef vector[unsigned int] im_size = [data.shape[0], data.shape[1], data.shape[2]]
         cdef Image img = Image(im_size, sitkFloat64)
         cdef int[::1] temp_view = data
@@ -196,12 +201,12 @@ cdef class MinimalSurfaceCalculator:
         cdef vector[Vec3[int]] path
         with nogil:
             path = ResolvePath(point_vec, img)
-        cdef np.ndarray[np.int_t, ndim=2] path_arr = np.ndarray((path.size(), 3), dtype=int)
+        cdef np.ndarray[np.int64_t, ndim=2] path_arr = np.ndarray((path.size(), 3), dtype=np.int64)
         cdef int i
         for i in range(path.size()):
-            path_arr[i, 0] = path[i].x()
+            path_arr[i, 2] = path[i].x()
             path_arr[i, 1] = path[i].y()
-            path_arr[i, 2] = path[i].z()
+            path_arr[i, 0] = path[i].z()
         return path_arr
 
     cpdef np.ndarray[np.float_t, ndim=3] calculate(
@@ -210,7 +215,7 @@ cdef class MinimalSurfaceCalculator:
             np.ndarray[np.float_t, ndim=3] image,
             np.ndarray[np.float_t, ndim=1] point1,
             np.ndarray[np.float_t, ndim=1] point2,
-            bool use_correction,
+            bool use_correction=True,
             int max_iterations=10000,
     ):
         cdef int i
@@ -221,8 +226,8 @@ cdef class MinimalSurfaceCalculator:
         cdef double* point1_data = point1_vec.begin()
         cdef double* point2_data = point2_vec.begin()
         for i in range(3):
-            point1_data[i] = point1[i]
-            point2_data[i] = point2[i]
+            point1_data[i] = point1[2-i]
+            point2_data[i] = point2[2-i]
         self.calculator.SetUsesCorrection(use_correction)
         with nogil:
             self.calculator.Calculate(sitk_phi, sitk_image, point1_vec, point2_vec, max_iterations)
@@ -248,8 +253,8 @@ cdef class MinimalSurfaceCalculator:
         cdef double* point1_data = point1_vec.begin()
         cdef double* point2_data = point2_vec.begin()
         for i in range(3):
-            point1_data[i] = point1[i]
-            point2_data[i] = point2[i]
+            point1_data[i] = point1[2-i]
+            point2_data[i] = point2[2-i]
         cdef Image transport_slice
         with nogil:
             transport_slice = self.calculator.GetTransportSliceFromPoints(sitk_image, point1_vec, point2_vec)
@@ -271,8 +276,8 @@ cdef class MinimalSurfaceCalculator:
         cdef double* point1_data = point1_vec.begin()
         cdef double* point2_data = point2_vec.begin()
         for i in range(3):
-            point1_data[i] = point1[i]
-            point2_data[i] = point2[i]
+            point1_data[i] = point1[2-i]
+            point2_data[i] = point2[2-i]
         cdef Image transport_slice
         self.calculator.SetUsesCorrection(use_correction)
         with nogil:
@@ -289,7 +294,5 @@ cdef class MinimalSurfaceCalculator:
 
     cpdef object get_init_plane(self):
         cdef Image init_plane = Cast(self.calculator.GetTempInitContour(), sitkFloat64)
-        print("init_plane")
         cdef object arr = sitk_2_np(init_plane).copy()
-        print("arr")
         return arr

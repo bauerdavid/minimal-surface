@@ -1,4 +1,4 @@
-from distutils.core import setup, Extension, DEBUG
+from setuptools import setup, Extension
 import glob
 import os
 import sys
@@ -72,13 +72,20 @@ libs = itk_libs+sitk_libs
 libs = map(os.path.basename, libs)
 libs = map(lambda s: s.rsplit(".", 1)[0], libs)
 libs = list(map(lambda s: s[3:] if s.startswith("lib") else s, libs))
-print("libs:")
-for l in libs:
-    print(" - %s" % l)
-print("extra_objects:")
-for l in itk_libs+sitk_libs:
-    print(" - %s" % l)
-print("library dirs: %s, %s" % (sitk_lib_path, itk_lib_path))
+
+# Compile against the modern NumPy C API only, so that use of the NumPy 1
+# legacy API is a build error rather than a silent numpy 1 pin.
+define_macros = [("NPY_NO_DEPRECATED_API", "NPY_1_7_API_VERSION")]
+
+# Function-level profiling is opt-in. It is only reachable through
+# profile_manager::dump(), which nothing calls, so it stays out of normal
+# builds. Enable with MINIMAL_SURFACE_PROFILE=1.
+if os.environ.get("MINIMAL_SURFACE_PROFILE", "").strip().lower() not in (
+    "", "0", "false", "no", "off",
+):
+    define_macros.append(("PROFILE_FUNCTIONS", "1"))
+    print("setup.py: function profiling enabled (PROFILE_FUNCTIONS)")
+
 extension = Extension(
     'minimal_surface',
     sources=["src/minimal-surface/code/_minimal_surface.pyx"] + glob.glob("src/minimal-surface/code/eikonal/*.cpp"),
@@ -91,6 +98,7 @@ extension = Extension(
         glob.glob(os.path.join(sitk_path, "include", "SimpleITK-*"))[0]
     ],
     depends=["MinimalSurfaceEstimator.h", "SimpleITK.h", "sitkImage.h"],
+    define_macros=define_macros,
     library_dirs=[sitk_lib_path, itk_lib_path],
     libraries=libs,
     extra_objects=itk_libs+sitk_libs+os_libs,

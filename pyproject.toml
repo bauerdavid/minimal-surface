@@ -1,5 +1,8 @@
 [build-system]
-requires = ["setuptools", "wheel", "cython", "numpy"]
+# NumPy 2 headers are required: a binary built against them stays compatible
+# with NumPy >= 1.19 at runtime, whereas one built against NumPy 1 headers
+# cannot be imported under NumPy 2 at all. Do not relax this pin.
+requires = ["setuptools>=64", "wheel", "cython>=3.0", "numpy>=2.0"]
 build-backend = "setuptools.build_meta"
 
 

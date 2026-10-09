@@ -78,7 +78,11 @@
 #define POINT3D_MAP(val_type) POINT3D, val_type, POINT3D_HASH
 #define POINT3D_SET POINT3D, POINT3D_HASH
 
-#define PROFILE_FUNCTIONS
+// Function-level profiling is opt-in and is defined by the build system, not
+// here. The collected data is only reachable through profile_manager::dump(),
+// which nothing in this project calls, so it is left out of normal builds.
+// Enable it with MINIMAL_SURFACE_PROFILE=1 when running setup.py, or by
+// defining PROFILE_FUNCTIONS yourself.
 
 #ifdef PROFILE_FUNCTIONS
 class profiler {
@@ -115,7 +119,16 @@ class profile_manager {
 		call_stack.push("__MAIN__");
 	}
 	~profile_manager() {
-		delete main_profiler;
+		// Do not let the main profiler run its normal end-of-scope
+		// bookkeeping here. That pops "__MAIN__" off the call stack and then
+		// reads the stack top, which is empty by that point, so it reads a
+		// destroyed element and indexes profile_data with the result. Mark it
+		// finished first so ~profiler() becomes a no-op.
+		if (main_profiler != nullptr) {
+			main_profiler->ended_profiling = true;
+			delete main_profiler;
+			main_profiler = nullptr;
+		}
 	}
 	std::stack<std::string> call_stack;
 public:
@@ -161,11 +174,18 @@ public:
 		getInstance().call_stack.push(func);
 	}
 	static void pop_func() {
-		getInstance().call_stack.pop();
+		// pop() and top() are undefined on an empty stack, so guard both
+		// rather than relying on every push being matched by exactly one pop.
+		std::stack<std::string>& stack = getInstance().call_stack;
+		if (!stack.empty())
+			stack.pop();
 	}
 
 	static std::string current_func() {
-		return getInstance().call_stack.top();
+		std::stack<std::string>& stack = getInstance().call_stack;
+		if (stack.empty())
+			return "__MAIN__";
+		return stack.top();
 	}
 	static void set_filename(std::string fname) {
 		getInstance().filename = fname;
@@ -463,21 +483,68 @@ void cross_product(const std::vector<T> vec1, const std::vector<T> vec2, std::ve
 	out.push_back(vec1[0] * vec2[1] - vec1[1] * vec2[0]);
 }
 
+// Row-major 3x3 rotation matrix taking vec1 onto vec2, by Rodrigues' formula.
+// The inputs need not be unit length. Returns the identity when either input
+// has no direction.
 template<typename T>
 std::vector<double> rotation_matrix_from_vectors(std::vector<T> vec1, std::vector<T> vec2) {
-	std::vector<T> vec1_sqr;
-	transform(vec1.begin(), vec1.end(), back_inserter(vec1_sqr), [](T& v) { return v * v; });
-	std::vector<T> vec2_sqr;
-	transform(vec2.begin(), vec2.end(), back_inserter(vec2_sqr), [](T& v) { return v * v; });
+	const double eps = 1e-12;
+	const std::vector<double> identity({ 1., 0., 0.,
+										 0., 1., 0.,
+										 0., 0., 1. });
+	if (vec1.size() != 3 || vec2.size() != 3)
+		return identity;
 
-	T sum1 = accumulate(vec1_sqr.begin(), vec1_sqr.end(), 0.0);
-	T sum2 = accumulate(vec2_sqr.begin(), vec2_sqr.end(), 0.0);
-	transform(vec1.begin(), vec1.end(), vec1.begin(), [sum1](T& c) { return c / sum1; });
-	transform(vec2.begin(), vec2.end(), vec2.begin(), [sum2](T& c) { return c / sum2; });
+	std::vector<double> a(vec1.begin(), vec1.end());
+	std::vector<double> b(vec2.begin(), vec2.end());
+	// Normalise by the Euclidean norm. The previous version divided by the sum
+	// of squares rather than its square root, which only happened to be
+	// harmless because every caller already passes unit vectors.
+	double a_norm = sqrt(std::inner_product(a.begin(), a.end(), a.begin(), 0.0));
+	double b_norm = sqrt(std::inner_product(b.begin(), b.end(), b.begin(), 0.0));
+	if (a_norm < eps || b_norm < eps)
+		return identity;
+	for (int i = 0; i < 3; i++) {
+		a[i] /= a_norm;
+		b[i] /= b_norm;
+	}
+
 	std::vector<double> v;
-	cross_product(vec1, vec2, v);
-	double c = inner_product(vec1.begin(), vec1.end(), vec2.begin(), 0.0);
-	double norm = sqrt(inner_product(v.begin(), v.end(), v.begin(), 0.0));
+	cross_product(a, b, v);
+	double c = std::inner_product(a.begin(), a.end(), b.begin(), 0.0);
+	double s = sqrt(std::inner_product(v.begin(), v.end(), v.begin(), 0.0));
+
+	if (s < eps) {
+		// Parallel or antiparallel. Rodrigues' formula divides by s*s, so both
+		// have to be handled here; previously this evaluated 0/0 and filled the
+		// matrix with NaN, which is what happened whenever the meeting plane
+		// normal came out along the x axis.
+		if (c > 0)
+			return identity;
+		// Opposite directions: rotate by pi about any unit axis perpendicular
+		// to a. Cross a with whichever coordinate axis it is least aligned
+		// with, so the result is well conditioned.
+		int min_axis = 0;
+		for (int i = 1; i < 3; i++) {
+			if (fabs(a[i]) < fabs(a[min_axis]))
+				min_axis = i;
+		}
+		std::vector<double> unit_axis(3, 0.);
+		unit_axis[min_axis] = 1.;
+		std::vector<double> p;
+		cross_product(a, unit_axis, p);
+		double p_norm = sqrt(std::inner_product(p.begin(), p.end(), p.begin(), 0.0));
+		for (int i = 0; i < 3; i++)
+			p[i] /= p_norm;
+		// A rotation by pi about the unit axis p is 2*p*p^T - I.
+		std::vector<double> rotation_matrix(9);
+		for (int i = 0; i < 3; i++) {
+			for (int j = 0; j < 3; j++)
+				rotation_matrix[3 * i + j] = 2 * p[i] * p[j] - (i == j ? 1. : 0.);
+		}
+		return rotation_matrix;
+	}
+
 	std::vector<double> kmat_plus_eye = std::vector<double>({
 		1, -v[2], v[1],
 		v[2], 1, -v[0],
@@ -486,9 +553,10 @@ std::vector<double> rotation_matrix_from_vectors(std::vector<T> vec1, std::vecto
 		(-v[2] * v[2] - v[1] * v[1]),				 (v[0] * v[1]),				   (v[2] * v[0]),
 					   (v[1] * v[0]), (-v[2] * v[2] - v[0] * v[0]),				   (v[2] * v[1]),
 					   (v[0] * v[2]),				 (v[1] * v[2]), (-v[0] * v[0] - v[1] * v[1]) });
-	transform(kmat_2.begin(), kmat_2.end(), kmat_2.begin(), [c, norm](T& val) {return val * ((1 - c) / (norm * norm)); });
+	double k = (1 - c) / (s * s);
 	std::vector<double> rotation_matrix = std::vector<double>(9);
-	transform(kmat_plus_eye.begin(), kmat_plus_eye.end(), kmat_2.begin(), rotation_matrix.begin(), std::plus<double>());
+	for (int i = 0; i < 9; i++)
+		rotation_matrix[i] = kmat_plus_eye[i] + kmat_2[i] * k;
 	return rotation_matrix;
 }
 

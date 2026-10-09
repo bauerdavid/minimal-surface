@@ -11,7 +11,7 @@ using namespace std;
 
 MinimalSurfaceEstimator::MinimalSurfaceEstimator()
 {
-    using namespace std::placeholders;
+	using namespace std::placeholders;
 	omp_set_nested(1);
 	omp_set_dynamic(1);
 	mInitialContourCalculatorFunc = [this](sitk::Image& slice_image, sitk::Image& slice_distance){return this->CalculateInitialContourFromPhaseField(slice_image, slice_distance);};
@@ -22,28 +22,28 @@ MinimalSurfaceEstimator::~MinimalSurfaceEstimator()
 }
 
 sitk::Image MinimalSurfaceEstimator::GetTransportSliceFromPoints(sitk::Image image, Vec3<double> point1, Vec3<double> point2){
-    Vec3<double> center = (point1 + point2)/2;
-    mAreaEikonal.SetMeetingPlaneCenter(center);
-    Vec3<double> normal_vec = (point2-point1);
-    normal_vec /= normal_vec.Norm();
-    normal_vec = StandardizeVector(normal_vec);
-    mAreaEikonal.SetMeetingPlaneNormal(normal_vec);
-    mRotationMatrix = mAreaEikonal.GetRotationMatrix();
-    vector<double> translation = calculateOffsetFromRotation(mRotationMatrix, image.GetSize());
+	Vec3<double> center = (point1 + point2)/2;
+	mAreaEikonal.SetMeetingPlaneCenter(center);
+	Vec3<double> normal_vec = (point2-point1);
+	normal_vec /= normal_vec.Norm();
+	normal_vec = StandardizeVector(normal_vec);
+	mAreaEikonal.SetMeetingPlaneNormal(normal_vec);
+	mRotationMatrix = mAreaEikonal.GetRotationMatrix();
+	vector<double> translation = calculateOffsetFromRotation(mRotationMatrix, image.GetSize());
 
-    sitk::Image rotated_image, sample_image;
-    sample_image = resample_img(image, rotated_image, mRotationMatrix);
-    vector<unsigned> rotated_size = rotated_image.GetSize();
+	sitk::Image rotated_image, sample_image;
+	sample_image = resample_img(image, rotated_image, mRotationMatrix);
+	vector<unsigned> rotated_size = rotated_image.GetSize();
 
-    vector<double> plane_center_transformed = sample_image.TransformPhysicalPointToContinuousIndex(center);
+	vector<double> plane_center_transformed = sample_image.TransformPhysicalPointToContinuousIndex(center);
 	mTransportInitPlaneSlice = (int)round(plane_center_transformed[0]);
 	sitk::Image plane_sample_image({1, rotated_size[1], rotated_size[2]}, sitk::sitkFloat64);
 
 	vector<double> origin;
 	rotate(mRotationMatrix, { plane_center_transformed[0], 0, 0}, origin);
-    std::transform(origin.begin(), origin.end(), translation.begin(), origin.begin(), std::plus<double>());
-    plane_sample_image.SetDirection(mRotationMatrix);
-    plane_sample_image.SetOrigin(origin);
+	std::transform(origin.begin(), origin.end(), translation.begin(), origin.begin(), std::plus<double>());
+	plane_sample_image.SetDirection(mRotationMatrix);
+	plane_sample_image.SetOrigin(origin);
 	plane_sample_image = sitk::Resample(image, plane_sample_image, sitk::Transform(), sitk::sitkLinear, 0., sitk::sitkUnknown, true);
 	sitk::Image plane_image_2d({rotated_size[1], rotated_size[2]}, sitk::sitkFloat64);
 	memcpy(plane_image_2d.GetBufferAsDouble(), plane_sample_image.GetBufferAsDouble(), plane_image_2d.GetNumberOfPixels() * sizeof(double));
@@ -51,9 +51,9 @@ sitk::Image MinimalSurfaceEstimator::GetTransportSliceFromPoints(sitk::Image ima
 }
 
 void MinimalSurfaceEstimator::CalculateEikonal(sitk::Image phi, Vec3<double> point1, Vec3<double> point2){
-    mAreaEikonal.Calculate(phi, point1, point2);
-    if(mAreaEikonal.IsUsingMeetingPoints())
-	    mAreaEikonal.UpdateMeetingPlane();
+	mAreaEikonal.Calculate(phi, point1, point2);
+	if(mAreaEikonal.IsUsingMeetingPoints())
+		mAreaEikonal.UpdateMeetingPlane();
 	mAreaEikonal.CombineDistance();
 	mRotationMatrix = mAreaEikonal.GetRotationMatrix();
 	vector<double> translation = calculateOffsetFromRotation(mRotationMatrix, mAreaEikonal.GetSampleImage().GetSize());
@@ -77,14 +77,14 @@ void MinimalSurfaceEstimator::CalculateEikonal(sitk::Image phi, Vec3<double> poi
 }
 
 sitk::Image MinimalSurfaceEstimator::CalculateEikonalAndTransportInit(sitk::Image phi, sitk::Image image, Vec3<double> point1, Vec3<double> point2){
-    CalculateEikonal(phi, point1, point2);
+	CalculateEikonal(phi, point1, point2);
 	//calculate slice distance
 	sitk::Image distanceSlice = GetImageSlice<sitk::sitkFloat64>(mRotatedAreaEikonal.GetCombinedDistanceMap(), 0, mTransportInitPlaneSlice);
 	vector<unsigned> slice_size = distanceSlice.GetSize();
 	sitk::Image plane_sample_image({1, slice_size[0], slice_size[1]}, sitk::sitkFloat64);
-    mRotationMatrix = mAreaEikonal.GetRotationMatrix();
-    vector<double> translation = calculateOffsetFromRotation(mRotationMatrix, mAreaEikonal.GetSampleImage().GetSize());
-    vector<double> plane_center_physical = mAreaEikonal.GetMeetingPlaneCenter();
+	mRotationMatrix = mAreaEikonal.GetRotationMatrix();
+	vector<double> translation = calculateOffsetFromRotation(mRotationMatrix, mAreaEikonal.GetSampleImage().GetSize());
+	vector<double> plane_center_physical = mAreaEikonal.GetMeetingPlaneCenter();
 	vector<double> plane_center_transformed = mRotatedAreaEikonal.TransformPhysicalPointToContinuousIndex(plane_center_physical);
 	plane_sample_image.SetDirection(mRotationMatrix);
 	vector<double> origin;
@@ -95,20 +95,20 @@ sitk::Image MinimalSurfaceEstimator::CalculateEikonalAndTransportInit(sitk::Imag
 	sitk::Image plane_image_2d(slice_size, sitk::sitkFloat64);
 	memcpy(plane_image_2d.GetBufferAsDouble(), plane_sample_image.GetBufferAsDouble(), plane_image_2d.GetNumberOfPixels() * sizeof(double));
 	sitk::Image init_contour = sitk::Cast(mInitialContourCalculatorFunc(plane_image_2d, distanceSlice), sitk::sitkUInt8);
-    return init_contour;
+	return init_contour;
 }
 
 sitk::Image MinimalSurfaceEstimator::CalculateEikonalAndTransportInit(sitk::Image phi, Vec3<double> point1, Vec3<double> point2){
-    return CalculateEikonalAndTransportInit(phi, phi, point1, point2);
+	return CalculateEikonalAndTransportInit(phi, phi, point1, point2);
 }
 
 void MinimalSurfaceEstimator::CalculateTransportFunction(sitk::Image& initial_contour, int maxIterations){
-    sitk::Image initial_slice = sitk::SignedMaurerDistanceMap(initial_contour, true, false);
-    initial_slice = sitk::Clamp(initial_slice, sitk::sitkFloat64, -25, 25);
-    realnum maxdist = mRotatedAreaEikonal.GetCurrentDistance();
-    IterationEvent(TRANSPORT_FUNCTION_ITERATION);
-    auto size = mRotatedAreaEikonal.GetCombinedDistanceMap().GetSize();
-    mTransportFunctionCalculator.Calculate(mRotatedAreaEikonal.GetCombinedDistanceMap(), initial_slice, mTransportInitPlaneSlice, maxdist, maxIterations);
+	sitk::Image initial_slice = sitk::SignedMaurerDistanceMap(initial_contour, true, false);
+	initial_slice = sitk::Clamp(initial_slice, sitk::sitkFloat64, -25, 25);
+	realnum maxdist = mRotatedAreaEikonal.GetCurrentDistance();
+	IterationEvent(TRANSPORT_FUNCTION_ITERATION);
+	auto size = mRotatedAreaEikonal.GetCombinedDistanceMap().GetSize();
+	mTransportFunctionCalculator.Calculate(mRotatedAreaEikonal.GetCombinedDistanceMap(), initial_slice, mTransportInitPlaneSlice, maxdist, maxIterations);
 
 	//rotate transport function to original position
 	vector<unsigned int> sample_size = mAreaEikonal.GetPhiMap().GetSize();
@@ -118,27 +118,29 @@ void MinimalSurfaceEstimator::CalculateTransportFunction(sitk::Image& initial_co
 void MinimalSurfaceEstimator::Calculate(sitk::Image phi, sitk::Image image, Vec3<double> point1, Vec3<double> point2, int maxIterations) {
 	sitk::Image initial_contour;
 	if(mTempInitContour == nullptr){
-        if(mAreaEikonal.IsUsingMeetingPoints()) {
-            SetTransportInitSlice(CalculateEikonalAndTransportInit(phi, image, point1, point2));
-        }
-        else {
-            SetTransportInitSlice(GetTransportSliceFromPoints(phi, point1, point2));
-        }
+		cout <<"Calculating initial contour..." <<endl;
+		if(mAreaEikonal.IsUsingMeetingPoints()) {
+			SetTransportInitSlice(CalculateEikonalAndTransportInit(phi, image, point1, point2));
+		}
+		else {
+			SetTransportInitSlice(GetTransportSliceFromPoints(phi, point1, point2));
+		}
 	}
 	if(!mAreaEikonal.IsInitialized()){
-        CalculateEikonal(phi, point1, point2);
-    }
+		cout <<"Calculating Eikonal" <<endl;
+		CalculateEikonal(phi, point1, point2);
+	}
 	initial_contour = *mTempInitContour;
-    CalculateTransportFunction(initial_contour, maxIterations);
+	CalculateTransportFunction(initial_contour, maxIterations);
 }
 
 void MinimalSurfaceEstimator::Calculate(sitk::Image phi, Vec3<double> point1, Vec3<double> point2, int maxIterations){
-    Calculate(phi, phi, point1, point2, maxIterations);
+	Calculate(phi, phi, point1, point2, maxIterations);
 }
 
 void MinimalSurfaceEstimator::SetTransportInitSlice(const sitk::Image& image){
-    mTempInitContour.reset(new sitk::Image(image));
-    IterationEvent(PLANE_PHASEFIELD_ITERATION);
+	mTempInitContour.reset(new sitk::Image(image));
+	IterationEvent(PLANE_PHASEFIELD_ITERATION);
 }
 
 
@@ -455,7 +457,7 @@ void MinimalSurfaceEstimator::SetUsesCorrection(bool useCorrection)
 }
 
 void MinimalSurfaceEstimator::SetUsingMeetingPoints(bool useMeetingPoints){
-    mAreaEikonal.SetUsingMeetingPoints(useMeetingPoints);
+	mAreaEikonal.SetUsingMeetingPoints(useMeetingPoints);
 }
 
 
@@ -480,19 +482,19 @@ const TransportFunctionES& MinimalSurfaceEstimator::GetTransportFunctionCalculat
 }
 
 sitk::Image MinimalSurfaceEstimator::CalculateInitialContourFromPhaseField(sitk::Image& plane_image_2d, sitk::Image& distanceSlice) {
-    mInitialContourCalculator.Calculate(plane_image_2d, distanceSlice);
-    return sitk::Less(mInitialContourCalculator.GetPhaseField(), 0);
+	mInitialContourCalculator.Calculate(plane_image_2d, distanceSlice);
+	return sitk::Less(mInitialContourCalculator.GetPhaseField(), 0);
 }
 
 void MinimalSurfaceEstimator::SetInitialContourCalculatorFunc(std::function<sitk::Image(sitk::Image&, sitk::Image&)> func){
-    mInitialContourCalculatorFunc = func;
+	mInitialContourCalculatorFunc = func;
 }
 
 const sitk::Image& MinimalSurfaceEstimator::GetCombinedDistanceMap() const{
-    return mRotatedAreaEikonal.GetCombinedDistanceMap();
+	return mRotatedAreaEikonal.GetCombinedDistanceMap();
 }
 
 sitk::Image MinimalSurfaceEstimator::GetTempInitContour() const {
-    return *mTempInitContour;
+	return *mTempInitContour;
 }
 

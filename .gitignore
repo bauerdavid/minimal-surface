@@ -11,6 +11,7 @@ env/
 env39/
 env31[0-9]/
 .idea/
+.vscode/
 /dist/
 **/.vs/
 *.pyd

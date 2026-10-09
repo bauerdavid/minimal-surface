@@ -4,6 +4,8 @@
 #include <SimpleITK.h>
 #include <vector>
 #include <numpy/arrayobject.h>
+#include <stdexcept>
+
 namespace sitk = itk::simple;
 
 
@@ -55,17 +57,22 @@ public:
 
 
     RetVal call_pyobject(Args... args) {
-        PyGILState_STATE gstate;
-		gstate = PyGILState_Ensure();
+        // The GIL must be held for the whole call, including the conversion of
+        // the return value by cast_from_python, and must be released on every
+        // exit path - including the throws below.
+        GILGuard gil;
         PyObject* arg_list = BuildArgs<Args...>(args...);
-        if(PyErr_Occurred() != NULL){
+        if(arg_list == NULL){
             PyErr_Print();
+            throw std::runtime_error("Failed to build arguments for Python callable.");
         }
+        PyRef arg_list_ref(arg_list);
         PyObject* retval = PyObject_CallObject(callable, arg_list);
-        if(PyErr_Occurred() != NULL){
+        if(retval == NULL){
             PyErr_Print();
+            throw std::runtime_error("Failed to execute Python callable.");
         }
-        PyGILState_Release(gstate);
+        PyRef retval_ref(retval);
         return cast_from_python<RetVal>(retval);
     }
 };

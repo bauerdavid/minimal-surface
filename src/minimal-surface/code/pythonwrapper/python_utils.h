@@ -14,8 +14,33 @@
 #include <memory>
 #include <string>
 #include <cstdlib>
+#include <stdexcept>
 
 namespace sitk = itk::simple;
+
+
+// Holds the GIL for the lifetime of the object, so that it is released on
+// every exit path from a scope, including when an exception is thrown.
+class GILGuard {
+    PyGILState_STATE state;
+public:
+    GILGuard() : state(PyGILState_Ensure()) {}
+    ~GILGuard() { PyGILState_Release(state); }
+    GILGuard(const GILGuard&) = delete;
+    GILGuard& operator=(const GILGuard&) = delete;
+};
+
+// Owns one strong reference and drops it on scope exit. The GIL must be held
+// when the object is destroyed.
+class PyRef {
+    PyObject* obj;
+public:
+    explicit PyRef(PyObject* o) : obj(o) {}
+    ~PyRef() { Py_XDECREF(obj); }
+    PyRef(const PyRef&) = delete;
+    PyRef& operator=(const PyRef&) = delete;
+    PyObject* get() const { return obj; }
+};
 
 
 template <class T>
@@ -106,7 +131,7 @@ PyObject* sitk_2_np(const sitk::Image& img){
         image_dims[2] = 1;
     const double* img_buffer = img.GetBufferAsDouble();
     PyObject* out = PyArray_SimpleNew(3, image_dims, NPY_DOUBLE);
-    void* arr_data = PyArray_DATA(out);
+    void* arr_data = PyArray_DATA((PyArrayObject*)out);
     memcpy(arr_data, img_buffer, n_pixels*sizeof(double));
     if (out == NULL) {
         std::cout << "Couldn't create numpy array" << std::endl;
@@ -115,20 +140,47 @@ PyObject* sitk_2_np(const sitk::Image& img){
     return out;
 }
 
+// Copy a numpy array into a SimpleITK image of the given pixel type.
+// The caller must hold the GIL.
 template<sitk::PixelIDValueEnum pixelID>
 sitk::Image np_2_sitk(PyObject* arr_obj){
-    int ndim = PyArray_NDIM(arr_obj);
-    npy_intp* dims = PyArray_DIMS(arr_obj);
-    void* data = PyArray_DATA(arr_obj);
+    typedef typename CType<pixelID>::Type PixelType;
+    // Coerce the input to a C-contiguous array of exactly the pixel type that
+    // the memcpy below reads. Without this the memcpy reinterprets whatever
+    // buffer the caller supplied: a bool mask read as float64 yields garbage
+    // and over-reads the heap by a factor of eight.
+    PyObject* converted = PyArray_FROM_OTF(
+        arr_obj, npy_type<PixelType>::value,
+        NPY_ARRAY_C_CONTIGUOUS | NPY_ARRAY_FORCECAST);
+    if (converted == NULL) {
+        // A Python exception is already set, e.g. TypeError when the object is
+        // not array-like at all.
+        PyErr_Print();
+        throw std::runtime_error(
+            "np_2_sitk: could not convert object to a contiguous numpy array "
+            "of the required pixel type");
+    }
+    PyRef converted_ref(converted);
+    PyArrayObject* arr = (PyArrayObject*)converted;
+
+    int ndim = PyArray_NDIM(arr);
+    if (ndim < 2 || ndim > 3) {
+        // Without this, None converts to a 0-d array and the failure surfaces
+        // as an opaque error from inside SimpleITK.
+        throw std::runtime_error(
+            "np_2_sitk: expected a 2D or 3D array, got " +
+            std::to_string(ndim) + " dimensions");
+    }
+    npy_intp* dims = PyArray_DIMS(arr);
     std::vector<unsigned> im_size;
-    int n_pixels = 1;
+    size_t n_pixels = 1;
     for(int i=0; i< ndim; i++){
-        im_size.push_back(dims[ndim-1-i]);
-        n_pixels *= (int)dims[ndim-1-i];
+        im_size.push_back((unsigned)dims[ndim-1-i]);
+        n_pixels *= (size_t)dims[ndim-1-i];
     }
     sitk::Image img(im_size, pixelID);
-    typename CType<pixelID>::Type* buffer = PixelManagerTrait<pixelID>::GetBuffer(img);
-    memcpy(buffer, data, n_pixels*sizeof(typename CType<pixelID>::Type));
+    PixelType* buffer = PixelManagerTrait<pixelID>::GetBuffer(img);
+    memcpy(buffer, PyArray_DATA(arr), n_pixels*sizeof(PixelType));
     return img;
 }
 
@@ -143,7 +195,7 @@ PyObject* vector_2_np(const std::vector<T>& vec){
     PyGILState_STATE gstate;
     gstate = PyGILState_Ensure();
     PyObject* out = PyArray_SimpleNew(ndims, &dims, npy_type<T>::value);
-    void* data = PyArray_DATA(out);
+    void* data = PyArray_DATA((PyArrayObject*)out);
     memcpy(data, &vec[0], vec.size()*sizeof(T));
 //    Py_XDECREF(out);
     if (out == NULL) {
