@@ -115,7 +115,16 @@ class profile_manager {
 		call_stack.push("__MAIN__");
 	}
 	~profile_manager() {
-		delete main_profiler;
+		// Do not let the main profiler run its normal end-of-scope
+		// bookkeeping here. That pops "__MAIN__" off the call stack and then
+		// reads the stack top, which is empty by that point, so it reads a
+		// destroyed element and indexes profile_data with the result. Mark it
+		// finished first so ~profiler() becomes a no-op.
+		if (main_profiler != nullptr) {
+			main_profiler->ended_profiling = true;
+			delete main_profiler;
+			main_profiler = nullptr;
+		}
 	}
 	std::stack<std::string> call_stack;
 public:
@@ -161,11 +170,18 @@ public:
 		getInstance().call_stack.push(func);
 	}
 	static void pop_func() {
-		getInstance().call_stack.pop();
+		// pop() and top() are undefined on an empty stack, so guard both
+		// rather than relying on every push being matched by exactly one pop.
+		std::stack<std::string>& stack = getInstance().call_stack;
+		if (!stack.empty())
+			stack.pop();
 	}
 
 	static std::string current_func() {
-		return getInstance().call_stack.top();
+		std::stack<std::string>& stack = getInstance().call_stack;
+		if (stack.empty())
+			return "__MAIN__";
+		return stack.top();
 	}
 	static void set_filename(std::string fname) {
 		getInstance().filename = fname;
