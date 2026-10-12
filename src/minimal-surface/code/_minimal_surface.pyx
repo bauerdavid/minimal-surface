@@ -191,18 +191,26 @@ cdef class MinimalSurfaceCalculator:
         self.calculator.SetInitialContourCalculatorFunc(<init_contour_callback_type> wrapper)
 
     cpdef np.ndarray[np.int64_t, ndim=2] resolve_shortest_paths(self, np.ndarray[np.int64_t, ndim=1] point, np.ndarray[np.float_t, ndim=3] data):
-        if len(point) != 3:
-            print("point should be a size 3 array")
-        cdef Vec3[int] point_vec = Vec3[int](point[2], point[1], point[0])
-        cdef vector[unsigned int] im_size = [data.shape[0], data.shape[1], data.shape[2]]
-        cdef Image img = Image(im_size, sitkFloat64)
-        cdef int[::1] temp_view = data
-        memcpy(img.GetBufferAsDouble(), &temp_view[0], im_size[2] * im_size[1] * im_size[0] * sizeof(double))
+        # point and the returned path are in array index order, (z, y, x), like
+        # the rest of this API; the SimpleITK (x, y, z) order is internal.
+        cdef int i
+        if point.shape[0] != 3:
+            raise ValueError("point should be a size 3 array")
+        # ResolvePath indexes the distance map without checking, so a start point
+        # outside it would be an out-of-bounds read.
+        for i in range(3):
+            if point[i] < 0 or point[i] >= data.shape[i]:
+                raise ValueError(
+                    "point %s is outside the distance map of shape (%d, %d, %d)"
+                    % (point.tolist(), data.shape[0], data.shape[1], data.shape[2]))
+        cdef Vec3[int] point_vec = Vec3[int](<int>point[2], <int>point[1], <int>point[0])
+        # Same conversion as calculate(): a C-contiguous float64 copy with the
+        # dimensions reversed into SimpleITK order.
+        cdef Image img = np_2_sitk[sitkFloat64_](data)
         cdef vector[Vec3[int]] path
         with nogil:
             path = ResolvePath(point_vec, img)
         cdef np.ndarray[np.int64_t, ndim=2] path_arr = np.ndarray((path.size(), 3), dtype=np.int64)
-        cdef int i
         for i in range(path.size()):
             path_arr[i, 2] = path[i].x()
             path_arr[i, 1] = path[i].y()
