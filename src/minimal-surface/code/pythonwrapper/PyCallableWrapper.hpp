@@ -13,15 +13,35 @@ template<typename RetVal, class ...Args>
 class PyCallableWrapperBase {
 protected:
     PyObject* callable;
+
+    // Reference counts may only be changed while holding the GIL. These
+    // wrappers are copied and destroyed from inside the estimator's nogil
+    // sections (the callbacks live in std::function objects that get copied
+    // when a calculation starts), so every operation that touches a count takes
+    // the GIL itself. PyGILState_Ensure is cheap when the thread already holds it.
+    static void acquire(PyObject* obj) {
+        if (obj == nullptr) return;
+        GILGuard gil;
+        Py_INCREF(obj);
+    }
+
+    // If the interpreter is already gone (a wrapper destroyed by a static
+    // destructor at process exit) there is nothing left to release into, and
+    // asking for the GIL would be invalid, so the reference is just dropped.
+    static void release(PyObject* obj) {
+        if (obj == nullptr || !Py_IsInitialized()) return;
+        GILGuard gil;
+        Py_DECREF(obj);
+    }
 public:
     typedef RetVal result_type;
     // Takes a new reference to obj, which may be NULL.
     PyCallableWrapperBase(PyObject* obj): callable(obj){
-        Py_XINCREF(callable);
+        acquire(callable);
     };
 
     PyCallableWrapperBase(const PyCallableWrapperBase& other): callable(other.callable) {
-        Py_XINCREF(callable);
+        acquire(callable);
     }
 
     // Steals the reference rather than taking a new one. Taking a reference
@@ -34,7 +54,7 @@ public:
     PyCallableWrapperBase(): callable(nullptr) { }
 
     ~PyCallableWrapperBase() {
-        Py_XDECREF(callable);
+        release(callable);
     }
 
     // Acquires the new reference before releasing the old one, so that
@@ -44,14 +64,14 @@ public:
     PyCallableWrapperBase& operator=(const PyCallableWrapperBase& other) {
         PyObject* old = callable;
         callable = other.callable;
-        Py_XINCREF(callable);
-        Py_XDECREF(old);
+        acquire(callable);
+        release(old);
         return *this;
     }
 
     PyCallableWrapperBase& operator=(PyCallableWrapperBase&& other) noexcept {
         if (this != &other) {
-            Py_XDECREF(callable);
+            release(callable);
             callable = other.callable;
             other.callable = nullptr;
         }
