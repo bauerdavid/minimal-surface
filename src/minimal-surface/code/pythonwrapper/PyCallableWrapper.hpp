@@ -13,40 +13,68 @@ template<typename RetVal, class ...Args>
 class PyCallableWrapperBase {
 protected:
     PyObject* callable;
+
+    // Reference counts may only be changed while holding the GIL. These
+    // wrappers are copied and destroyed from inside the estimator's nogil
+    // sections (the callbacks live in std::function objects that get copied
+    // when a calculation starts), so every operation that touches a count takes
+    // the GIL itself. PyGILState_Ensure is cheap when the thread already holds it.
+    static void acquire(PyObject* obj) {
+        if (obj == nullptr) return;
+        GILGuard gil;
+        Py_INCREF(obj);
+    }
+
+    // If the interpreter is already gone (a wrapper destroyed by a static
+    // destructor at process exit) there is nothing left to release into, and
+    // asking for the GIL would be invalid, so the reference is just dropped.
+    static void release(PyObject* obj) {
+        if (obj == nullptr || !Py_IsInitialized()) return;
+        GILGuard gil;
+        Py_DECREF(obj);
+    }
 public:
     typedef RetVal result_type;
+    // Takes a new reference to obj, which may be NULL.
     PyCallableWrapperBase(PyObject* obj): callable(obj){
-		Py_INCREF(obj);
+        acquire(callable);
     };
 
     PyCallableWrapperBase(const PyCallableWrapperBase& other): callable(other.callable) {
-     	Py_INCREF(callable);
+        acquire(callable);
     }
 
-    PyCallableWrapperBase(PyCallableWrapperBase&& other): callable(other.callable) {
-        Py_INCREF(callable);
-        other.callable = 0;
+    // Steals the reference rather than taking a new one. Taking a reference
+    // here and then clearing other.callable - so that the moved-from object
+    // no longer releases anything - leaked one reference per move.
+    PyCallableWrapperBase(PyCallableWrapperBase&& other) noexcept: callable(other.callable) {
+        other.callable = nullptr;
     }
 
     PyCallableWrapperBase(): callable(nullptr) { }
 
     ~PyCallableWrapperBase() {
-        Py_XDECREF(callable);
+        release(callable);
     }
 
+    // Acquires the new reference before releasing the old one, so that
+    // self-assignment through an alias cannot free the object being assigned.
+    // The previous body released this->callable and then let the delegated
+    // move-assignment release it a second time.
     PyCallableWrapperBase& operator=(const PyCallableWrapperBase& other) {
-        Py_XDECREF(callable);
-        PyCallableWrapperBase tmp = other;
-        *this = std::move(tmp);
-        Py_INCREF(this->callable);
+        PyObject* old = callable;
+        callable = other.callable;
+        acquire(callable);
+        release(old);
         return *this;
     }
 
-    PyCallableWrapperBase& operator=(PyCallableWrapperBase&& other) {
-        Py_XDECREF(callable);
-        callable = other.callable;
-        Py_INCREF(callable);
-        other.callable = 0;
+    PyCallableWrapperBase& operator=(PyCallableWrapperBase&& other) noexcept {
+        if (this != &other) {
+            release(callable);
+            callable = other.callable;
+            other.callable = nullptr;
+        }
         return *this;
     }
     RetVal operator()(Args... args){
