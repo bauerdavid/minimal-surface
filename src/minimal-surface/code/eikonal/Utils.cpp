@@ -134,22 +134,23 @@ vector<Vec3<int>> ResolvePath(Vec3<int> point, const sitk::Image& distanceMap)
 	for (int ii = 0; ii < 11111; ++ii) {
 		auto [ix, iy, iz] = point;
 
-		if (iz < 2) iz = 2;
-		if (iz >= zs - 2) iz = zs - 3;
-		if (ix < 2) ix = 2;
-		if (ix >= xs - 2) ix = xs - 3;
-		if (iy < 2) iy = 2;
-		if (iy >= ys - 2) iy = ys - 3;
-
-		
+		// Look at the neighbours of the voxel the path is actually on, and
+		// leave out the ones that fall outside the volume. The scan used to be
+		// centred on a copy of the position clamped to [2, size - 3], while the
+		// step it chose was added to the unclamped position. Next to a border
+		// the chosen direction therefore belonged to a different voxel, and the
+		// path could walk out of the volume and read past the buffer.
 		realnum mmin(0);
 		Vec3<int> minimal_direction;
 		for (int zo = -1; zo <= 1; ++zo) {
 			int zz = iz + zo;
+			if (zz < 0 || zz >= zs) continue;
 			for (int yo = -1; yo <= 1; ++yo) {
 				int yy = iy + yo;
+				if (yy < 0 || yy >= ys) continue;
 				for (int xo = -1; xo <= 1; ++xo) {
 					int xx = ix + xo;
+					if (xx < 0 || xx >= xs) continue;
 					if (!zo && !yo && !xo) continue;
 					double dist = sqrts[abs(xo) + abs(yo) + abs(zo)];
 					double d0 = BUF_IDX3D(distance_buffer, xs, ys, zs, (int)ix, (int)iy, (int)iz);
