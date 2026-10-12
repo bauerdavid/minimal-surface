@@ -59,9 +59,11 @@ def calc_features(image):
 # Crop the part to the smallest size possible to prevent long computation
 data = cells3d()[:, 1, 60:130, 130:190] 
 
-# Two points on the surface of the nucleus
-p1 = np.asarray([ 20., 60., 35.])
-p2 = np.asarray([ 39., 12., 35.])
+# Two points on the surface of the nucleus. Points use the same axis order as
+# the array indices, (z, y, x), just like `data[z, y, x]`.
+# Both lie in slice z=35, which is the one displayed at the end.
+p1 = np.asarray([ 35., 60., 20.])
+p2 = np.asarray([ 35., 12., 39.])
 
 data = (data - (min_ := data.min())) / (data.max() - min_)
 data = ndimage.gaussian_filter(data, 1.)
