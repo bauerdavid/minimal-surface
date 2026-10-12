@@ -92,6 +92,11 @@ plt.imshow(mask[35], cmap="plasma")
 plt.show()
 ```
 
+## Inputs
+`calculate`, `calc_eikonal_and_transport_init` and `init_transport_slice` take 3D arrays of any real numeric dtype (bool, integer or floating point) and any memory layout; they are converted to C-contiguous `float64` internally, and your arrays are not modified. Anything else (complex, strings, objects, `None` for `phi`) raises a `TypeError`, and `phi` and `image` must have the same shape.
+
+Points are `(z, y, x)`, like array indices, and may be fractional. A point must lie inside the volume (each coordinate in `[-0.5, n - 0.5)` for an axis of length `n`); a point of the wrong length, or outside the array on any axis, raises a `ValueError` naming the point and the shape.
+
 ## Issues
 If you bump into any problems regarding the package, please [file an issue].
 
