@@ -121,6 +121,54 @@ cdef extern from "MinimalSurfaceEstimator.h":
         Image GetTempInitContour() nogil
     cdef vector[Vec3[int]] ResolvePath(Vec3[int], const Image&) nogil
 
+cdef object _as_float64_volume(object arr, str name):
+    # The C++ side works on float64 images stored C-contiguously, so any real
+    # numeric array is converted here: a float32 or uint16 image gives exactly
+    # the result of the same data as float64, and a Fortran-ordered or strided
+    # view is laid out C-contiguously. An array that is already C-contiguous
+    # float64 is passed through without a copy; it is only ever read.
+    # Anything that is not real numeric data (complex, str, object, datetime,
+    # None...) is rejected with a TypeError instead of being cast blindly.
+    cdef object a = np.asarray(arr)
+    if a.dtype.kind not in "biuf":
+        raise TypeError(
+            "%s must be an array of real numbers (bool, integer or floating "
+            "point), got dtype %s" % (name, a.dtype))
+    if a.ndim != 3:
+        raise ValueError(
+            "%s must be a 3D array, got %d dimension(s) with shape %s"
+            % (name, a.ndim, a.shape))
+    if a.size == 0:
+        raise ValueError("%s must not be empty, got shape %s" % (name, a.shape))
+    return np.ascontiguousarray(a, dtype=np.float64)
+
+
+cdef object _validated_point(object point, str name, tuple shape):
+    # point is in array index order, (z, y, x), like the volumes, and may be
+    # fractional. It is inside the volume when every coordinate lies within the
+    # extent of the voxels along that axis, [-0.5, n - 0.5). The C++ code does
+    # not check this: it indexes the volume with the point, so a point outside
+    # reads out of bounds, which can take down the whole process.
+    cdef object p = np.asarray(point)
+    cdef int i
+    if p.dtype.kind not in "biuf":
+        raise TypeError(
+            "%s must be 3 real numbers (z, y, x), got dtype %s" % (name, p.dtype))
+    if p.ndim != 1 or p.shape[0] != 3:
+        raise ValueError(
+            "%s must be a point with 3 coordinates (z, y, x) in the volume of "
+            "shape %s, got %s" % (name, shape, p.tolist()))
+    cdef object p64 = np.ascontiguousarray(p, dtype=np.float64)
+    for i in range(3):
+        # written as "not inside" so that NaN is rejected too
+        if not (-0.5 <= p64[i] < shape[i] - 0.5):
+            raise ValueError(
+                "%s %s is outside the volume of shape %s: coordinate %d (axis "
+                "%d, order z, y, x) must be in [-0.5, %s)"
+                % (name, p64.tolist(), shape, i, i, shape[i] - 0.5))
+    return p64
+
+
 cdef class MinimalSurfaceCalculator:
     cdef MinimalSurfaceEstimator calculator
     def __cinit__(self):
@@ -219,50 +267,64 @@ cdef class MinimalSurfaceCalculator:
 
     cpdef np.ndarray[np.float_t, ndim=3] calculate(
             self,
-            np.ndarray[np.float_t, ndim=3] phi,
-            np.ndarray[np.float_t, ndim=3] image,
-            np.ndarray[np.float_t, ndim=1] point1,
-            np.ndarray[np.float_t, ndim=1] point2,
+            object phi,
+            object image,
+            object point1,
+            object point2,
             bool use_correction=True,
             int max_iterations=10000,
     ):
+        # phi and image: 3D arrays of any real numeric dtype and memory layout,
+        # converted to C-contiguous float64. point1, point2: (z, y, x) array
+        # index order, inside the volume (ValueError otherwise).
         cdef int i
-        cdef Image sitk_image = np_2_sitk[sitkFloat64_](image)
-        cdef Image sitk_phi = np_2_sitk[sitkFloat64_](phi)
+        cdef object phi_arr = _as_float64_volume(phi, "phi")
+        cdef object image_arr = _as_float64_volume(image, "image")
+        if phi_arr.shape != image_arr.shape:
+            raise ValueError(
+                "phi and image must have the same shape, got %s and %s"
+                % (phi_arr.shape, image_arr.shape))
+        cdef double[::1] p1 = _validated_point(point1, "point1", image_arr.shape)
+        cdef double[::1] p2 = _validated_point(point2, "point2", image_arr.shape)
+        cdef Image sitk_image = np_2_sitk[sitkFloat64_](image_arr)
+        cdef Image sitk_phi = np_2_sitk[sitkFloat64_](phi_arr)
         cdef Vec3[double] point1_vec
         cdef Vec3[double] point2_vec
         cdef double* point1_data = point1_vec.begin()
         cdef double* point2_data = point2_vec.begin()
         for i in range(3):
-            point1_data[i] = point1[2-i]
-            point2_data[i] = point2[2-i]
+            point1_data[i] = p1[2-i]
+            point2_data[i] = p2[2-i]
         self.calculator.SetUsesCorrection(use_correction)
         with nogil:
             self.calculator.Calculate(sitk_phi, sitk_image, point1_vec, point2_vec, max_iterations)
         cdef const double* transport_buffer = self.calculator.GetTransportFunctionCalculator().GetTransportFunction().GetBufferAsDouble()
-        cdef np.ndarray[np.float_t, ndim=3] output = np.empty((image.shape[0], image.shape[1], image.shape[2]), dtype=float)
+        cdef np.ndarray[np.float_t, ndim=3] output = np.empty((image_arr.shape[0], image_arr.shape[1], image_arr.shape[2]), dtype=float)
         cdef double[:, :, :] out_view = output
-        memcpy(&out_view[0, 0, 0], transport_buffer, image.size * sizeof(double))
+        memcpy(&out_view[0, 0, 0], transport_buffer, image_arr.size * sizeof(double))
         return output
 
     cpdef void init_transport_slice(self,
-            np.ndarray[np.float_t, ndim=3] image,
-            np.ndarray[np.float_t, ndim=1] point1,
-            np.ndarray[np.float_t, ndim=1] point2):
+            object image,
+            object point1,
+            object point2):
         cdef int i
+        cdef object image_arr = _as_float64_volume(image, "image")
+        cdef double[::1] p1 = _validated_point(point1, "point1", image_arr.shape)
+        cdef double[::1] p2 = _validated_point(point2, "point2", image_arr.shape)
         cdef vector[unsigned int] im_size
         for i in range(3):
-            im_size.push_back(<unsigned int>image.shape[2-i])
+            im_size.push_back(<unsigned int>image_arr.shape[2-i])
         cdef Image sitk_image = Image(im_size, sitkFloat64)
-        cdef double[:, :, :] image_data = image
-        memcpy(sitk_image.GetBufferAsDouble(), &image_data[0, 0, 0], image.size*sizeof(double))
+        cdef double[:, :, :] image_data = image_arr
+        memcpy(sitk_image.GetBufferAsDouble(), &image_data[0, 0, 0], image_arr.size*sizeof(double))
         cdef Vec3[double] point1_vec
         cdef Vec3[double] point2_vec
         cdef double* point1_data = point1_vec.begin()
         cdef double* point2_data = point2_vec.begin()
         for i in range(3):
-            point1_data[i] = point1[2-i]
-            point2_data[i] = point2[2-i]
+            point1_data[i] = p1[2-i]
+            point2_data[i] = p2[2-i]
         cdef Image transport_slice
         with nogil:
             transport_slice = self.calculator.GetTransportSliceFromPoints(sitk_image, point1_vec, point2_vec)
@@ -270,22 +332,31 @@ cdef class MinimalSurfaceCalculator:
 
     cpdef void calc_eikonal_and_transport_init(
             self,
-            np.ndarray[np.float_t, ndim=3] phi,
-            np.ndarray[np.float_t, ndim=3] image,
-            np.ndarray[np.float_t, ndim=1] point1,
-            np.ndarray[np.float_t, ndim=1] point2,
+            object phi,
+            object image,
+            object point1,
+            object point2,
             bool use_correction,
     ):
+        # image may be None, then phi is used for it.
         cdef int i
-        cdef Image sitk_phi = np_2_sitk[sitkFloat64_](phi)
-        cdef Image sitk_image = np_2_sitk[sitkFloat64_](image) if image is not None else sitk_phi
+        cdef object phi_arr = _as_float64_volume(phi, "phi")
+        cdef object image_arr = _as_float64_volume(image, "image") if image is not None else phi_arr
+        if phi_arr.shape != image_arr.shape:
+            raise ValueError(
+                "phi and image must have the same shape, got %s and %s"
+                % (phi_arr.shape, image_arr.shape))
+        cdef double[::1] p1 = _validated_point(point1, "point1", phi_arr.shape)
+        cdef double[::1] p2 = _validated_point(point2, "point2", phi_arr.shape)
+        cdef Image sitk_phi = np_2_sitk[sitkFloat64_](phi_arr)
+        cdef Image sitk_image = np_2_sitk[sitkFloat64_](image_arr) if image is not None else sitk_phi
         cdef Vec3[double] point1_vec
         cdef Vec3[double] point2_vec
         cdef double* point1_data = point1_vec.begin()
         cdef double* point2_data = point2_vec.begin()
         for i in range(3):
-            point1_data[i] = point1[2-i]
-            point2_data[i] = point2[2-i]
+            point1_data[i] = p1[2-i]
+            point2_data[i] = p2[2-i]
         cdef Image transport_slice
         self.calculator.SetUsesCorrection(use_correction)
         with nogil:
