@@ -582,7 +582,12 @@ realnum AreaEikonal::UpdateVelo(int i, double S) {
 	sitk::Image& field = mPhaseFieldMap[i];
 	double* field_buffer = field.GetBufferAsDouble();
 
-	double* phi_buffer = mPhiMap.GetBufferAsDouble();
+	// UpdateVelo runs for both sides at the same time and both read mPhiMap. The non-const
+	// GetBufferAsDouble() makes the image unique first (copy-on-write): if its data is still shared
+	// with another copy, such as the caller's, it clones the data and swaps its own internal
+	// pointer. Two threads doing that to the same image race, and one can free the buffer the other
+	// is still reading. Going through a const reference never modifies the image.
+	const double* phi_buffer = std::as_const(mPhiMap).GetBufferAsDouble();
 	
 
 	const vector<unsigned>& size = mPhaseFieldMap[i].GetSize();
