@@ -145,8 +145,10 @@ def describe_sdk(root):
 def openmp_flags(root):
     """(compile arguments, link arguments) that turn on OpenMP, or empty lists if it is unavailable."""
     if WINDOWS:
-        # the Windows build has never used /openmp
-        return [], []
+        # MSVC implements OpenMP 2.0. Without /openmp it ignores every `#pragma omp`, which is
+        # how the Windows wheels on PyPI (0.0.1 and 0.0.2) were built: their OpenMP loops run on
+        # one thread.
+        return ["/openmp"], []
     if not MACOS:
         return ["-fopenmp"], ["-fopenmp"]
     # Apple's clang has no OpenMP. conda's clang, together with llvm-openmp, does.
