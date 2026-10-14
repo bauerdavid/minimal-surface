@@ -66,12 +66,21 @@ def volumes():
     return make_volumes()
 
 
-# SYNTHETIC_RESULTS were recorded on Windows (MSVC). On Linux (GCC) the results with meeting
-# points are the same to about 1e-10. The results without meeting points differ slightly: they
-# resample the volume, and the zero level set that the voxel count depends on moves by a few
-# voxels with the compiler's floating-point behaviour (-2 of 27693 and -56 of 17033 voxels, sum
-# 5e-6 away at most). The tolerances accept that and still catch a real change of the result.
-COUNT_RTOL = 1e-2
+# SYNTHETIC_RESULTS were recorded on Windows (MSVC). Other platforms give slightly different
+# results. They are the same on every run (and, on Linux, with 2, 3 or 4 threads), so they come
+# from the compiler and architecture and not from a race. Results with meeting points are close to
+# identical everywhere. Without meeting points the volume is resampled, and the voxel count, which
+# depends on where the zero level set falls, moves by a few voxels up to a few percent:
+#
+#                                Windows   Linux (GCC)   macOS arm64 (clang)
+#   ALONG_X, no meeting points     27693        27691         27695
+#   ALONG_Z, no meeting points     17033        16977         16554   (-2.8%)
+#   ALONG_X, meeting points         1951         1951          1952
+#   ALONG_Z, meeting points         1906         1906          1906
+#
+# The sums agree to 1e-5 at most and the minimum and maximum are identical. The tolerances accept
+# these differences and still catch a real change of the result, which moves the values by far more.
+COUNT_RTOL = 5e-2
 SUM_RTOL = 1e-4
 EXTREMA_RTOL = 1e-6
 
