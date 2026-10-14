@@ -18,6 +18,28 @@ python -m pip install minimal-surface
 
 > **Note**: This package is currently available only for Windows. In the future we plan to release it for Linux and Mac systems.
 
+### Building from source
+The extension is written in C++ and links against the SimpleITK C++ libraries, which `setup.py` finds through
+the `SIMPLEITK_PATH` environment variable. It can point at either
+
+* a prefix that has conda-forge's `libsimpleitk` and `libitk-devel` installed (a conda or micromamba environment),
+  which is the quickest way to get a working SDK on Linux, macOS and Windows, or
+* a SimpleITK [SuperBuild](https://simpleitk.readthedocs.io/en/master/building.html) directory (static ITK and
+  SimpleITK libraries), for example `C:\SimpleITK-build` on Windows.
+
+With micromamba (on Windows leave out `compilers`: Visual Studio is used instead; on macOS add `llvm-openmp`):
+```
+micromamba create -n minimal-surface -c conda-forge python=3.13 libsimpleitk=2.5 libitk-devel numpy pip pytest compilers
+micromamba activate minimal-surface
+export SIMPLEITK_PATH=$CONDA_PREFIX      # Windows (cmd): set SIMPLEITK_PATH=%CONDA_PREFIX%
+python -m pip install .
+python -m pytest tests
+```
+The build is checked on Linux, macOS (Apple silicon and Intel) and Windows by
+[`.github/workflows/build.yml`](.github/workflows/build.yml), which is the reference for the exact steps.
+The wheels it produces use the ITK libraries of the conda environment they were built in; they are for testing,
+not for distribution.
+
 ## Usage
 The easiest way to utilize our tool is by using [Annotation Toolbox](https://github.com/bauerdavid/napari-nD-annotator), a [napari](https://www.napari.org) plugin created for fast 2 and 3D image annotation.
 

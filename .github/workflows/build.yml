@@ -1,0 +1,122 @@
+name: build
+
+# Builds the extension and runs the tests on Linux, macOS (Apple silicon and Intel) and
+# Windows, for each supported Python version.
+#
+# minimal-surface links against the SimpleITK C++ libraries, which nobody wants to compile
+# for every job. conda-forge ships them: `libsimpleitk` (headers and static SimpleITK
+# libraries) and `libitk-devel` (shared ITK libraries), so each job gets a ready-made SDK in
+# a conda environment and setup.py is pointed at it with SIMPLEITK_PATH.
+#
+# The wheels uploaded by this workflow link against the ITK libraries of that conda
+# environment, so they are build artifacts for inspection, not something to publish to PyPI.
+
+on:
+  push:
+    branches: [master]
+    paths-ignore:
+      - "**.md"
+      - ".github/ISSUE_TEMPLATE/**"
+  pull_request:
+    paths-ignore:
+      - "**.md"
+      - ".github/ISSUE_TEMPLATE/**"
+  workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    # a login shell, so that the micromamba environment is active in every step
+    shell: bash -el {0}
+
+jobs:
+  build:
+    name: ${{ matrix.platform }}, Python ${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-15, macos-15-intel, windows-latest]
+        python: ["3.10", "3.11", "3.12", "3.13"]
+        include:
+          - os: ubuntu-latest
+            platform: Linux
+            # conda-forge's compilers match the ABI of the libraries in the environment
+            toolchain: compilers
+          - os: macos-15
+            platform: macOS (arm64)
+            toolchain: compilers llvm-openmp
+          - os: macos-15-intel
+            platform: macOS (x86_64)
+            toolchain: compilers llvm-openmp
+          - os: windows-latest
+            platform: Windows
+            # the runner's Visual Studio is used
+            toolchain: ""
+
+    steps:
+      - name: Allow long paths (the vendored Eigen tree has very long file names)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: git config --global core.longpaths true
+
+      - uses: actions/checkout@v4
+
+      - name: Point conda's compilers at the macOS SDK
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          # clang reads SDKROOT, and older conda compiler packages read CONDA_BUILD_SYSROOT when
+          # the environment is activated, so these have to be set before the next step. The
+          # conda libraries need macOS 11.
+          sdk="$(xcrun --show-sdk-path)"
+          echo "MACOSX_DEPLOYMENT_TARGET=11.0" >> "$GITHUB_ENV"
+          echo "SDKROOT=$sdk" >> "$GITHUB_ENV"
+          echo "CONDA_BUILD_SYSROOT=$sdk" >> "$GITHUB_ENV"
+
+      - name: Set up the conda environment with SimpleITK
+        uses: mamba-org/setup-micromamba@v2
+        with:
+          environment-name: build
+          init-shell: bash
+          condarc: |
+            channels:
+              - conda-forge
+            channel_priority: strict
+          create-args: >-
+            python=${{ matrix.python }}
+            libsimpleitk=2.5.*
+            libitk-devel
+            numpy
+            pip
+            pytest
+            ${{ matrix.toolchain }}
+
+      - name: Build the wheel
+        run: |
+          if [ "$RUNNER_OS" = Windows ]; then
+            export SIMPLEITK_PATH="$(cygpath -w "$CONDA_PREFIX")"
+          else
+            export SIMPLEITK_PATH="$CONDA_PREFIX"
+          fi
+          echo "SimpleITK SDK: $SIMPLEITK_PATH"
+          echo "CC=${CC:-} CXX=${CXX:-}"
+          python -m pip wheel . --no-deps --wheel-dir dist -v
+
+      - name: Install and test
+        run: |
+          python -m pip install --no-deps dist/*.whl
+          python -m pytest tests -v
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheel-${{ runner.os }}-${{ runner.arch }}-py${{ matrix.python }}
+          path: dist/*.whl
+          if-no-files-found: error
