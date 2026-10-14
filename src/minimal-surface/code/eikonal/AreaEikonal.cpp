@@ -424,10 +424,19 @@ std::vector<double> AreaEikonal::TransformPhysicalPointToContinuousIndex(const s
 std::vector<double> AreaEikonal::TransformContinuousIndexToPhysicalPoint(const std::vector<double>& point) const {
 	return mSampleImage.TransformContinuousIndexToPhysicalPoint(point);
 }
+// The number of threads the parallel loops are sized from, never less than 2. The two sides of
+// the evolution run at the same time, each with an inner team of half the threads (n_threads / 2).
+// With a single thread available (OMP_NUM_THREADS=1, a single core) that is zero: a team of
+// num_threads(0), an empty vector of per-thread heaps, and a division by zero in GetMinS. The
+// process crashed with SIGFPE or a segmentation fault; two threads give a team of one.
+static int ThreadsAvailable() {
+	return std::max(2, omp_get_max_threads());
+}
+
 int current_iteration = 0;
 
 void AreaEikonal::UpdateCurvature(int i) {
-	static int n_threads = omp_get_max_threads();
+	static int n_threads = ThreadsAvailable();
 	sitk::Image& field = mPhaseFieldMap[i];
 	auto& act_set = mActivePoints[i];
 	const vector<unsigned>& size = mPhaseFieldMap[i].GetSize();
@@ -478,7 +487,7 @@ OMP_PARALLEL_FOR_NUM_THREADS(n_threads/2)
 
 realnum AreaEikonal::GetMinS(int i) const {
 
-	static int n_threads = omp_get_max_threads();
+	static int n_threads = ThreadsAvailable();
 	const sitk::Image& field = mPhaseFieldMap[i];
 	auto& act_set = mActivePoints[i];
 	int n_top = 5000;
@@ -577,7 +586,7 @@ OMP_FOR_REDUCTION(+, n_outliers)
 	return minS;
 }
 realnum AreaEikonal::UpdateVelo(int i, double S) {
-	static int n_threads = omp_get_max_threads();
+	static int n_threads = ThreadsAvailable();
 	//_PROFILING;
 	sitk::Image& field = mPhaseFieldMap[i];
 	double* field_buffer = field.GetBufferAsDouble();
@@ -688,7 +697,7 @@ OMP_CRITICAL(maxS_selection)
 	return maxv;
 }
 void AreaEikonal::UpdateField(int idx, double maxv) {
-	static int n_threads = omp_get_max_threads();
+	static int n_threads = ThreadsAvailable();
 	_PROFILING;
 	double* field_buffer = mPhaseFieldMap[idx].GetBufferAsDouble();
 	vector<unsigned> size = mPhaseFieldMap[idx].GetSize();
@@ -746,7 +755,7 @@ OMP_CRITICAL_NO_TAG
 }
 void AreaEikonal::UpdateDistance(int idx, realnum current_distance) {
 
-	static int n_threads = omp_get_max_threads();
+	static int n_threads = ThreadsAvailable();
 	_PROFILING;
 	Vec3<double> origin_point = !idx ? mStartPoint : mEndPoint;
 	auto& changed_velo = mVelocities[idx];
