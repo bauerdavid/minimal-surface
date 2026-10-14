@@ -1,6 +1,7 @@
 from setuptools import setup, Extension
 import glob
 import os
+import subprocess
 import sys
 import numpy as np
 
@@ -28,50 +29,152 @@ def no_cythonize(extensions, **_ignore):
     return extensions
 
 
+WINDOWS = sys.platform == "win32"
+MACOS = sys.platform == "darwin"
+
+# Windows system libraries that the static ITK/SimpleITK libraries depend on.
+WINDOWS_SYSTEM_LIBS = [
+    "rpcrt4.lib",
+    "comctl32.lib",
+    "wsock32.lib",
+    "ws2_32.lib",
+    "dbghelp.lib",
+    "psapi.lib",
+    "kernel32.lib",
+    "user32.lib",
+    "gdi32.lib",
+    "winspool.lib",
+    "shell32.lib",
+    "ole32.lib",
+    "oleaut32.lib",
+    "uuid.lib",
+    "comdlg32.lib",
+    "advapi32.lib",
+]
+
+
+def _glob(directory, *patterns):
+    found = set()
+    for pattern in patterns:
+        found.update(glob.glob(os.path.join(directory, pattern)))
+    return sorted(found)
+
+
+def _link_group(libraries):
+    """Wrap static libraries so that GNU ld can resolve references between them.
+
+    ld only looks at an archive once, in command line order, and the ITK and
+    SimpleITK archives reference each other in both directions; a group makes it
+    rescan them until nothing more resolves. Other linkers do not need (or accept) it.
+    """
+    if WINDOWS or MACOS:
+        return list(libraries)
+    return ["-Wl,--start-group", *libraries, "-Wl,--end-group"]
+
+
+def describe_sdk(root):
+    """Work out how to compile and link against the SimpleITK installation at root.
+
+    Two layouts are supported:
+
+    * a SimpleITK SuperBuild tree (ITK-build/ next to lib/ and include/), where SimpleITK
+      and ITK are both static libraries. This is what the Windows wheels were built against.
+    * an installed prefix, for example a conda environment holding conda-forge's
+      libsimpleitk (static SimpleITK libraries) and libitk-devel (shared ITK libraries).
+      On Windows such a prefix keeps its headers and libraries under Library/.
+
+    Returns the keyword arguments for the pieces of Extension that depend on the SDK.
+    """
+    root = os.path.abspath(root)
+    static_ext = ".lib" if WINDOWS else ".a"
+    sitk = ("" if WINDOWS else "lib") + "SimpleITK*" + static_ext
+    sdk = {
+        "include_dirs": [],
+        "library_dirs": [],
+        "extra_objects": [],
+        "extra_link_args": [],
+    }
+
+    if os.path.isdir(os.path.join(root, "ITK-build")):
+        itk_dir = os.path.join(root, "ITK-build", "lib", "MinSizeRel" if WINDOWS else "")
+        itk_libs = _glob(itk_dir, "*" + static_ext)
+        sitk_libs = _glob(os.path.join(root, "lib"), "*" + static_ext)
+        include_roots = [os.path.join(root, "include")]
+        lib_dirs = [os.path.join(root, "lib"), itk_dir]
+        static_libs = itk_libs + sitk_libs
+        shared_libs = []
+    else:
+        subdirs = ["Library"] if WINDOWS else []
+        include_roots = [os.path.join(root, *subdirs, "include")]
+        lib_dir = next(
+            (d for d in (os.path.join(root, *subdirs, "lib"), os.path.join(root, "lib"))
+             if _glob(d, sitk)),
+            None,
+        )
+        if lib_dir is None:
+            raise RuntimeError(
+                "No SimpleITK libraries (%s) found under %s. Set SIMPLEITK_PATH to a SimpleITK "
+                "SuperBuild directory or to a prefix that has libsimpleitk installed." % (sitk, root))
+        lib_dirs = [lib_dir]
+        static_libs = _glob(lib_dir, sitk)
+        if WINDOWS:
+            shared_libs = _glob(lib_dir, "ITK*.lib", "itk*.lib")
+        elif MACOS:
+            shared_libs = _glob(lib_dir, "libITK*.dylib", "libitk*.dylib")
+        else:
+            shared_libs = _glob(lib_dir, "libITK*.so", "libitk*.so")
+        if not shared_libs:
+            raise RuntimeError("No ITK libraries found in %s; install libitk-devel next to libsimpleitk." % lib_dir)
+        if not WINDOWS:
+            # let the extension find the shared ITK libraries again at run time
+            sdk["extra_link_args"].append("-Wl,-rpath," + lib_dir)
+
+    include_dirs = [d for r in include_roots for d in sorted(glob.glob(os.path.join(r, "SimpleITK-*")))]
+    if not include_dirs:
+        raise RuntimeError("SimpleITK headers (SimpleITK-*) not found under %s" % include_roots)
+    sdk["include_dirs"] = include_dirs[-1:]
+    sdk["library_dirs"] = lib_dirs
+
+    if WINDOWS:
+        sdk["extra_objects"] = static_libs + shared_libs + WINDOWS_SYSTEM_LIBS
+    else:
+        sdk["extra_link_args"] = _link_group(static_libs) + shared_libs + sdk["extra_link_args"]
+    return sdk
+
+
+def openmp_flags(root):
+    """(compile arguments, link arguments) that turn on OpenMP, or empty lists if it is unavailable."""
+    if WINDOWS:
+        # the Windows build has never used /openmp
+        return [], []
+    if not MACOS:
+        return ["-fopenmp"], ["-fopenmp"]
+    # Apple's clang has no OpenMP. conda's clang, together with llvm-openmp, does.
+    if os.path.exists(os.path.join(root, "lib", "libomp.dylib")):
+        return ["-fopenmp"], ["-fopenmp"]
+    # Otherwise use Homebrew's libomp, as the napari-nD-annotator build does.
+    try:
+        prefix = subprocess.run(["brew", "--prefix", "libomp"], capture_output=True, text=True,
+                                check=True).stdout.strip()
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        print("setup.py: OpenMP not found; building without it")
+        return [], []
+    return (["-Xpreprocessor", "-fopenmp", "-I%s/include" % prefix],
+            ["-L%s/lib" % prefix, "-lomp"])
+
+
 if "SIMPLEITK_PATH" in os.environ:
     sitk_path = os.environ["SIMPLEITK_PATH"]
 else:
-    if sys.platform == "win32":
+    if WINDOWS:
         sitk_path = "C:\\SimpleITK-build"
-        extra_build_args = ["/Zc:externC"]
     else:
         sitk_path = os.path.expanduser("~/SimpleITK-build")
         os.environ["CC"] = "g++"
 
-sitk_lib_path = os.path.join(sitk_path, "lib")
-if sys.platform == "win32":
-    itk_lib_path = os.path.join(sitk_path, "ITK-build", "lib", "MinSizeRel")
-    itk_libs = glob.glob(os.path.join(itk_lib_path, "*.lib"))
-    sitk_libs = glob.glob(os.path.join(sitk_lib_path, "*.lib"))
-    os_libs = [
-        "rpcrt4.lib",
-        "comctl32.lib",
-        "wsock32.lib",
-        "ws2_32.lib",
-        "dbghelp.lib",
-        "psapi.lib",
-        "kernel32.lib",
-        "user32.lib",
-        "gdi32.lib",
-        "winspool.lib",
-        "shell32.lib",
-        "ole32.lib",
-        "oleaut32.lib",
-        "uuid.lib",
-        "comdlg32.lib",
-        "advapi32.lib",
-    ]
-    extra_compile_args = ["/std:c++17"]
-else:
-    itk_lib_path = os.path.join(sitk_path, "ITK-build", "lib")
-    itk_libs = glob.glob(os.path.join(itk_lib_path, "*.a"))
-    sitk_libs = glob.glob(os.path.join(sitk_lib_path, "*.*"))
-    extra_compile_args = ["-std=c++17", "-fopenmp"]
-    os_libs = []
-libs = itk_libs+sitk_libs
-libs = map(os.path.basename, libs)
-libs = map(lambda s: s.rsplit(".", 1)[0], libs)
-libs = list(map(lambda s: s[3:] if s.startswith("lib") else s, libs))
+sdk = describe_sdk(sitk_path)
+omp_compile_args, omp_link_args = openmp_flags(sitk_path)
+extra_compile_args = (["/std:c++17"] if WINDOWS else ["-std=c++17"]) + omp_compile_args
 
 # Compile against the modern NumPy C API only, so that use of the NumPy 1
 # legacy API is a build error rather than a silent numpy 1 pin.
@@ -95,14 +198,14 @@ extension = Extension(
         "src/minimal-surface/code/eikonal",
         "src/minimal-surface/code/pythonwrapper",
         "src/minimal-surface/code/eigen-3.4.0",
-        glob.glob(os.path.join(sitk_path, "include", "SimpleITK-*"))[0]
+        *sdk["include_dirs"],
     ],
     depends=["MinimalSurfaceEstimator.h", "SimpleITK.h", "sitkImage.h"],
     define_macros=define_macros,
-    library_dirs=[sitk_lib_path, itk_lib_path],
-    libraries=libs,
-    extra_objects=itk_libs+sitk_libs+os_libs,
+    library_dirs=sdk["library_dirs"],
+    extra_objects=sdk["extra_objects"],
     extra_compile_args=extra_compile_args,
+    extra_link_args=sdk["extra_link_args"] + omp_link_args,
     language="c++"
 )
 
@@ -118,4 +221,3 @@ setup(name='minimal_surface',
     description='Python Package with minimalsurface C++ extension',
     ext_modules=extensions
 )
-
