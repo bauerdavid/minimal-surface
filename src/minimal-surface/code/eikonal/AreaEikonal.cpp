@@ -776,10 +776,14 @@ void AreaEikonal::UpdateDistance(int idx, realnum current_distance) {
 	vector<unsigned> size = mPhaseFieldMap[idx].GetSize();
 	int xs = size[0], ys = size[1], zs = size[2];
 	_SECTION_BEGIN(loop_timer, "side.UpdateDistance.loop");
+#ifdef USE_VECTOR_AS_SET
+	// The new points each thread finds, appended to the band in thread order below.
+	vector<vector<POINT3D>> found(n_threads / 2);
+#endif
 OMP_PARALLEL_NUM_THREADS(n_threads/2)
 	{
 #ifdef USE_VECTOR_AS_SET
-		vector<POINT3D> temp;
+		vector<POINT3D>& temp = found[omp_get_thread_num()];
 		vector<POINT3D> temp_inact;
 #else
 		unordered_set<POINT3D_SET> temp;
@@ -827,15 +831,17 @@ OMP_FOR_NOWAIT
 					} // end for k
 				}
 		} // end for i
+#ifndef USE_VECTOR_AS_SET
 OMP_CRITICAL_NO_TAG
 		{
-#ifdef USE_VECTOR_AS_SET
-			act_set.insert(act_set.end(), temp.begin(), temp.end());
-#else
 			act_set.insert(temp.begin(), temp.end());
-#endif
 		}
+#endif
 	}
+#ifdef USE_VECTOR_AS_SET
+	for (const vector<POINT3D>& temp : found)
+		act_set.insert(act_set.end(), temp.begin(), temp.end());
+#endif
 
 
 	_SECTION_END(loop_timer);
@@ -843,11 +849,51 @@ OMP_CRITICAL_NO_TAG
 	changed_velo.clear();
 #ifdef USE_VECTOR_AS_SET
 	_RECORD_VALUE("side.UpdateDistance.size_before_unique", act_set.size());
-	sort(act_set.begin(), act_set.end());
-	act_set.erase(unique(act_set.begin(), act_set.end()), act_set.end());
-	if (!act_set.empty() && act_set.back() == REMOVABLE_POINT)
-		act_set.pop_back();
+	RemoveDuplicatesFromBand(idx);
 #endif
+}
+
+void AreaEikonal::RemoveDuplicatesFromBand(int idx) {
+	// The band now holds the points UpdateField marked as REMOVABLE_POINT, and new neighbours,
+	// many of them more than once or already in the band. Drop both. The order of the band does
+	// not matter to any step of the evolution (each treats its points independently; the only
+	// reductions are a maximum and an order statistic), so instead of sorting it, keep the first
+	// occurrence of each point, found with a per-voxel flag that is cleared again afterwards.
+	// The band ends up with the same points as a sort and unique would leave.
+	auto& act_set = mActivePoints[idx];
+	vector<unsigned> size = mPhaseFieldMap[idx].GetSize();
+	int xs = size[0], ys = size[1], zs = size[2];
+	size_t voxel_count = (size_t)xs * ys * zs;
+	for (POINT3D pn : act_set) {
+		if (pn == REMOVABLE_POINT) continue;
+		auto [xx, yy, zz] = representation_to_point<int>(pn);
+		if (xx < 0 || xx >= xs || yy < 0 || yy >= ys || zz < 0 || zz >= zs) {
+			// Not a voxel (a band rotated from another volume can have such points): fall back
+			// to sorting, which keeps them as they were kept before.
+			sort(act_set.begin(), act_set.end());
+			act_set.erase(unique(act_set.begin(), act_set.end()), act_set.end());
+			if (!act_set.empty() && act_set.back() == REMOVABLE_POINT)
+				act_set.pop_back();
+			return;
+		}
+	}
+	vector<unsigned char>& in_band = mInBand[idx];
+	if (in_band.size() != voxel_count)
+		in_band.assign(voxel_count, 0);
+	size_t kept = 0;
+	for (POINT3D pn : act_set) {
+		if (pn == REMOVABLE_POINT) continue;
+		auto [xx, yy, zz] = representation_to_point<int>(pn);
+		unsigned char& seen = in_band[xx + (size_t)xs * (yy + (size_t)ys * zz)];
+		if (seen) continue;
+		seen = 1;
+		act_set[kept++] = pn;
+	}
+	act_set.resize(kept);
+	for (POINT3D pn : act_set) {
+		auto [xx, yy, zz] = representation_to_point<int>(pn);
+		in_band[xx + (size_t)xs * (yy + (size_t)ys * zz)] = 0;
+	}
 }
 
 bool AreaEikonal::IsDone() const {

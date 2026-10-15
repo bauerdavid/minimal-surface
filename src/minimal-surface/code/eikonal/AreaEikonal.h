@@ -64,6 +64,9 @@ protected:
 	mutable int mUnreachedVoxel = 0;
 	// The points whose curvature UpdateCurvature wrote last; mCurvatureMap is zero elsewhere.
 	std::vector<POINT3D> mCurvatureBand[2];
+	// All zero between calls; RemoveDuplicatesFromBand uses it to find repeated points.
+	std::vector<unsigned char> mInBand[2];
+	void RemoveDuplicatesFromBand(int idx);
 #ifdef DEBUG_CURVATURE
 	sitk::Image m_new_update[2];
 #endif
