@@ -194,46 +194,43 @@ bool TransportFunction::Iterate()
 	//bool decreasing_y = mIterationCount / 2 % 2;
 	//bool decreasing_z = mIterationCount / 4 % 2;
 
-OMP_PARALLEL_FOR_NUM_THREADS(4)
-	for (int zyx = 0; zyx < zs * ys * xs; zyx++) {
-		int zz = zyx / (ys * xs);
-		if (zz > 0 && zz < zs - 1)
-		{
-			//if (decreasing_z) zz = zs - 1 - zz;
-			int yy = (zyx / xs) % ys;
-			if (yy > 0 && yy < ys - 1)
-			{
-				//if (decreasing_y) yy = ys - 1 - yy;
-				int xx = zyx % xs;
-				if (xx > 0 && xx < xs - 1)
-				{
-					//if (decreasing_x) xx = xs - 1 - xx;
-					if (BUF_IDX3D(bound_buffer, xs, ys, zs, xx, yy, zz) != 0) {
-						continue; // boundary to completely omit (no transport from uninitialized distance map)
-					}
-
-					realnum val;
-					realnum dx, dy, dz; // reference values in the transport function along the given axis
-					int x, y, z;
-					realnum gx(BUF_IDX3D(gx_buffer, xs, ys, zs, xx, yy, zz)), gy(BUF_IDX3D(gy_buffer, xs, ys, zs, xx, yy, zz)), gz(BUF_IDX3D(gz_buffer, xs, ys, zs, xx, yy, zz));
-					x = gx > 0 ? xx + 1 : xx - 1;
-					y = gy > 0 ? yy + 1 : yy - 1;
-					z = gz > 0 ? zz + 1 : zz - 1;
-					if (gx < 0) gx *= -1;
-					if (gy < 0) gy *= -1;
-					if (gz < 0) gz *= -1;
-					dx = BUF_IDX3D(src_buffer, xs, ys, zs, x, yy, zz);
-					dy = BUF_IDX3D(src_buffer, xs, ys, zs, xx, y, zz);
-					dz = BUF_IDX3D(src_buffer, xs, ys, zs, xx, yy, z);
-					val = gx * dx + gy * dy + gz * dz;
-					val /= gx + gy + gz + alpha;// zero: at points where calculation is needed, 1 read only boundary points
-					if (abs(val - BUF_IDX3D(src_buffer, xs, ys, zs, xx, yy, zz)) > abs(BUF_IDX3D(src_buffer, xs, ys, zs, xx, yy, zz) * 0.001))
-						updated = true;
-					BUF_IDX3D(dst_buffer, xs, ys, zs, xx, yy, zz) = val;
-				}
+	// Only the interior is updated. The loop runs over its rows, so that finding a voxel's
+	// coordinates takes no integer division per voxel. Every voxel is computed from the source
+	// buffer alone (Jacobi), so the order and the split between threads do not change the result.
+	const int row_count = (zs - 2) * (ys - 2);
+	const int plane_stride = xs * ys;
+	int any_updated = 0;
+OMP_PARALLEL_FOR_NUM_THREADS_REDUCTION(4, |, any_updated)
+	for (int row = 0; row < row_count; row++) {
+		int zz = row / (ys - 2) + 1;
+		int yy = row % (ys - 2) + 1;
+		int row_start = xs * (yy + ys * zz);
+		for (int xx = 1; xx < xs - 1; xx++) {
+			int idx = row_start + xx;
+			if (bound_buffer[idx] != 0) {
+				continue; // boundary to completely omit (no transport from uninitialized distance map)
 			}
+
+			realnum val;
+			realnum dx, dy, dz; // reference values in the transport function along the given axis
+			realnum gx(gx_buffer[idx]), gy(gy_buffer[idx]), gz(gz_buffer[idx]);
+			int x_neighbor = gx > 0 ? idx + 1 : idx - 1;
+			int y_neighbor = gy > 0 ? idx + xs : idx - xs;
+			int z_neighbor = gz > 0 ? idx + plane_stride : idx - plane_stride;
+			if (gx < 0) gx *= -1;
+			if (gy < 0) gy *= -1;
+			if (gz < 0) gz *= -1;
+			dx = src_buffer[x_neighbor];
+			dy = src_buffer[y_neighbor];
+			dz = src_buffer[z_neighbor];
+			val = gx * dx + gy * dy + gz * dz;
+			val /= gx + gy + gz + alpha;// zero: at points where calculation is needed, 1 read only boundary points
+			if (abs(val - src_buffer[idx]) > abs(src_buffer[idx] * 0.001))
+				any_updated |= 1;
+			dst_buffer[idx] = val;
 		}
 	}
+	updated = any_updated != 0;
 	return updated;
 }
 
