@@ -62,6 +62,8 @@ protected:
 	bool mInitialized = false;
 	// The last voxel IsDone() found that neither side had reached; where it starts looking next.
 	mutable int mUnreachedVoxel = 0;
+	// The points whose curvature UpdateCurvature wrote last; mCurvatureMap is zero elsewhere.
+	std::vector<POINT3D> mCurvatureBand[2];
 #ifdef DEBUG_CURVATURE
 	sitk::Image m_new_update[2];
 #endif

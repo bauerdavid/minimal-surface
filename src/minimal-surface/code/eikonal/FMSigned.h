@@ -42,11 +42,17 @@ class FMSigned
 	double m_max_dist;
 	double mVelocityMap;
 	int xs, ys, zs;
+	// True when m_distance_map holds m_band_fill_value and m_frozen holds 0 everywhere except at
+	// the points in m_narrow_band_v, as build_for_neighbors leaves them. Every other way of
+	// filling the maps clears it, and then the next build_for_neighbors fills the whole volume.
+	bool m_band_maps_clean = false;
+	double m_band_fill_value = 0;
 	bool finished();
 	void initialize(sitk::Image& input_map, double max_distance, double velo);
 	template<class RandIt>
 	void initialize(const sitk::Image& distance_map, const sitk::Image& frozen, const RandIt& bound_points, double max_distance = DBL_MAX, double velo = 1., bool fix_heap = true) {
 		_PROFILING;
+		m_band_maps_clean = false;
 		m_max_dist = max_distance;
 		mVelocityMap = velo;
 		m_distance_map = sitk::Image(distance_map);
@@ -71,6 +77,7 @@ class FMSigned
 	template<class RandIt>
 	void initialize(sitk::Image& input_map, const RandIt& bound_points, double max_distance = DBL_MAX, double velo = 1., bool fix_heap=true) {
 		_PROFILING;
+		m_band_maps_clean = false;
 		std::vector<uint32_t> input_size = input_map.GetSize();
 		xs = input_size[0];
 		ys = input_size[1];
@@ -105,6 +112,7 @@ class FMSigned
 
 	void initialize(sitk::Image& input_map, const std::vector<POINT3D>& bound_points, double max_distance, double velo, bool fix_heap) {
 		_PROFILING;
+		m_band_maps_clean = false;
 		std::vector<uint32_t> input_size = input_map.GetSize();
 		xs = input_size[0];
 		ys = input_size[1];
@@ -162,12 +170,23 @@ OMP_PARALLEL_FOR
 			m_distance_buffer = m_distance_map.GetBufferAsDouble();
 			m_frozen_buffer = m_frozen.GetBufferAsUInt8();
 		}
+		else if (m_band_maps_clean && m_band_fill_value == INF) {
+			// The last call only wrote the points in m_narrow_band_v (its band and their
+			// neighbours); put those back instead of filling the whole volume.
+			for (const auto& written : m_narrow_band_v) {
+				auto [xx, yy, zz] = representation_to_point<int>(written.first);
+				BUF_IDX3D(m_distance_buffer, xs, ys, zs, xx, yy, zz) = INF;
+				BUF_IDX3D(m_frozen_buffer, xs, ys, zs, xx, yy, zz) = 0;
+			}
+		}
 		else {
 			std::fill(m_distance_buffer, m_distance_buffer + xs * ys * zs, INF);
 			memset(m_frozen_buffer, 0, xs * ys * zs);
 			//m_distance_map += -m_distance_map + INF;
 			//m_frozen -= m_frozen;
 		}
+		m_band_fill_value = INF;
+		m_band_maps_clean = false;
 		_SECTION_END(fill_timer);
 
 		_SECTION("side.signed_distance.init_band");
@@ -236,6 +255,9 @@ public:
 		if (smooth) {
 			signedDistMap.smooth_distances();
 		}
+		// Unless smoothing replaced it, the distance map is m_band_fill_value and nothing is frozen
+		// except at the points listed in m_narrow_band_v.
+		signedDistMap.m_band_maps_clean = !smooth;
 		//save_image("Y:/BIOMAG/shortest path/out_dist.tif", signedDistMap.m_distance_map);
 		//sitk::Image&& signs = sitk::Cast(sitk::GreaterEqual(input_map, 0), signedDistMap.m_distance_map.GetPixelID()) * (-2) + 1;
 

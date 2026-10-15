@@ -26,6 +26,7 @@ bool FMSigned::finished() {
 
 void FMSigned::initialize(sitk::Image& input_map, double max_distance, double velo) {
 	_PROFILING;
+	m_band_maps_clean = false;
 	double* input_buffer = input_map.GetBufferAsDouble();
 	m_max_dist = max_distance;
 	mVelocityMap = velo;
@@ -232,6 +233,7 @@ void FMSigned::build(int id, sitk::Image& input_map, sitk::Image& output, double
 }
 
 void FMSigned::smooth_distances() {
+	m_band_maps_clean = false;
 	if(temp.GetSize() != m_distance_map.GetSize())
 		temp = sitk::Image(m_distance_map.GetSize(), m_distance_map.GetPixelID());
 	double* temp_buffer = temp.GetBufferAsDouble();

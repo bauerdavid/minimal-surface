@@ -236,6 +236,8 @@ void AreaEikonal::InitializeContainers(const sitk::Image& image) {
 
 	mCurvatureMap[0] = sitk::Image(size, sitk::sitkFloat64);
 	mCurvatureMap[1] = sitk::Image(size, sitk::sitkFloat64);
+	mCurvatureBand[0].clear();
+	mCurvatureBand[1].clear();
 #ifdef DEBUG_CURVATURE
 
 	m_new_update[0] = sitk::Image(size, sitk::sitkUInt8);
@@ -447,7 +449,15 @@ void AreaEikonal::UpdateCurvature(int i) {
 	double* sdist_buffer = temp_sdist.GetBufferAsDouble();
 	double* curvature_buffer = mCurvatureMap[i].GetBufferAsDouble();
 	_SECTION_BEGIN(memset_timer, "side.UpdateCurvature.memset");
-	memset(curvature_buffer, 0, xs * ys * zs * sizeof(double));
+	// Only the points of the band are written below, and the map is zero everywhere else. So
+	// instead of clearing the whole volume, clear the points the last call wrote: the map ends
+	// up the same.
+	for (POINT3D pn : mCurvatureBand[i]) {
+		auto [xx, yy, zz] = representation_to_point<int>(pn);
+		if (zz < 0 || zz >= zs || yy < 0 || yy >= ys || xx < 0 || xx >= xs) continue;
+		BUF_IDX3D(curvature_buffer, xs, ys, zs, xx, yy, zz) = 0;
+	}
+	mCurvatureBand[i].assign(act_set.begin(), act_set.end());
 	_SECTION_END(memset_timer);
 	_SECTION("side.UpdateCurvature.loop");
 OMP_PARALLEL_FOR_NUM_THREADS(n_threads/2)
