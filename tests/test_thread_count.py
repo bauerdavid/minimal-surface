@@ -27,7 +27,11 @@ for meeting in (False, True):
 
 
 def run_with_threads(threads):
-    env = dict(os.environ, OMP_NUM_THREADS=str(threads))
+    """Run the calculation with OMP_NUM_THREADS=threads, or with it unset when threads is None."""
+    env = dict(os.environ)
+    env.pop("OMP_NUM_THREADS", None)
+    if threads is not None:
+        env["OMP_NUM_THREADS"] = str(threads)
     done = subprocess.run([sys.executable, "-c", SCRIPT], capture_output=True, text=True, env=env, timeout=300)
     assert done.returncode == 0, "exit status %s with OMP_NUM_THREADS=%s\n%s" % (
         done.returncode, threads, done.stderr[-2000:])
@@ -49,7 +53,9 @@ def test_a_small_number_of_threads_does_not_crash(threads):
 
 def test_the_result_does_not_depend_on_the_number_of_threads():
     single = run_with_threads(1)
-    for threads in (2, 4):
+    # None is the default: no OMP_NUM_THREADS, so the extension picks its own limit. 16 is more
+    # threads than most test machines have cores.
+    for threads in (2, 4, 16, None):
         other = run_with_threads(threads)
         for meeting in single:
             assert other[meeting][0] == single[meeting][0], (threads, meeting)

@@ -852,10 +852,16 @@ OMP_PARALLEL
 {
 	OMP_FOR
 	for (int zyx = 0; zyx < zs*ys*xs; zyx++) {
+#ifndef _MSC_VER
+		// OpenMP 4.0, which MSVC (OpenMP 2.0) does not compile. Cancellation is off unless
+		// OMP_CANCELLATION=true is set, so leaving these out changes nothing by default.
 		#pragma omp cancellation point for
+#endif
 		if (dist0_buffer[zyx] < 0 && dist1_buffer[zyx] < 0){
 			is_done = false;
+#ifndef _MSC_VER
 			#pragma omp cancel for
+#endif
 		}
 	}
 }

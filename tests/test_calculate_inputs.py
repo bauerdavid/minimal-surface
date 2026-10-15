@@ -66,6 +66,34 @@ def volumes():
     return make_volumes()
 
 
+# SYNTHETIC_RESULTS were recorded on Windows (MSVC). Other platforms give slightly different
+# results. They are the same on every run (and, on Linux, with 2, 3 or 4 threads), so they come
+# from the compiler and architecture and not from a race. Results with meeting points are close to
+# identical everywhere. Without meeting points the volume is resampled, and the voxel count, which
+# depends on where the zero level set falls, moves by a few voxels up to a few percent:
+#
+#                                Windows   Linux (GCC)   macOS arm64 (clang)
+#   ALONG_X, no meeting points     27693        27691         27695
+#   ALONG_Z, no meeting points     17033        16977         16554   (-2.8%)
+#   ALONG_X, meeting points         1951         1951          1952
+#   ALONG_Z, meeting points         1906         1906          1906
+#
+# The sums agree to 1e-5 at most and the minimum and maximum are identical. The tolerances accept
+# these differences and still catch a real change of the result, which moves the values by far more.
+COUNT_RTOL = 5e-2
+SUM_RTOL = 1e-4
+EXTREMA_RTOL = 1e-6
+
+
+def assert_matches_recorded(out, key):
+    inside, total, low, high = SYNTHETIC_RESULTS[key]
+    assert out.dtype == np.float64 and out.shape == SHAPE
+    assert int((out >= 0).sum()) == pytest.approx(inside, rel=COUNT_RTOL)
+    assert out.sum() == pytest.approx(total, rel=SUM_RTOL)
+    assert out.min() == pytest.approx(low, rel=EXTREMA_RTOL)
+    assert out.max() == pytest.approx(high, rel=EXTREMA_RTOL)
+
+
 # --------------------------------------------------------------------------
 # results do not change
 # --------------------------------------------------------------------------
@@ -74,13 +102,8 @@ def volumes():
 def test_float64_results_are_unchanged(volumes, points, meeting):
     image, phi = volumes
     out = calculate(phi, image, points, meeting)
-    inside, total, low, high = SYNTHETIC_RESULTS[(points, meeting)]
 
-    assert out.dtype == np.float64 and out.shape == SHAPE
-    assert int((out >= 0).sum()) == inside
-    assert out.sum() == pytest.approx(total, rel=1e-9)
-    assert out.min() == pytest.approx(low, rel=1e-9)
-    assert out.max() == pytest.approx(high, rel=1e-9)
+    assert_matches_recorded(out, (points, meeting))
 
 
 # --------------------------------------------------------------------------
@@ -303,9 +326,7 @@ def test_a_rejected_call_leaves_the_calculator_usable(volumes):
         calculator.calculate(phi, image, np.array([15., 20., 12.]), np.array([15., 20., 320.]), True, 50)
     out = calculator.calculate(phi, image, np.array(ALONG_X[0]), np.array(ALONG_X[1]), True, MAX_ITERATIONS)
 
-    inside, total, _, _ = SYNTHETIC_RESULTS[(ALONG_X, False)]
-    assert int((out >= 0).sum()) == inside
-    assert out.sum() == pytest.approx(total, rel=1e-9)
+    assert_matches_recorded(out, (ALONG_X, False))
 
 
 # --------------------------------------------------------------------------

@@ -2,12 +2,47 @@
 #include "Utils.h"
 #include <utility>
 #include <cmath>
+#include <cstdlib>
 #include <omp.h>
 #define LOG_RUN
 #ifdef LOG_RUN
 #include <fstream>
 #endif
 using namespace std;
+
+namespace {
+// The evolution stops getting faster at about 4 to 8 threads and is slower beyond that: with all
+// 16 threads of a 16-thread Windows machine it took up to 2.8 times as long as without OpenMP
+// (64^3 volume, with meeting points), while 4 to 8 threads were 2 to 3 times faster. Unless the
+// user chose a number with OMP_NUM_THREADS, a calculation therefore uses at most
+// kDefaultMaxThreads, and the previous setting is put back afterwards so that other OpenMP code
+// in the same process is not affected. The value comes from measurements on that one machine.
+const int kDefaultMaxThreads = 8;
+
+bool UserChoseThreadCount() {
+#ifdef _MSC_VER
+	size_t length = 0;
+	getenv_s(&length, nullptr, 0, "OMP_NUM_THREADS");
+	return length > 0;
+#else
+	return std::getenv("OMP_NUM_THREADS") != nullptr;
+#endif
+}
+
+class DefaultThreadLimit {
+	int mPrevious;
+public:
+	DefaultThreadLimit() : mPrevious(omp_get_max_threads()) {
+		if (mPrevious > kDefaultMaxThreads && !UserChoseThreadCount())
+			omp_set_num_threads(kDefaultMaxThreads);
+	}
+	~DefaultThreadLimit() {
+		omp_set_num_threads(mPrevious);
+	}
+	DefaultThreadLimit(const DefaultThreadLimit&) = delete;
+	DefaultThreadLimit& operator=(const DefaultThreadLimit&) = delete;
+};
+}
 
 MinimalSurfaceEstimator::MinimalSurfaceEstimator()
 {
@@ -22,6 +57,7 @@ MinimalSurfaceEstimator::~MinimalSurfaceEstimator()
 }
 
 sitk::Image MinimalSurfaceEstimator::GetTransportSliceFromPoints(sitk::Image image, Vec3<double> point1, Vec3<double> point2){
+	DefaultThreadLimit thread_limit;
 	Vec3<double> center = (point1 + point2)/2;
 	mAreaEikonal.SetMeetingPlaneCenter(center);
 	Vec3<double> normal_vec = (point2-point1);
@@ -77,6 +113,7 @@ void MinimalSurfaceEstimator::CalculateEikonal(sitk::Image phi, Vec3<double> poi
 }
 
 sitk::Image MinimalSurfaceEstimator::CalculateEikonalAndTransportInit(sitk::Image phi, sitk::Image image, Vec3<double> point1, Vec3<double> point2){
+	DefaultThreadLimit thread_limit;
 	CalculateEikonal(phi, point1, point2);
 	//calculate slice distance
 	sitk::Image distanceSlice = GetImageSlice<sitk::sitkFloat64>(mRotatedAreaEikonal.GetCombinedDistanceMap(), 0, mTransportInitPlaneSlice);
@@ -116,6 +153,7 @@ void MinimalSurfaceEstimator::CalculateTransportFunction(sitk::Image& initial_co
 }
 
 void MinimalSurfaceEstimator::Calculate(sitk::Image phi, sitk::Image image, Vec3<double> point1, Vec3<double> point2, int maxIterations) {
+	DefaultThreadLimit thread_limit;
 	sitk::Image initial_contour;
 	if(mTempInitContour == nullptr){
 		cout <<"Calculating initial contour..." <<endl;
