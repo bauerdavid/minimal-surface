@@ -2,6 +2,15 @@
 #include "SimpleITK.h"
 #include "Utils.h"
 #include <sitkImageOperators.h>
+#if defined(__SSE2__) || defined(_M_X64)
+// x86-64 always has SSE2. Other processors (Apple silicon) use the plain loop.
+#include <emmintrin.h>
+#define TRANSPORT_SSE2
+// mask ? a : b, lane by lane, for a mask from a comparison.
+static inline __m128d select_pd(__m128d mask, __m128d a, __m128d b) {
+	return _mm_or_pd(_mm_and_pd(mask, a), _mm_andnot_pd(mask, b));
+}
+#endif
 namespace sitk = itk::simple;
 using namespace std;
 
@@ -207,7 +216,44 @@ OMP_PARALLEL_FOR_REDUCTION(|, any_updated)
 		int zz = row / (ys - 2) + 1;
 		int yy = row % (ys - 2) + 1;
 		int row_start = xs * (yy + ys * zz);
-		for (int xx = 1; xx < xs - 1; xx++) {
+		int xx = 1;
+#ifdef TRANSPORT_SSE2
+		// Two voxels at a time, with the same operations in the same order as the loop below, so
+		// the values are the same bit for bit. Boundary voxels get their own value back.
+		const __m128d zero = _mm_setzero_pd();
+		const __m128d sign_bit = _mm_set1_pd(-0.0);
+		const __m128d alpha2 = _mm_set1_pd(alpha);
+		const __m128d tolerance = _mm_set1_pd(0.001);
+		__m128d any_vec = _mm_setzero_pd();
+		for (; xx + 1 < xs - 1; xx += 2) {
+			int idx = row_start + xx;
+			__m128i bound2 = _mm_loadl_epi64((const __m128i*)(bound_buffer + idx));
+			__m128i free32 = _mm_cmpeq_epi32(bound2, _mm_setzero_si128());
+			__m128d writable = _mm_castsi128_pd(_mm_unpacklo_epi32(free32, free32));
+			__m128d gx = _mm_loadu_pd(gx_buffer + idx);
+			__m128d gy = _mm_loadu_pd(gy_buffer + idx);
+			__m128d gz = _mm_loadu_pd(gz_buffer + idx);
+			// gx > 0 ? next : previous
+			__m128d dx = select_pd(_mm_cmpgt_pd(gx, zero), _mm_loadu_pd(src_buffer + idx + 1), _mm_loadu_pd(src_buffer + idx - 1));
+			__m128d dy = select_pd(_mm_cmpgt_pd(gy, zero), _mm_loadu_pd(src_buffer + idx + xs), _mm_loadu_pd(src_buffer + idx - xs));
+			__m128d dz = select_pd(_mm_cmpgt_pd(gz, zero), _mm_loadu_pd(src_buffer + idx + plane_stride), _mm_loadu_pd(src_buffer + idx - plane_stride));
+			// if (g < 0) g *= -1: max(-g, g) is -g exactly when -g > g, and g otherwise, which
+			// keeps -0 and NaN as they are, like the comparison does.
+			gx = _mm_max_pd(_mm_xor_pd(gx, sign_bit), gx);
+			gy = _mm_max_pd(_mm_xor_pd(gy, sign_bit), gy);
+			gz = _mm_max_pd(_mm_xor_pd(gz, sign_bit), gz);
+			__m128d val = _mm_add_pd(_mm_add_pd(_mm_mul_pd(gx, dx), _mm_mul_pd(gy, dy)), _mm_mul_pd(gz, dz));
+			val = _mm_div_pd(val, _mm_add_pd(_mm_add_pd(_mm_add_pd(gx, gy), gz), alpha2));
+			__m128d src = _mm_loadu_pd(src_buffer + idx);
+			__m128d change = _mm_andnot_pd(sign_bit, _mm_sub_pd(val, src));
+			__m128d limit = _mm_andnot_pd(sign_bit, _mm_mul_pd(src, tolerance));
+			any_vec = _mm_or_pd(any_vec, _mm_and_pd(_mm_cmpgt_pd(change, limit), writable));
+			_mm_storeu_pd(dst_buffer + idx, select_pd(writable, val, _mm_loadu_pd(dst_buffer + idx)));
+		}
+		if (_mm_movemask_pd(any_vec))
+			any_updated |= 1;
+#endif
+		for (; xx < xs - 1; xx++) {
 			int idx = row_start + xx;
 			if (bound_buffer[idx] != 0) {
 				continue; // boundary to completely omit (no transport from uninitialized distance map)
