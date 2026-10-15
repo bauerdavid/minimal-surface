@@ -158,6 +158,7 @@ void FMSigned::iterate() {
 
 void FMSigned::calculateForNeighbors() {
 	_PROFILING;
+	_SECTION("side.signed_distance.neighbors");
 	auto& v = m_narrow_band_v;
 	int n = (int)v.size();
 OMP_PARALLEL

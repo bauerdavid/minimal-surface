@@ -155,6 +155,7 @@ OMP_PARALLEL_FOR
 		m_max_dist = max_distance;
 		mVelocityMap = velo;
 		std::vector<uint32_t> init_size = m_distance_map.GetSize();
+		_SECTION_BEGIN(fill_timer, "side.signed_distance.fill");
 		if (init_size != input_size) {
 			m_distance_map = sitk::Image(input_size, sitk::sitkFloat64) + INF;
 			m_frozen = sitk::Image(input_size, sitk::sitkUInt8);
@@ -167,8 +168,9 @@ OMP_PARALLEL_FOR
 			//m_distance_map += -m_distance_map + INF;
 			//m_frozen -= m_frozen;
 		}
+		_SECTION_END(fill_timer);
 
-
+		_SECTION("side.signed_distance.init_band");
 		m_narrow_band_v.clear();
 
 		_SUB_PROFILE(initmaps);

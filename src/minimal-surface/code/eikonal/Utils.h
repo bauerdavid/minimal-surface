@@ -18,6 +18,11 @@
 #include <functional>
 #include <vector>
 #include <cfloat>
+#include <map>
+#include <mutex>
+#include <optional>
+#include <sstream>
+#include <string>
 
 #define BIG_NUMBER 1e11
 
@@ -253,7 +258,42 @@ static inline std::string methodName(const std::string& prettyFunction)
 #define __FUNCSIG__ __PRETTY_FUNCTION__
 #endif
 
+// Flat, thread-safe timers and value records. The profiler above keeps one call stack for the
+// whole process and is blocked inside parallel regions; these can be used from any thread, and
+// time spent by the two sides of the evolution is summed.
+class section_profile {
+	struct entry {
+		size_t n = 0;
+		double sum = 0, min = DBL_MAX, max = -DBL_MAX;
+	};
+	std::mutex mutex;
+	std::map<std::string, entry> timers, values;
+	static void add(std::map<std::string, entry>& entries, const char* name, double value);
+public:
+	static section_profile& get();
+	static void add_time(const char* name, double ns);
+	static void add_value(const char* name, double value);
+	static void report(std::ostream& os);
+	static void reset();
+};
+class section_timer {
+	const char* name;
+	std::chrono::steady_clock::time_point start_time;
+public:
+	section_timer(const char* name) : name(name), start_time(std::chrono::steady_clock::now()) {}
+	~section_timer() {
+		section_profile::add_time(name, (double)std::chrono::duration_cast<std::chrono::nanoseconds>(
+			std::chrono::steady_clock::now() - start_time).count());
+	}
+};
+
 #define __METHOD_NAME__ methodName(__FUNCSIG__)
+#define _PROFILE_CONCAT_(a, b) a##b
+#define _PROFILE_CONCAT(a, b) _PROFILE_CONCAT_(a, b)
+#define _SECTION(name) section_timer _PROFILE_CONCAT(_section_timer_, __LINE__)(name)
+#define _SECTION_BEGIN(var, name) std::optional<section_timer> var; var.emplace(name)
+#define _SECTION_END(var) var.reset()
+#define _RECORD_VALUE(name, value) section_profile::add_value(name, (double)(value))
 #define _SUB_PROFILE(name) profiler name##_profiler(#name, !profile_manager::is_blocked())
 #define _END_SUBPROFILE(name) name##_profiler.end_profiling()
 #define _PROFILING profiler _profiler(__METHOD_NAME__, !profile_manager::is_blocked())
@@ -267,10 +307,18 @@ static inline std::string methodName(const std::string& prettyFunction)
 #define _PROFILING
 #define _END_PROFILING
 #define _DUMP_PROFILE_INFO(output)
-#define _BLOCK_PROFILING 
+#define _BLOCK_PROFILING
 #define _UNBLOCK_PROFILING
+#define _SECTION(name)
+#define _SECTION_BEGIN(var, name)
+#define _SECTION_END(var)
+#define _RECORD_VALUE(name, value)
 
 #endif
+
+// The collected profile as text, or an empty string if profiling was not compiled in.
+// reset clears what was collected so far.
+std::string profile_report(bool reset);
 
 #define GET_MACRO(_1, _2, _3, _4, _5, _6, _7, NAME,...) NAME
 #define BUF_IDX2D(buffer, xs, ys, xx, yy) buffer[(xx)+(xs)*(yy)]

@@ -441,10 +441,15 @@ void AreaEikonal::UpdateCurvature(int i) {
 	auto& act_set = mActivePoints[i];
 	const vector<unsigned>& size = mPhaseFieldMap[i].GetSize();
 	int xs = size[0], ys = size[1], zs = size[2]; 
+	_SECTION_BEGIN(sdist_timer, "side.UpdateCurvature.signed_distance");
 	sitk::Image& temp_sdist = FMSigned::build_for_neighbors(i, field, act_set, 2, 1);
+	_SECTION_END(sdist_timer);
 	double* sdist_buffer = temp_sdist.GetBufferAsDouble();
 	double* curvature_buffer = mCurvatureMap[i].GetBufferAsDouble();
+	_SECTION_BEGIN(memset_timer, "side.UpdateCurvature.memset");
 	memset(curvature_buffer, 0, xs * ys * zs * sizeof(double));
+	_SECTION_END(memset_timer);
+	_SECTION("side.UpdateCurvature.loop");
 OMP_PARALLEL_FOR_NUM_THREADS(n_threads/2)
 #ifdef USE_VECTOR_AS_SET
 	for (int i = 0; i < act_set.size(); i++)
@@ -488,6 +493,7 @@ OMP_PARALLEL_FOR_NUM_THREADS(n_threads/2)
 realnum AreaEikonal::GetMinS(int i) const {
 
 	static int n_threads = ThreadsAvailable();
+	_SECTION("side.GetMinS");
 	const sitk::Image& field = mPhaseFieldMap[i];
 	auto& act_set = mActivePoints[i];
 	int n_top = 5000;
@@ -587,6 +593,7 @@ OMP_FOR_REDUCTION(+, n_outliers)
 }
 realnum AreaEikonal::UpdateVelo(int i, double S) {
 	static int n_threads = ThreadsAvailable();
+	_SECTION("side.UpdateVelo");
 	//_PROFILING;
 	sitk::Image& field = mPhaseFieldMap[i];
 	double* field_buffer = field.GetBufferAsDouble();
@@ -698,6 +705,7 @@ OMP_CRITICAL(maxS_selection)
 }
 void AreaEikonal::UpdateField(int idx, double maxv) {
 	static int n_threads = ThreadsAvailable();
+	_SECTION("side.UpdateField");
 	_PROFILING;
 	double* field_buffer = mPhaseFieldMap[idx].GetBufferAsDouble();
 	vector<unsigned> size = mPhaseFieldMap[idx].GetSize();
@@ -768,6 +776,7 @@ void AreaEikonal::UpdateDistance(int idx, realnum current_distance) {
 	//unsigned int* connectivity_buffer = m_distance_connectivity.GetBufferAsUInt32();
 	vector<unsigned> size = mPhaseFieldMap[idx].GetSize();
 	int xs = size[0], ys = size[1], zs = size[2];
+	_SECTION_BEGIN(loop_timer, "side.UpdateDistance.loop");
 OMP_PARALLEL_NUM_THREADS(n_threads/2)
 	{
 #ifdef USE_VECTOR_AS_SET
@@ -830,8 +839,11 @@ OMP_CRITICAL_NO_TAG
 	}
 
 
+	_SECTION_END(loop_timer);
+	_SECTION("side.UpdateDistance.sort_unique");
 	changed_velo.clear();
 #ifdef USE_VECTOR_AS_SET
+	_RECORD_VALUE("side.UpdateDistance.size_before_unique", act_set.size());
 	sort(act_set.begin(), act_set.end());
 	act_set.erase(unique(act_set.begin(), act_set.end()), act_set.end());
 	if (!act_set.empty() && act_set.back() == REMOVABLE_POINT)
@@ -841,6 +853,7 @@ OMP_CRITICAL_NO_TAG
 
 bool AreaEikonal::IsDone() const {
 	_PROFILING;
+	_SECTION("iter.IsDone");
 	if (mActivePoints[0].empty() && mActivePoints[1].empty())
 		return true;
 	vector<unsigned> size = mPhaseFieldMap[0].GetSize();
@@ -871,8 +884,12 @@ OMP_PARALLEL
 void AreaEikonal::Iterate()
 {
 	_PROFILING;
+	_SECTION("iter.Iterate");
+	_RECORD_VALUE("band.side0", mActivePoints[0].size());
+	_RECORD_VALUE("band.side1", mActivePoints[1].size());
 	// mAreaEikonal.m_field[i]
 	if (mUseMeetingPoints && !mPlaneFinalized && ++mIterationCount > REFRESH_ITERS) {
+		_SECTION("iter.UpdateMeetingPlane");
 		mIterationCount = 0;
 		UpdateMeetingPlane();
 	}
@@ -880,11 +897,13 @@ void AreaEikonal::Iterate()
 	realnum min_capital_s = 1e-11;
 	vector<double> min_capital_s_vals(2);
 	_BLOCK_PROFILING;
+	_SECTION_BEGIN(phase1_timer, "iter.1 curvature+minS (both sides)");
 	OMP_PARALLEL_FOR_NUM_THREADS(2)
 		for (int i = 0; i < 2; i++) {
 			UpdateCurvature(i);
 			min_capital_s_vals[i] = GetMinS(i);
 		}
+	_SECTION_END(phase1_timer);
 	_UNBLOCK_PROFILING;
 	min_capital_s = min_capital_s_vals[0] < min_capital_s_vals[1] ? min_capital_s_vals[0] : min_capital_s_vals[1];
 	if (min_capital_s < 1e-11) min_capital_s = 1e-11;
@@ -892,10 +911,12 @@ void AreaEikonal::Iterate()
 	//Calculate the velocity along the front
 	vector<double> max_velocities(2);
 	_BLOCK_PROFILING;
+	_SECTION_BEGIN(phase2_timer, "iter.2 velocity (both sides)");
 OMP_PARALLEL_FOR_NUM_THREADS(2)
 	for (int i = 0; i < 2; i++) {
 		max_velocities[i] = UpdateVelo(i, min_capital_s);
 	}
+	_SECTION_END(phase2_timer);
 	_UNBLOCK_PROFILING;
 	double max_velocity = max_velocities[0] > max_velocities[1] ? max_velocities[0] : max_velocities[1];
 	realnum mdatspedmax = 2; 
@@ -904,11 +925,13 @@ OMP_PARALLEL_FOR_NUM_THREADS(2)
 
 	// update phase field and distance values
 	_BLOCK_PROFILING;
+	_SECTION_BEGIN(phase3_timer, "iter.3 field+distance (both sides)");
 OMP_PARALLEL_FOR_NUM_THREADS(2)
 	for (int i = 0; i < 2; i++) {
 		UpdateField(i, max_velocity);
 		UpdateDistance(i, mCurrentDistance);
 	}
+	_SECTION_END(phase3_timer);
 	_UNBLOCK_PROFILING;
 }
 void AreaEikonal::Calculate(const sitk::Image& image, Vec3<double>& point1, Vec3<double>& point2) {
@@ -916,9 +939,13 @@ void AreaEikonal::Calculate(const sitk::Image& image, Vec3<double>& point1, Vec3
 	Calculate();
 }
 void AreaEikonal::Calculate() {
+	_SECTION("eik.Calculate");
+	int iterations = 0;
 	while (!IsDone()) {
 		Iterate();
+		iterations++;
 	}
+	_RECORD_VALUE("eik.iterations per Calculate", iterations);
 }
 void AreaEikonal::CombineDistance(int slice, double p0_x, double p1_x) {
 	_PROFILING;
