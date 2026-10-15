@@ -498,8 +498,6 @@ realnum AreaEikonal::GetMinS(int i) const {
 	auto& act_set = mActivePoints[i];
 	int n_top = 5000;
 	//int n_top = act_set.size();
-	vector<double> topSs;
-	topSs.reserve(n_top + 1);
 	const double* field_buffer = field.GetBufferAsDouble();
 	const double* phi_buffer = mPhiMap.GetBufferAsDouble();
 	const double* curvature_buffer = mCurvatureMap[i].GetBufferAsDouble();
@@ -509,13 +507,16 @@ realnum AreaEikonal::GetMinS(int i) const {
 	realnum minS(DBL_MAX);
 	if (act_set.size() == 0)
 		return minS;
-	vector<vector<double>> heaps(n_threads / 2);
+	// S of every point of the band, in band order. Points outside the volume get DBL_MAX, which
+	// the selection below leaves out.
+#ifdef USE_VECTOR_AS_SET
+	vector<double> s_values(act_set.size(), DBL_MAX);
+#else
+	vector<double> s_values;
+#endif
 
 OMP_PARALLEL_NUM_THREADS(n_threads/2)
 	{
-		//double temp_minS(DBL_MAX);
-		vector<double>& temp = heaps[omp_get_thread_num()];
-		temp.reserve(act_set.size()/(n_threads/2));
 OMP_FOR_REDUCTION(+, n_outliers)
 #ifdef USE_VECTOR_AS_SET
 		for (int i = 0; i < (int)act_set.size(); i++)
@@ -554,41 +555,29 @@ OMP_FOR_REDUCTION(+, n_outliers)
 						n_outliers++;
 					}
 					realnum S = calculate_S(sumcur, phi, 2/gradlen);
-					temp.push_back(S);
+#ifdef USE_VECTOR_AS_SET
+					s_values[i] = S;
+#else
+OMP_CRITICAL_NO_TAG
+					s_values.push_back(S);
+#endif
 				}
 			} // for zz
 		}
-		std::sort(temp.begin(), temp.end());
 	}
-	vector<int> indices(heaps.size());
-	for (int i = 0; i < n_top; i++) {
-		double next_elem(DBL_MAX);
-		int heap_idx;
-		for (size_t h = 0; h < heaps.size(); h++) {
-			int idx = indices[h];
-			if (idx >= (int)heaps[h].size()) continue;
-			double top = heaps[h][idx];
-			if (top < next_elem) {
-				heap_idx = h;
-				next_elem = top;
-			}
-		}
-		if (next_elem == DBL_MAX) break;
-		topSs.push_back(next_elem);
-		indices[heap_idx]++;
-	}
-	if (topSs.empty()) {
+	// minS is the idx-th smallest of the n_top smallest values of S, which is the idx-th smallest
+	// value overall: nth_element finds it without sorting them all. This used to sort per-thread
+	// lists and merge their first n_top values, a merge that stopped at the first value not below
+	// DBL_MAX; such values (and NaN) are left out here too. The result is the same value.
+	auto valid_end = std::partition(s_values.begin(), s_values.end(), [](double s) { return s < DBL_MAX; });
+	size_t valid_count = valid_end - s_values.begin();
+	if (valid_count == 0) {
 		return DBL_MAX;
 	}
-	/*minS = 0;
-	std::for_each(topSs.begin(), topSs.end(), [&minS](double val) {minS += val; });
-	minS /= topSs.size();*/
-	/*if (n_outliers == 0)
-		minS = topSs[0];
-	else
-		minS = topSs[n_outliers*2];*/
-	size_t idx = min((size_t)max(200, n_outliers/20), topSs.size()-1);
-	minS = topSs[idx];
+	size_t top_count = min((size_t)n_top, valid_count);
+	size_t idx = min((size_t)max(200, n_outliers/20), top_count - 1);
+	std::nth_element(s_values.begin(), s_values.begin() + idx, valid_end);
+	minS = s_values[idx];
 	return minS;
 }
 realnum AreaEikonal::UpdateVelo(int i, double S) {
