@@ -167,7 +167,7 @@ void FMSigned::calculateForNeighbors() {
 	_SECTION("side.signed_distance.neighbors");
 	auto& v = m_narrow_band_v;
 	int n = (int)v.size();
-OMP_PARALLEL
+OMP_PARALLEL_NUM_THREADS(m_team_size)
 	{
 		vector< std::pair<POINT3D, double>> temp;
 OMP_FOR

@@ -47,6 +47,8 @@ class FMSigned
 	// filling the maps clears it, and then the next build_for_neighbors fills the whole volume.
 	bool m_band_maps_clean = false;
 	double m_band_fill_value = 0;
+	// Threads for the parallel loops of build_for_neighbors.
+	int m_team_size = 1;
 	bool finished();
 	void initialize(sitk::Image& input_map, double max_distance, double velo);
 	template<class RandIt>
@@ -194,7 +196,7 @@ OMP_PARALLEL_FOR
 
 		_SUB_PROFILE(initmaps);
 		m_narrow_band_v.resize(bound_points.size());
-OMP_PARALLEL_FOR
+OMP_PARALLEL_FOR_NUM_THREADS(m_team_size)
 		for (int i = 0; i < (int)bound_points.size(); i++) {
 			auto [xx, yy, zz] = representation_to_point<int>(bound_points[i]);
 			double val = -BUF_IDX3D(m_input_buffer, xs, ys, zs, xx, yy, zz);
@@ -240,9 +242,13 @@ public:
 	}
 
 	template <class RandIt>
-	static sitk::Image& build_for_neighbors(int id, sitk::Image& input_map, RandIt& bound_points, double max_distance = DBL_MAX, double velo = 1., bool smooth=false) {
+	// team_size: the number of threads for its parallel loops; 0 for the default team. The
+	// evolution calls this for both sides at the same time, from a team of two threads, and a
+	// default-sized team for each would ask for twice as many threads as there are.
+	static sitk::Image& build_for_neighbors(int id, sitk::Image& input_map, RandIt& bound_points, double max_distance = DBL_MAX, double velo = 1., bool smooth=false, int team_size=0) {
 		_PROFILING;
 		FMSigned& signedDistMap = getInstance(id);
+		signedDistMap.m_team_size = team_size > 0 ? team_size : omp_get_max_threads();
 		signedDistMap.initialize_for_neighbors(input_map, bound_points, max_distance, velo);
 #ifdef DEBUG_CURVATURE
 		extern int current_iteration;

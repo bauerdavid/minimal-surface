@@ -444,7 +444,7 @@ void AreaEikonal::UpdateCurvature(int i) {
 	const vector<unsigned>& size = mPhaseFieldMap[i].GetSize();
 	int xs = size[0], ys = size[1], zs = size[2]; 
 	_SECTION_BEGIN(sdist_timer, "side.UpdateCurvature.signed_distance");
-	sitk::Image& temp_sdist = FMSigned::build_for_neighbors(i, field, act_set, 2, 1);
+	sitk::Image& temp_sdist = FMSigned::build_for_neighbors(i, field, act_set, 2, 1, false, n_threads/2);
 	_SECTION_END(sdist_timer);
 	double* sdist_buffer = temp_sdist.GetBufferAsDouble();
 	double* curvature_buffer = mCurvatureMap[i].GetBufferAsDouble();
