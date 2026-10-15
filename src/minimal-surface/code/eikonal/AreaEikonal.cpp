@@ -849,26 +849,20 @@ bool AreaEikonal::IsDone() const {
 	int xs = size[0], ys = size[1], zs = size[2];
 	const double* dist0_buffer = mDistanceMap[0].GetBufferAsDouble();
 	const double* dist1_buffer = mDistanceMap[1].GetBufferAsDouble();
-	bool is_done = true;
-OMP_PARALLEL
-{
-	OMP_FOR
-	for (int zyx = 0; zyx < zs*ys*xs; zyx++) {
-#ifndef _MSC_VER
-		// OpenMP 4.0, which MSVC (OpenMP 2.0) does not compile. Cancellation is off unless
-		// OMP_CANCELLATION=true is set, so leaving these out changes nothing by default.
-		#pragma omp cancellation point for
-#endif
-		if (dist0_buffer[zyx] < 0 && dist1_buffer[zyx] < 0){
-			is_done = false;
-#ifndef _MSC_VER
-			#pragma omp cancel for
-#endif
+	// Done when no voxel is left that neither side has reached. Look for one, starting at the
+	// one found last time and wrapping around: that one is usually still unreached, so most
+	// calls look at a single voxel instead of the whole volume. The answer is the same as a
+	// scan from the start, since every voxel is looked at before deciding that it is done.
+	int voxel_count = zs * ys * xs;
+	int start = mUnreachedVoxel < voxel_count ? mUnreachedVoxel : 0;
+	for (int offset = 0; offset < voxel_count; offset++) {
+		int zyx = start + offset < voxel_count ? start + offset : start + offset - voxel_count;
+		if (dist0_buffer[zyx] < 0 && dist1_buffer[zyx] < 0) {
+			mUnreachedVoxel = zyx;
+			return false;
 		}
 	}
-}
-	
-	return is_done;
+	return true;
 }
 void AreaEikonal::Iterate()
 {

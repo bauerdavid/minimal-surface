@@ -60,6 +60,8 @@ protected:
 	bool mUsesCorrection;
 	double mCurrentDistance;
 	bool mInitialized = false;
+	// The last voxel IsDone() found that neither side had reached; where it starts looking next.
+	mutable int mUnreachedVoxel = 0;
 #ifdef DEBUG_CURVATURE
 	sitk::Image m_new_update[2];
 #endif
