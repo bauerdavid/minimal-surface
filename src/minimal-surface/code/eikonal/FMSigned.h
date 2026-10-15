@@ -5,6 +5,8 @@
 #include "AreaEikonal.h"
 #include "Utils.h"
 #include <vector>
+#include <atomic>
+#include <memory>
 #include <math.h>
 #include <cfloat>
 
@@ -47,6 +49,10 @@ class FMSigned
 	// filling the maps clears it, and then the next one fills the whole volume.
 	bool m_band_maps_clean = false;
 	double m_band_fill_value = 0;
+	// Per voxel: has a thread of the current call taken it to calculate its distance (see
+	// relax_neighbors_of)? Zero everywhere when no call is running, like the frozen map, except
+	// at the points in m_narrow_band_v.
+	std::unique_ptr<std::atomic<uint8_t>[]> m_claimed;
 	bool finished();
 	void initialize(sitk::Image& input_map, double max_distance, double velo);
 	template<class RandIt>
@@ -174,6 +180,7 @@ OMP_PARALLEL_FOR
 			m_frozen = sitk::Image(input_size, sitk::sitkUInt8);
 			m_distance_buffer = m_distance_map.GetBufferAsDouble();
 			m_frozen_buffer = m_frozen.GetBufferAsUInt8();
+			clear_claims();
 		}
 		else if (m_band_maps_clean && m_band_fill_value == INF) {
 			// The last call only wrote the points in m_narrow_band_v (its band and their
@@ -183,6 +190,7 @@ OMP_PARALLEL_FOR
 		else {
 			std::fill(m_distance_buffer, m_distance_buffer + xs * ys * zs, INF);
 			memset(m_frozen_buffer, 0, xs * ys * zs);
+			clear_claims();
 			//m_distance_map += -m_distance_map + INF;
 			//m_frozen -= m_frozen;
 		}
@@ -191,10 +199,17 @@ OMP_PARALLEL_FOR
 		_SECTION_END(fill_timer);
 		return reset_pending;
 	}
+	void clear_claims() {
+		size_t voxel_count = (size_t)xs * ys * zs;
+		m_claimed.reset(new std::atomic<uint8_t>[voxel_count]);
+		for (size_t i = 0; i < voxel_count; i++)
+			m_claimed[i].store(0, std::memory_order_relaxed);
+	}
 	void reset_written_point(int i) {
 		auto [xx, yy, zz] = representation_to_point<int>(m_narrow_band_v[i].first);
 		BUF_IDX3D(m_distance_buffer, xs, ys, zs, xx, yy, zz) = INF;
 		BUF_IDX3D(m_frozen_buffer, xs, ys, zs, xx, yy, zz) = 0;
+		m_claimed[xx + (size_t)xs * (yy + (size_t)ys * zz)].store(0, std::memory_order_relaxed);
 	}
 	void finish_prepare_for_neighbors(const std::vector<POINT3D>& bound_points) {
 		m_narrow_band_v.clear();

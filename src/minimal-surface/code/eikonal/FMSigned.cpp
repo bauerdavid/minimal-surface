@@ -163,19 +163,31 @@ void FMSigned::iterate() {
 }
 
 // The distances of the neighbours of the i-th band point that have none yet, appended to found.
+// Threads work on different band points that can have the same neighbour. A thread takes a
+// neighbour with an atomic exchange on its claim flag, and only that thread calculates and writes
+// its distance; the others skip it without reading its distance, which the thread may be writing.
+// (The test for "has a distance already" is made on the frozen map, which this does not write:
+// the band points are frozen and have a distance, the neighbours are not.) The distance of a
+// neighbour only depends on the frozen band points around it, so who calculates it does not matter.
 void FMSigned::relax_neighbors_of(int i, std::vector<std::pair<POINT3D, double>>& found) {
 	POINT3D p = m_narrow_band_v[i].first;
 	auto [x, y, z] = representation_to_point<int>(p);
 	for (int i = 0; i < 6; i++) {
 		const int* offset = NEIGH6[i];
 		int xn = x + offset[0], yn = y + offset[1], zn = z + offset[2];
-		if (xn < 0 || xn >= xs || yn < 0 || yn >= ys || zn < 0 || zn >= zs
-			|| BUF_IDX3D(m_distance_buffer, xs, ys, zs, xn, yn, zn) < INF) continue;
+		if (xn < 0 || xn >= xs || yn < 0 || yn >= ys || zn < 0 || zn >= zs) continue;
+		const size_t voxel = xn + (size_t)xs * (yn + (size_t)ys * zn);
+		if (m_frozen_buffer[voxel]) continue;
+		if (m_claimed[voxel].load(std::memory_order_relaxed) || m_claimed[voxel].exchange(1, std::memory_order_acq_rel)) continue;
 		double dist_n;
 		bool solved = compute_distance(xn, yn, zn, dist_n);
 		if (solved) {
-			BUF_IDX3D(m_distance_buffer, xs, ys, zs, xn, yn, zn) = dist_n;
+			m_distance_buffer[voxel] = dist_n;
 			found.push_back(make_pair(point_to_representation(xn, yn, zn), dist_n));
+		}
+		else {
+			// no distance: it stays free for the next band point, as before
+			m_claimed[voxel].store(0, std::memory_order_release);
 		}
 	}
 }
