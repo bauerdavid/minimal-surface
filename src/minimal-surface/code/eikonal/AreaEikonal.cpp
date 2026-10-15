@@ -84,9 +84,15 @@ void AreaEikonal::FitMeetingPlane() {
 	double* distance1_buffer = mDistanceMap[1].GetBufferAsDouble();
 	int* meeting_plane_buffer = mMeetingPointsMap.GetBufferAsInt32();
 	int xs(size[0]), ys(size[1]), zs(size[2]);
+	// The points each thread finds. They go into mMeetingPoints in thread order below, not in
+	// the order the threads finish: the plane is fitted to the points in the set's iteration
+	// order, which depends on the order of insertion, so a varying order changed the result in
+	// the last bits from run to run. Each thread's points are a contiguous range of the volume,
+	// so this is the order a single thread would insert them in.
+	vector<vector<POINT3D>> found(omp_get_max_threads());
 OMP_PARALLEL
 	{
-		vector<POINT3D> temp;
+		vector<POINT3D>& temp = found[omp_get_thread_num()];
 OMP_FOR
 		for (int zyx = 0; zyx < zs * ys * xs; zyx++)
 		{
@@ -119,9 +125,9 @@ OMP_FOR
 				}
 			}
 		}
-OMP_CRITICAL(fill_meeting_plane)
-		mMeetingPoints.insert(temp.begin(), temp.end());
 	}
+	for (const vector<POINT3D>& temp : found)
+		mMeetingPoints.insert(temp.begin(), temp.end());
 	vector<vector<double>> meeting_plane_vec;
 	meeting_plane_vec.reserve(mMeetingPoints.size());
 
