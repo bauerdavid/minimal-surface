@@ -162,62 +162,44 @@ void FMSigned::iterate() {
 	}
 }
 
-void FMSigned::calculateForNeighbors() {
-	_PROFILING;
-	_SECTION("side.signed_distance.neighbors");
-	auto& v = m_narrow_band_v;
-	int n = (int)v.size();
-OMP_PARALLEL_NUM_THREADS(m_team_size)
-	{
-		vector< std::pair<POINT3D, double>> temp;
-OMP_FOR
-		for (int i = 0; i < n; i++) {
-			POINT3D p;
-			double dist;
-			tie(p, dist) = v[i];
-			auto [x, y, z] = representation_to_point<int>(p);
-			//OMP_PARALLEL_FOR
-			for (int i = 0; i < 6; i++) {
-				const int* offset = NEIGH6[i];
-				int xn = x + offset[0], yn = y + offset[1], zn = z + offset[2];
-				if (xn < 0 || xn >= xs || yn < 0 || yn >= ys || zn < 0 || zn >= zs
-					|| BUF_IDX3D(m_distance_buffer, xs, ys, zs, xn, yn, zn) < INF) continue;
-				double dist_n;
-				bool solved = compute_distance(xn, yn, zn, dist_n);
-				if (solved) {
-					BUF_IDX3D(m_distance_buffer, xs, ys, zs, xn, yn, zn) = dist_n;
-					temp.push_back(make_pair(point_to_representation(xn, yn, zn), dist_n));
-				}
+// The distances of the neighbours of the i-th band point that have none yet, appended to found.
+void FMSigned::relax_neighbors_of(int i, std::vector<std::pair<POINT3D, double>>& found) {
+	POINT3D p = m_narrow_band_v[i].first;
+	auto [x, y, z] = representation_to_point<int>(p);
+	for (int i = 0; i < 6; i++) {
+		const int* offset = NEIGH6[i];
+		int xn = x + offset[0], yn = y + offset[1], zn = z + offset[2];
+		if (xn < 0 || xn >= xs || yn < 0 || yn >= ys || zn < 0 || zn >= zs
+			|| BUF_IDX3D(m_distance_buffer, xs, ys, zs, xn, yn, zn) < INF) continue;
+		double dist_n;
+		bool solved = compute_distance(xn, yn, zn, dist_n);
+		if (solved) {
+			BUF_IDX3D(m_distance_buffer, xs, ys, zs, xn, yn, zn) = dist_n;
+			found.push_back(make_pair(point_to_representation(xn, yn, zn), dist_n));
+		}
+	}
+}
 
-			}
+// The distances of the neighbours of the band points of both instances, in one team. The band
+// lists only grow once every thread is done reading them.
+void FMSigned::calculate_for_neighbors_both(FMSigned* f[2], int team_size) {
+	_SECTION("evolve.signed_distance.neighbors");
+	const int n0 = (int)f[0]->m_narrow_band_v.size();
+	const int total = n0 + (int)f[1]->m_narrow_band_v.size();
+OMP_PARALLEL_NUM_THREADS(team_size)
+	{
+		vector< std::pair<POINT3D, double>> temp[2];
+OMP_FOR
+		for (int k = 0; k < total; k++) {
+			int s = k >= n0 ? 1 : 0;
+			f[s]->relax_neighbors_of(s ? k - n0 : k, temp[s]);
 		}
 OMP_CRITICAL_NO_TAG
-		m_narrow_band_v.insert(m_narrow_band_v.end(), temp.begin(), temp.end());
-	}
-	/*sort(m_narrow_band_v.begin() + n, m_narrow_band_v.end());
-	m_narrow_band_v.erase(unique(m_narrow_band_v.begin()+n, m_narrow_band_v.end()), m_narrow_band_v.end());
-	m_narrow_band = IndexedPriorityQueue<POINT3D_MAP(double), std::greater<double>>(m_narrow_band_v.begin() + n, m_narrow_band_v.end());
-	while (!finished()) {
-		POINT3D p;
-		double dist;
-		tie(p, dist) = m_narrow_band.top();
-		auto [x, y, z] = representation_to_point<int>(p);
-		m_narrow_band.pop();
-		BUF_IDX3D(m_frozen_buffer, xs, ys, zs, x, y, z) = 1;
-		BUF_IDX3D(m_distance_buffer, xs, ys, zs, x, y, z) = dist;
-		for (int i = 0; i < 6; i++) {
-			const int* offset = NEIGH6[i];
-			int xn = x + offset[0], yn = y + offset[1], zn = z + offset[2];
-			POINT3D neighb = point_to_representation(xn, yn, zn);
-			if (xn < 0 || xn >= xs || yn < 0 || yn >= ys || zn < 0 || zn >= zs
-				|| BUF_IDX3D(m_frozen_buffer, xs, ys, zs, xn, yn, zn) || !m_narrow_band.contains(neighb)) continue;
-			double dist_n;
-			bool solved = compute_distance(xn, yn, zn, dist_n);
-			if (solved && abs(m_narrow_band[neighb]) > abs(dist_n)) {
-				m_narrow_band.changeAtKey(neighb, dist_n);
-			}
+		{
+			for (int s = 0; s < 2; s++)
+				f[s]->m_narrow_band_v.insert(f[s]->m_narrow_band_v.end(), temp[s].begin(), temp[s].end());
 		}
-	}*/
+	}
 }
 
 

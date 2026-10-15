@@ -74,11 +74,16 @@ protected:
 	void InitializeContainers(const sitk::Image& image);
 	void InitializeDistanceMap(int idx, Vec3<double> center, int initialRadius);
 	void InitializeNeighbors();
-	virtual void UpdateCurvature(int i);
-	double GetMinS(int i) const ;
-	double UpdateVelo(int i, double S);
-	virtual void UpdateField(int i, double maxv);
-	virtual void UpdateDistance(int i, double current_distance);
+	// The steps of an iteration. Each goes over the points of both sides in one loop and one team
+	// of threads, side 0's points first.
+	void UpdateCurvatures();
+	void GetMinS(double min_s[2]) const;
+	void UpdateVelo(double S, double max_velocity[2]);
+	void UpdateFields(double maxv);
+	void UpdateDistances(double current_distance);
+	// Called when the curvature / the field of a side has been updated.
+	virtual void OnCurvatureUpdated(int i) {}
+	virtual void OnFieldUpdated(int i) {}
 	virtual void UpdateMeetPoints();
 	virtual void FitMeetingPlane();
     bool mUseMeetingPoints = true;
@@ -137,18 +142,12 @@ private:
 	EVENT_TYPE(data) InitializedDistanceMapEvent;
 	EVENT_TYPE(data) InitializedCurvatureMapEvent;
 
-	void UpdateCurvature(int i) override {
-		AreaEikonal::UpdateCurvature(i);
+	void OnCurvatureUpdated(int i) override {
 		UpdatedCurvatureMapEvent(mCurvatureMap[i], i);
 	}
 
-	void UpdateField(int i, double maxv) override {
-		AreaEikonal::UpdateField(i, maxv);
+	void OnFieldUpdated(int i) override {
 		UpdatedPhaseFieldMapEvent(mPhaseFieldMap[i], i);
-	}
-
-	void UpdateDistance(int i, double current_distance) override {
-		AreaEikonal::UpdateDistance(i, current_distance);
 	}
 
 	void UpdateMeetPoints() override {

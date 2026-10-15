@@ -39,6 +39,8 @@
 #define OMP_PARALLEL_NUM_THREADS(n_threads)
 #define OMP_FOR_REDUCTION(op, operand)
 #define OMP_PARALLEL_FOR_REDUCTION(op, operand)
+#define OMP_PARALLEL_SECTIONS_NUM_THREADS(n_threads)
+#define OMP_SECTION
 #else
 #ifdef _MSC_VER
 #define OMP_PARALLEL_FOR __pragma(omp parallel for)
@@ -52,6 +54,8 @@
 #define OMP_PARALLEL_NUM_THREADS(n_threads) __pragma(omp parallel num_threads(n_threads))
 #define OMP_FOR_REDUCTION(op, operand) __pragma(omp for reduction(op: operand))
 #define OMP_PARALLEL_FOR_REDUCTION(op, operand) __pragma(omp parallel for reduction(op: operand))
+#define OMP_PARALLEL_SECTIONS_NUM_THREADS(n_threads) __pragma(omp parallel sections num_threads(n_threads))
+#define OMP_SECTION __pragma(omp section)
 #else
 #define STRINGIFY(str) #str
 #define OMP_PARALLEL_FOR _Pragma(STRINGIFY(omp parallel for))
@@ -65,6 +69,8 @@
 #define OMP_PARALLEL_NUM_THREADS(n_threads) _Pragma(STRINGIFY(omp parallel num_threads(n_threads)))
 #define OMP_FOR_REDUCTION(op, operand) _Pragma(STRINGIFY(omp for reduction(op: operand)))
 #define OMP_PARALLEL_FOR_REDUCTION(op, operand) _Pragma(STRINGIFY(omp parallel for reduction(op: operand)))
+#define OMP_PARALLEL_SECTIONS_NUM_THREADS(n_threads) _Pragma(STRINGIFY(omp parallel sections num_threads(n_threads)))
+#define OMP_SECTION _Pragma(STRINGIFY(omp section))
 #endif
 #endif
 

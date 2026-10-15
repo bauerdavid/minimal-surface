@@ -47,7 +47,6 @@ public:
 MinimalSurfaceEstimator::MinimalSurfaceEstimator()
 {
 	using namespace std::placeholders;
-	omp_set_nested(1);
 	omp_set_dynamic(1);
 	mInitialContourCalculatorFunc = [this](sitk::Image& slice_image, sitk::Image& slice_distance){return this->CalculateInitialContourFromPhaseField(slice_image, slice_distance);};
 }

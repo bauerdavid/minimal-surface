@@ -43,12 +43,10 @@ class FMSigned
 	double mVelocityMap;
 	int xs, ys, zs;
 	// True when m_distance_map holds m_band_fill_value and m_frozen holds 0 everywhere except at
-	// the points in m_narrow_band_v, as build_for_neighbors leaves them. Every other way of
-	// filling the maps clears it, and then the next build_for_neighbors fills the whole volume.
+	// the points in m_narrow_band_v, as build_for_neighbors_both leaves them. Every other way of
+	// filling the maps clears it, and then the next one fills the whole volume.
 	bool m_band_maps_clean = false;
 	double m_band_fill_value = 0;
-	// Threads for the parallel loops of build_for_neighbors.
-	int m_team_size = 1;
 	bool finished();
 	void initialize(sitk::Image& input_map, double max_distance, double velo);
 	template<class RandIt>
@@ -155,8 +153,13 @@ OMP_PARALLEL_FOR
 		_END_SUBPROFILE(fill_narrowband);
 	}
 
-	void initialize_for_neighbors(const sitk::Image& input_map, const std::vector<POINT3D>& bound_points, double max_distance = DBL_MAX, double velo=1.) {
-		_PROFILING;
+	// The signed distance of the neighbours of a band, in steps, so that the loops of the two
+	// instances can be shared (build_for_neighbors_both): begin_prepare_for_neighbors sizes the
+	// maps and, if the last call wrote only the points in m_narrow_band_v, leaves their reset to
+	// reset_written_point (it returns true then); finish_prepare_for_neighbors makes the list for
+	// the new band; write_band_point fills in its points.
+	bool begin_prepare_for_neighbors(const sitk::Image& input_map, double max_distance, double velo) {
+		bool reset_pending = false;
 		m_input_buffer = input_map.GetBufferAsDouble();
 		std::vector<uint32_t> input_size = input_map.GetSize();
 		xs = input_size[0];
@@ -175,11 +178,7 @@ OMP_PARALLEL_FOR
 		else if (m_band_maps_clean && m_band_fill_value == INF) {
 			// The last call only wrote the points in m_narrow_band_v (its band and their
 			// neighbours); put those back instead of filling the whole volume.
-			for (const auto& written : m_narrow_band_v) {
-				auto [xx, yy, zz] = representation_to_point<int>(written.first);
-				BUF_IDX3D(m_distance_buffer, xs, ys, zs, xx, yy, zz) = INF;
-				BUF_IDX3D(m_frozen_buffer, xs, ys, zs, xx, yy, zz) = 0;
-			}
+			reset_pending = true;
 		}
 		else {
 			std::fill(m_distance_buffer, m_distance_buffer + xs * ys * zs, INF);
@@ -190,27 +189,63 @@ OMP_PARALLEL_FOR
 		m_band_fill_value = INF;
 		m_band_maps_clean = false;
 		_SECTION_END(fill_timer);
-
-		_SECTION("side.signed_distance.init_band");
+		return reset_pending;
+	}
+	void reset_written_point(int i) {
+		auto [xx, yy, zz] = representation_to_point<int>(m_narrow_band_v[i].first);
+		BUF_IDX3D(m_distance_buffer, xs, ys, zs, xx, yy, zz) = INF;
+		BUF_IDX3D(m_frozen_buffer, xs, ys, zs, xx, yy, zz) = 0;
+	}
+	void finish_prepare_for_neighbors(const std::vector<POINT3D>& bound_points) {
 		m_narrow_band_v.clear();
-
-		_SUB_PROFILE(initmaps);
 		m_narrow_band_v.resize(bound_points.size());
-OMP_PARALLEL_FOR_NUM_THREADS(m_team_size)
-		for (int i = 0; i < (int)bound_points.size(); i++) {
-			auto [xx, yy, zz] = representation_to_point<int>(bound_points[i]);
-			double val = -BUF_IDX3D(m_input_buffer, xs, ys, zs, xx, yy, zz);
-			BUF_IDX3D(m_distance_buffer, xs, ys, zs, xx, yy, zz) = val;
-			BUF_IDX3D(m_frozen_buffer, xs, ys, zs, xx, yy, zz) = 1;
-			m_narrow_band_v[i] = std::make_pair(bound_points[i],val);
-		}
-		_END_SUBPROFILE(initmaps);
+	}
+	void write_band_point(const std::vector<POINT3D>& bound_points, int i) {
+		auto [xx, yy, zz] = representation_to_point<int>(bound_points[i]);
+		double val = -BUF_IDX3D(m_input_buffer, xs, ys, zs, xx, yy, zz);
+		BUF_IDX3D(m_distance_buffer, xs, ys, zs, xx, yy, zz) = val;
+		BUF_IDX3D(m_frozen_buffer, xs, ys, zs, xx, yy, zz) = 1;
+		m_narrow_band_v[i] = std::make_pair(bound_points[i],val);
 	}
 	bool compute_distance(int x, int y, int z, double& out);
 	void iterate();
-	void calculateForNeighbors();
+	void relax_neighbors_of(int i, std::vector<std::pair<POINT3D, double>>& found);
+	static void calculate_for_neighbors_both(FMSigned* f[2], int team_size);
 	void smooth_distances();
 public:
+	// For the instances 0 and 1 together: the signed distance of the band points of each, and of
+	// the neighbours of those that have none, calculated in one team of team_size threads, with
+	// loops that go over the points of both. out gets their distance maps.
+	static void build_for_neighbors_both(const sitk::Image* input_maps[2], const std::vector<POINT3D>* bound_points[2], double max_distance, double velo, int team_size, const sitk::Image* out[2]) {
+		_PROFILING;
+		FMSigned* f[2] = { &getInstance(0), &getInstance(1) };
+		int n_reset[2] = { 0, 0 };
+		for (int s = 0; s < 2; s++) {
+			if (f[s]->begin_prepare_for_neighbors(*input_maps[s], max_distance, velo))
+				n_reset[s] = (int)f[s]->m_narrow_band_v.size();
+		}
+		// Reset what the last call wrote, then make the lists of the new bands: the lists are
+		// needed for the reset until it is done.
+		const int total_reset = n_reset[0] + n_reset[1];
+OMP_PARALLEL_FOR_NUM_THREADS(team_size)
+		for (int k = 0; k < total_reset; k++) {
+			int s = k >= n_reset[0] ? 1 : 0;
+			f[s]->reset_written_point(s ? k - n_reset[0] : k);
+		}
+		for (int s = 0; s < 2; s++)
+			f[s]->finish_prepare_for_neighbors(*bound_points[s]);
+		const int n0 = (int)bound_points[0]->size(), total = n0 + (int)bound_points[1]->size();
+OMP_PARALLEL_FOR_NUM_THREADS(team_size)
+		for (int k = 0; k < total; k++) {
+			int s = k >= n0 ? 1 : 0;
+			f[s]->write_band_point(*bound_points[s], s ? k - n0 : k);
+		}
+		calculate_for_neighbors_both(f, team_size);
+		for (int s = 0; s < 2; s++) {
+			f[s]->m_band_maps_clean = true;
+			out[s] = &f[s]->m_distance_map;
+		}
+	}
 	static void build(int id, sitk::Image& input_map, sitk::Image& output, double max_distance=DBL_MAX, double velo=1.);
 	template<class RandIt>
 	static void build(int id, sitk::Image& input_map, sitk::Image& output, RandIt& bound_points, double max_distance = DBL_MAX, double velo = 1.) {
@@ -239,35 +274,6 @@ public:
 
 
 		output = signedDistMap.m_distance_map;
-	}
-
-	template <class RandIt>
-	// team_size: the number of threads for its parallel loops; 0 for the default team. The
-	// evolution calls this for both sides at the same time, from a team of two threads, and a
-	// default-sized team for each would ask for twice as many threads as there are.
-	static sitk::Image& build_for_neighbors(int id, sitk::Image& input_map, RandIt& bound_points, double max_distance = DBL_MAX, double velo = 1., bool smooth=false, int team_size=0) {
-		_PROFILING;
-		FMSigned& signedDistMap = getInstance(id);
-		signedDistMap.m_team_size = team_size > 0 ? team_size : omp_get_max_threads();
-		signedDistMap.initialize_for_neighbors(input_map, bound_points, max_distance, velo);
-#ifdef DEBUG_CURVATURE
-		extern int current_iteration;
-		if (current_iteration % 50 == 0) {
-			save_image("Y:/BIOMAG/shortest path/curv_debug/dbg_" + std::to_string(id) + "_" + std::to_string(current_iteration) + "_init_sdist.tif", signedDistMap.m_distance_map);
-		}
-#endif
-		//save_image("Y:/BIOMAG/shortest path/init_dist.tif", signedDistMap.m_distance_map);
-		signedDistMap.calculateForNeighbors();
-		if (smooth) {
-			signedDistMap.smooth_distances();
-		}
-		// Unless smoothing replaced it, the distance map is m_band_fill_value and nothing is frozen
-		// except at the points listed in m_narrow_band_v.
-		signedDistMap.m_band_maps_clean = !smooth;
-		//save_image("Y:/BIOMAG/shortest path/out_dist.tif", signedDistMap.m_distance_map);
-		//sitk::Image&& signs = sitk::Cast(sitk::GreaterEqual(input_map, 0), signedDistMap.m_distance_map.GetPixelID()) * (-2) + 1;
-
-		return signedDistMap.m_distance_map;
 	}
 };
 
