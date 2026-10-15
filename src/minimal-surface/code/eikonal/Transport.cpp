@@ -197,10 +197,12 @@ bool TransportFunction::Iterate()
 	// Only the interior is updated. The loop runs over its rows, so that finding a voxel's
 	// coordinates takes no integer division per voxel. Every voxel is computed from the source
 	// buffer alone (Jacobi), so the order and the split between threads do not change the result.
+	// The sweep scales with the number of threads up to the memory bandwidth, so it uses the
+	// default team rather than a fixed number of threads.
 	const int row_count = (zs - 2) * (ys - 2);
 	const int plane_stride = xs * ys;
 	int any_updated = 0;
-OMP_PARALLEL_FOR_NUM_THREADS_REDUCTION(4, |, any_updated)
+OMP_PARALLEL_FOR_REDUCTION(|, any_updated)
 	for (int row = 0; row < row_count; row++) {
 		int zz = row / (ys - 2) + 1;
 		int yy = row % (ys - 2) + 1;
