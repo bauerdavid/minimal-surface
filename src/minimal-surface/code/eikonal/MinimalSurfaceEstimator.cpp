@@ -11,12 +11,14 @@
 using namespace std;
 
 namespace {
-// The evolution stops getting faster at about 4 to 8 threads and is slower beyond that: with all
-// 16 threads of a 16-thread Windows machine it took up to 2.8 times as long as without OpenMP
-// (64^3 volume, with meeting points), while 4 to 8 threads were 2 to 3 times faster. Unless the
-// user chose a number with OMP_NUM_THREADS, a calculation therefore uses at most
-// kDefaultMaxThreads, and the previous setting is put back afterwards so that other OpenMP code
-// in the same process is not affected. The value comes from measurements on that one machine.
+// The calculation stops getting faster at about 6 to 8 threads (64^3 and 96^3 volumes, on an
+// 8-core / 16-thread Windows machine and on 8 Linux CPUs); more threads are not slower any more,
+// but not faster either. It used to be much slower: with all 16 threads the evolution took up to
+// 2.8 times as long as without OpenMP, because of nested parallel regions. Unless the user chose
+// a number with OMP_NUM_THREADS, a calculation uses at most kDefaultMaxThreads, so that a machine
+// with many cores does not start dozens of threads for loops over a few thousand points (not
+// measured on such a machine). The previous setting is put back afterwards so that other OpenMP
+// code in the same process is not affected.
 const int kDefaultMaxThreads = 8;
 
 bool UserChoseThreadCount() {
