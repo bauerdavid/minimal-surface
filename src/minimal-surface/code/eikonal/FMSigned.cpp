@@ -82,7 +82,13 @@ OMP_CRITICAL(build_narrow_band)
 
 
 
-bool FMSigned::compute_distance(vector<int> p, double& out) {
+// The same offsets as NEIGH6_OFFSET, as a plain array: compute_distance runs for every
+// neighbour of every point of the band in every iteration, and must not allocate.
+static const int NEIGH6[6][3] = {
+	{-1, 0, 0}, {1, 0, 0}, {0, -1, 0}, {0, 1, 0}, {0, 0, -1}, {0, 0, 1}
+};
+
+bool FMSigned::compute_distance(int x, int y, int z, double& out) {
 	//_PROFILING;
 	double coeff[] = { -1. / (mVelocityMap * mVelocityMap), 0, 0 };
 	bool neg = false;
@@ -90,16 +96,15 @@ bool FMSigned::compute_distance(vector<int> p, double& out) {
 		double val1 = INF;
 		double val2 = INF;
 		for (int i = 0; i < 2; i++) {
-			const vector<int>& offset = NEIGH6_OFFSET[2 * dim + i];
-			int xn(p[0] + offset[0]), yn(p[1] + offset[1]), zn(p[2] + offset[2]);
+			const int* offset = NEIGH6[2 * dim + i];
+			int xn(x + offset[0]), yn(y + offset[1]), zn(z + offset[2]);
 			if (xn < 0 || xn >=xs || yn < 0 || yn >=ys || zn < 0 || zn >= zs ||
 				!BUF_IDX3D(m_frozen_buffer, xs, ys, zs, xn, yn, zn)) continue;
 			double _val1 = BUF_IDX3D(m_distance_buffer, xs, ys, zs, xn, yn, zn);
 			if (abs(_val1) < abs(val1)) {
 				val1 = _val1;
 #ifdef HIGH_ACCURACY
-				vector<int> pn2;
-				transform(p.begin(), p.end(), offset.begin(), back_inserter(pn2), [](int p, int o) { return p + 2 * o; });
+				int pn2[] = { x + 2 * offset[0], y + 2 * offset[1], z + 2 * offset[2] };
 
 				double _val2 = BUF_IDX3D(m_distance_buffer, xs, ys, zs, pn2[0], pn2[1], pn2[2]);
 				if (BUF_IDX3D(m_frozen_buffer, xs, ys, zs, pn2[0], pn2[1], pn2[2]) && _val2 <= val2)
@@ -144,12 +149,12 @@ void FMSigned::iterate() {
 	BUF_IDX3D(m_distance_buffer, xs, ys, zs, x, y, z) = dist;
 //OMP_PARALLEL_FOR
 	for (int i = 0; i < 6; i++) {
-		const vector<int> &offset = NEIGH6_OFFSET[i];
+		const int* offset = NEIGH6[i];
 		int xn = x + offset[0], yn = y + offset[1], zn = z + offset[2];
 		if (xn < 0 || xn >= xs || yn < 0 || yn >= ys || zn < 0 || zn >= zs
 			|| BUF_IDX3D(m_frozen_buffer, xs, ys, zs, xn, yn, zn)) continue;
 		double dist_n;
-		bool solved = compute_distance({ xn, yn, zn }, dist_n);
+		bool solved = compute_distance(xn, yn, zn, dist_n);
 		if (solved)
 //OMP_CRITICAL(push_to_narrow_band)
 			m_narrow_band.push_or_promote(point_to_representation(xn, yn, zn), dist_n);
@@ -172,12 +177,12 @@ OMP_FOR
 			auto [x, y, z] = representation_to_point<int>(p);
 			//OMP_PARALLEL_FOR
 			for (int i = 0; i < 6; i++) {
-				const vector<int>& offset = NEIGH6_OFFSET[i];
+				const int* offset = NEIGH6[i];
 				int xn = x + offset[0], yn = y + offset[1], zn = z + offset[2];
 				if (xn < 0 || xn >= xs || yn < 0 || yn >= ys || zn < 0 || zn >= zs
 					|| BUF_IDX3D(m_distance_buffer, xs, ys, zs, xn, yn, zn) < INF) continue;
 				double dist_n;
-				bool solved = compute_distance({ xn, yn, zn }, dist_n);
+				bool solved = compute_distance(xn, yn, zn, dist_n);
 				if (solved) {
 					BUF_IDX3D(m_distance_buffer, xs, ys, zs, xn, yn, zn) = dist_n;
 					temp.push_back(make_pair(point_to_representation(xn, yn, zn), dist_n));
@@ -200,13 +205,13 @@ OMP_CRITICAL_NO_TAG
 		BUF_IDX3D(m_frozen_buffer, xs, ys, zs, x, y, z) = 1;
 		BUF_IDX3D(m_distance_buffer, xs, ys, zs, x, y, z) = dist;
 		for (int i = 0; i < 6; i++) {
-			const vector<int>& offset = NEIGH6_OFFSET[i];
+			const int* offset = NEIGH6[i];
 			int xn = x + offset[0], yn = y + offset[1], zn = z + offset[2];
 			POINT3D neighb = point_to_representation(xn, yn, zn);
 			if (xn < 0 || xn >= xs || yn < 0 || yn >= ys || zn < 0 || zn >= zs
 				|| BUF_IDX3D(m_frozen_buffer, xs, ys, zs, xn, yn, zn) || !m_narrow_band.contains(neighb)) continue;
 			double dist_n;
-			bool solved = compute_distance({ xn, yn, zn }, dist_n);
+			bool solved = compute_distance(xn, yn, zn, dist_n);
 			if (solved && abs(m_narrow_band[neighb]) > abs(dist_n)) {
 				m_narrow_band.changeAtKey(neighb, dist_n);
 			}
@@ -240,7 +245,7 @@ OMP_PARALLEL_FOR
 		int n_neighbors = 0;
 		auto [x, y, z] = representation_to_point<int>(p);
 		for (int i = 0; i < 6; i++) {
-			const vector<int>& offset = NEIGH6_OFFSET[i];
+			const int* offset = NEIGH6[i];
 			int xn = x + offset[0], yn = y + offset[1], zn = z + offset[2];
 			double dist_n;
 			if (xn < 0 || xn >= xs || yn < 0 || yn >= ys || zn < 0 || zn >= zs || (dist_n = BUF_IDX3D(m_distance_buffer, xs, ys, zs, xn, yn, zn)) >= INF) continue;

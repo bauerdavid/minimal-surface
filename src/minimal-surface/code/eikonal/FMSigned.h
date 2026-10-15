@@ -185,7 +185,7 @@ OMP_PARALLEL_FOR
 		}
 		_END_SUBPROFILE(initmaps);
 	}
-	bool compute_distance(std::vector<int> p, double& out);
+	bool compute_distance(int x, int y, int z, double& out);
 	void iterate();
 	void calculateForNeighbors();
 	void smooth_distances();
