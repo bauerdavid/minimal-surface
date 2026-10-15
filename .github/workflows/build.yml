@@ -8,8 +8,17 @@ name: build
 # libraries) and `libitk-devel` (shared ITK libraries), so each job gets a ready-made SDK in
 # a conda environment and setup.py is pointed at it with SIMPLEITK_PATH.
 #
-# The wheels uploaded by this workflow link against the ITK libraries of that conda
-# environment, so they are build artifacts for inspection, not something to publish to PyPI.
+# The freshly built wheel still points at the ITK libraries of that conda environment, so each
+# job then repairs it: auditwheel (Linux), delocate (macOS) and delvewheel (Windows) copy the
+# libraries it needs into the wheel. A second job installs the repaired wheel on a plain
+# Python, without conda, and runs the tests, which is the check that nothing was left behind.
+#
+# The Linux wheel is only a CI check. conda-forge's toolchain needs glibc 2.34 and a recent
+# libstdc++, so auditwheel can tag it no lower than manylinux_2_39, which most distributions
+# cannot install. Its artifact is therefore named ci-only-*, and release.yml publishes only
+# the wheel-* artifacts.
+#
+# Also called by release.yml.
 
 on:
   push:
@@ -22,6 +31,7 @@ on:
       - "**.md"
       - ".github/ISSUE_TEMPLATE/**"
   workflow_dispatch:
+  workflow_call:
 
 concurrency:
   group: build-${{ github.event.pull_request.number || github.ref }}
@@ -50,16 +60,20 @@ jobs:
             platform: Linux
             # conda-forge's compilers match the ABI of the libraries in the environment
             toolchain: compilers
+            artifact: ci-only
           - os: macos-15
             platform: macOS (arm64)
             toolchain: compilers llvm-openmp
+            artifact: wheel
           - os: macos-15-intel
             platform: macOS (x86_64)
             toolchain: compilers llvm-openmp
+            artifact: wheel
           - os: windows-latest
             platform: Windows
             # the runner's Visual Studio is used
             toolchain: ""
+            artifact: wheel
 
     steps:
       - name: Allow long paths (the vendored Eigen tree has very long file names)
@@ -110,13 +124,79 @@ jobs:
           echo "CC=${CC:-} CXX=${CXX:-}"
           python -m pip wheel . --no-deps --wheel-dir dist -v
 
-      - name: Install and test
+      - name: Bundle the ITK libraries into the wheel
         run: |
-          python -m pip install --no-deps dist/*.whl
-          python -m pytest tests -v
+          case "$RUNNER_OS" in
+            Linux)
+              python -m pip install auditwheel patchelf
+              auditwheel show dist/*.whl
+              auditwheel repair dist/*.whl --wheel-dir wheelhouse
+              ;;
+            macOS)
+              python -m pip install delocate
+              delocate-wheel --wheel-dir wheelhouse --verbose dist/*.whl
+              ;;
+            Windows)
+              python -m pip install delvewheel
+              dll_dir="$(cygpath -w "$CONDA_PREFIX/Library/bin")"
+              python -m delvewheel show dist/*.whl --add-path "$dll_dir"
+              python -m delvewheel repair dist/*.whl --wheel-dir wheelhouse --add-path "$dll_dir"
+              ;;
+          esac
+          ls -l wheelhouse
 
       - uses: actions/upload-artifact@v4
         with:
-          name: wheel-${{ runner.os }}-${{ runner.arch }}-py${{ matrix.python }}
-          path: dist/*.whl
+          name: ${{ matrix.artifact }}-${{ runner.os }}-${{ runner.arch }}-py${{ matrix.python }}
+          path: wheelhouse/*.whl
           if-no-files-found: error
+          retention-days: 7
+
+  # The wheel on a plain Python, with no conda environment (and so none of the libraries the
+  # build used) on the machine's search paths.
+  test-wheel:
+    name: Test the wheel, ${{ matrix.platform }}, Python ${{ matrix.python }}
+    needs: build
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-15, macos-15-intel, windows-latest]
+        python: ["3.10", "3.11", "3.12", "3.13"]
+        include:
+          - os: ubuntu-latest
+            platform: Linux
+            artifact: ci-only
+          - os: macos-15
+            platform: macOS (arm64)
+            artifact: wheel
+          - os: macos-15-intel
+            platform: macOS (x86_64)
+            artifact: wheel
+          - os: windows-latest
+            platform: Windows
+            artifact: wheel
+
+    steps:
+      - name: Allow long paths (the vendored Eigen tree has very long file names)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: git config --global core.longpaths true
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}-${{ runner.os }}-${{ runner.arch }}-py${{ matrix.python }}
+          path: wheelhouse
+
+      - name: Install and test
+        shell: bash
+        run: |
+          python -m pip install wheelhouse/*.whl numpy pytest
+          python -m pytest tests -v
