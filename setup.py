@@ -191,6 +191,11 @@ if os.environ.get("MINIMAL_SURFACE_PROFILE", "").strip().lower() not in (
     define_macros.append(("PROFILE_FUNCTIONS", "1"))
     print("setup.py: function profiling enabled (PROFILE_FUNCTIONS)")
 
+# delocate (the tool that bundles the ITK libraries into the macOS wheel) rewrites every library
+# path to a longer one, and the extension links about a hundred of them. Without this padding
+# the Mach-O header has no room for the longer paths and install_name_tool fails.
+macos_link_args = ["-Wl,-headerpad_max_install_names"] if MACOS else []
+
 extension = Extension(
     'minimal_surface',
     sources=["src/minimal-surface/code/_minimal_surface.pyx"] + glob.glob("src/minimal-surface/code/eikonal/*.cpp"),
@@ -207,7 +212,7 @@ extension = Extension(
     library_dirs=sdk["library_dirs"],
     extra_objects=sdk["extra_objects"],
     extra_compile_args=extra_compile_args,
-    extra_link_args=sdk["extra_link_args"] + omp_link_args,
+    extra_link_args=sdk["extra_link_args"] + omp_link_args + macos_link_args,
     language="c++"
 )
 
