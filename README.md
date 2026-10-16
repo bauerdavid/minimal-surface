@@ -16,7 +16,9 @@ It can be installed from PyPI using `pip`:
 python -m pip install minimal-surface
 ```
 
-> **Note**: This package is currently available only for Windows. In the future we plan to release it for Linux and Mac systems.
+> **Note**: Wheels are published for Windows and macOS (Apple silicon and Intel), for Python 3.10 to 3.13. There is no
+> Linux wheel yet, so on Linux `pip` builds the package from source, which needs the SimpleITK libraries described
+> below.
 
 ### Building from source
 The extension is written in C++ and links against the SimpleITK C++ libraries, which `setup.py` finds through
@@ -37,8 +39,9 @@ python -m pytest tests
 ```
 The build is checked on Linux, macOS (Apple silicon and Intel) and Windows by
 [`.github/workflows/build.yml`](.github/workflows/build.yml), which is the reference for the exact steps.
-The wheels it produces use the ITK libraries of the conda environment they were built in; they are for testing,
-not for distribution.
+It also repairs each wheel so that it carries the ITK libraries it needs, and tests the result on a plain Python
+installation. Publishing a GitHub release uploads the Windows and macOS wheels and the source distribution to PyPI
+([`.github/workflows/release.yml`](.github/workflows/release.yml)).
 
 ## Usage
 The easiest way to utilize our tool is by using [Annotation Toolbox](https://github.com/bauerdavid/napari-nD-annotator), a [napari](https://www.napari.org) plugin created for fast 2 and 3D image annotation.
