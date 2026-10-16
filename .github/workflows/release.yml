@@ -7,7 +7,7 @@ name: release
 #   2. create a GitHub release whose tag is v<version> (for example v0.0.3) on that commit.
 #
 # The workflow checks that the tag matches setup.cfg, builds the source distribution and the
-# Windows and macOS wheels (build.yml, which also tests each wheel on a plain Python install),
+# wheels for Windows, macOS and Linux (build.yml, which also tests each wheel on a plain Python install),
 # and uploads them. Run by hand from the Actions tab (workflow_dispatch) it does everything
 # except the upload, which is a dry run.
 #
@@ -17,8 +17,6 @@ name: release
 #     environment pypi).
 #   * GitHub: Settings > Environments > create an environment named `pypi`. Requiring a
 #     reviewer there adds a manual approval before every upload.
-#
-# There are no Linux wheels yet, see build.yml.
 
 on:
   release:
@@ -75,7 +73,6 @@ jobs:
           name: sdist
           path: dist
 
-      # only the wheel-* artifacts: the ci-only-* Linux wheels are not for release
       - name: Collect the wheels
         uses: actions/download-artifact@v4
         with:

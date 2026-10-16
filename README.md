@@ -16,9 +16,19 @@ It can be installed from PyPI using `pip`:
 python -m pip install minimal-surface
 ```
 
-> **Note**: Wheels are published for Windows and macOS (Apple silicon and Intel), for Python 3.10 to 3.13. There is no
-> Linux wheel yet, so on Linux `pip` builds the package from source, which needs the SimpleITK libraries described
-> below.
+### Supported platforms
+Wheels are published to PyPI for:
+
+| | Python 3.10 | 3.11 | 3.12 | 3.13 | 3.14 |
+|---|---|---|---|---|---|
+| Windows (x86-64) | yes | yes | yes | yes | yes |
+| macOS 11 and later, Apple silicon and Intel | yes | yes | yes | yes | yes |
+| Linux (x86-64, glibc 2.28 or later: Ubuntu 20.04+, Debian 10+, RHEL 8+) | yes | yes | yes | yes | yes |
+
+Python 3.9 and older are not supported (0.0.2 was the last release for Python 3.9). On other platforms, such as
+Linux on ARM, `pip` builds the package from source, which needs the SimpleITK libraries described below.
+The supported Python versions are listed in `setup.cfg` (`python_requires` and the classifiers), and
+[`.github/workflows/build.yml`](.github/workflows/build.yml) builds and tests every one of them on each platform.
 
 ### Building from source
 The extension is written in C++ and links against the SimpleITK C++ libraries, which `setup.py` finds through
@@ -126,3 +136,10 @@ Points are `(z, y, x)`, like array indices, and may be fractional. A point must 
 If you bump into any problems regarding the package, please [file an issue].
 
 [file an issue]: https://github.com/bauerdavid/minimal-surface/issues
+
+## License
+minimal-surface is released under the BSD 3-Clause license (see [LICENSE](LICENSE)).
+
+The wheels also contain third-party libraries (ITK and what it depends on, the OpenMP runtime) and are built with
+SimpleITK and Eigen. Their licenses are collected in `THIRD_PARTY_LICENSES.txt`, which is stored in the wheel's
+`.dist-info/licenses` directory.

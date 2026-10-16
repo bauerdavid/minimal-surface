@@ -1,22 +1,29 @@
 name: build
 
 # Builds the extension and runs the tests on Linux, macOS (Apple silicon and Intel) and
-# Windows, for each supported Python version.
+# Windows, for each supported Python version, and produces the wheels that release.yml
+# uploads to PyPI.
 #
 # minimal-surface links against the SimpleITK C++ libraries, which nobody wants to compile
-# for every job. conda-forge ships them: `libsimpleitk` (headers and static SimpleITK
-# libraries) and `libitk-devel` (shared ITK libraries), so each job gets a ready-made SDK in
-# a conda environment and setup.py is pointed at it with SIMPLEITK_PATH.
+# for every job. They come in two ways:
 #
-# The freshly built wheel still points at the ITK libraries of that conda environment, so each
-# job then repairs it: auditwheel (Linux), delocate (macOS) and delvewheel (Windows) copy the
-# libraries it needs into the wheel. A second job installs the repaired wheel on a plain
-# Python, without conda, and runs the tests, which is the check that nothing was left behind.
+# * Windows and macOS: conda-forge ships them, `libsimpleitk` (headers and static SimpleITK
+#   libraries) and `libitk-devel` (shared ITK libraries), so each job gets a ready-made SDK in
+#   a conda environment and setup.py is pointed at it with SIMPLEITK_PATH. The freshly built
+#   wheel still points at the ITK libraries of that environment, so the job then repairs it:
+#   delocate (macOS) and delvewheel (Windows) copy the libraries it needs into the wheel.
 #
-# The Linux wheel is only a CI check. conda-forge's toolchain needs glibc 2.34 and a recent
-# libstdc++, so auditwheel can tag it no lower than manylinux_2_39, which most distributions
-# cannot install. Its artifact is therefore named ci-only-*, and release.yml publishes only
-# the wheel-* artifacts.
+# * Linux: a wheel has to be built against an old glibc and libstdc++ to install on common
+#   distributions (manylinux_2_28), and conda-forge's libraries are built against much newer
+#   ones. So the linux-sdk job builds static ITK and SimpleITK from source in the manylinux
+#   container, once, and caches the result; build-linux builds a wheel for each Python version
+#   from the cache and repairs it with auditwheel. That first build takes a couple of hours.
+#   The `build` job also builds on Linux with the conda SDK, to check that route (documented in
+#   the README), but its wheel is not kept.
+#
+# Every wheel gets the licenses of the libraries inside it (.github/scripts/licenses.py). The
+# test-wheel jobs then install the wheels on a plain Python, without conda, and run the tests,
+# which is the check that nothing was left behind.
 #
 # Also called by release.yml.
 
@@ -40,6 +47,12 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  # SimpleITK built from source for the Linux wheels: the same release as the conda-forge
+  # libsimpleitk the other platforms use, and so the same ITK.
+  SITK_TAG: v2.5.6
+  MANYLINUX_IMAGE: quay.io/pypa/manylinux_2_28_x86_64
+
 defaults:
   run:
     # a login shell, so that the micromamba environment is active in every step
@@ -54,26 +67,26 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-15, macos-15-intel, windows-latest]
-        python: ["3.10", "3.11", "3.12", "3.13"]
+        python: ["3.10", "3.11", "3.12", "3.13", "3.14"]
         include:
           - os: ubuntu-latest
-            platform: Linux
+            platform: Linux (conda SDK)
             # conda-forge's compilers match the ABI of the libraries in the environment
             toolchain: compilers
-            artifact: ci-only
+            repair: false
           - os: macos-15
             platform: macOS (arm64)
             toolchain: compilers llvm-openmp
-            artifact: wheel
+            repair: true
           - os: macos-15-intel
             platform: macOS (x86_64)
             toolchain: compilers llvm-openmp
-            artifact: wheel
+            repair: true
           - os: windows-latest
             platform: Windows
             # the runner's Visual Studio is used
             toolchain: ""
-            artifact: wheel
+            repair: true
 
     steps:
       - name: Allow long paths (the vendored Eigen tree has very long file names)
@@ -124,30 +137,120 @@ jobs:
           echo "CC=${CC:-} CXX=${CXX:-}"
           python -m pip wheel . --no-deps --wheel-dir dist -v
 
+      # The wheel that is not repaired only works inside this environment, which is all that
+      # the Linux job needs it for.
+      - name: Install and test
+        if: ${{ !matrix.repair }}
+        run: |
+          python -m pip install --no-deps dist/*.whl
+          python -m pytest tests -v
+
       - name: Bundle the ITK libraries into the wheel
+        if: ${{ matrix.repair }}
         run: |
           case "$RUNNER_OS" in
-            Linux)
-              python -m pip install auditwheel patchelf
-              auditwheel show dist/*.whl
-              auditwheel repair dist/*.whl --wheel-dir wheelhouse
-              ;;
             macOS)
               python -m pip install delocate
               delocate-wheel --wheel-dir wheelhouse --verbose dist/*.whl
+              prefix="$CONDA_PREFIX"
               ;;
             Windows)
               python -m pip install delvewheel
               dll_dir="$(cygpath -w "$CONDA_PREFIX/Library/bin")"
               python -m delvewheel show dist/*.whl --add-path "$dll_dir"
               python -m delvewheel repair dist/*.whl --wheel-dir wheelhouse --add-path "$dll_dir"
+              prefix="$(cygpath -w "$CONDA_PREFIX")"
               ;;
           esac
+          python .github/scripts/licenses.py conda --prefix "$prefix" --wheel wheelhouse/*.whl \
+            --eigen src/minimal-surface/code/eigen-3.4.0
           ls -l wheelhouse
 
       - uses: actions/upload-artifact@v4
+        if: ${{ matrix.repair }}
         with:
-          name: ${{ matrix.artifact }}-${{ runner.os }}-${{ runner.arch }}-py${{ matrix.python }}
+          name: wheel-${{ runner.os }}-${{ runner.arch }}-py${{ matrix.python }}
+          path: wheelhouse/*.whl
+          if-no-files-found: error
+          retention-days: 7
+
+  # Static ITK and SimpleITK for the Linux wheels, built in the manylinux container. The result is
+  # cached under a key made from the SimpleITK release and the build script; a job that finds it
+  # does nothing.
+  linux-sdk:
+    name: Linux SDK (SimpleITK from source)
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Look for the cached SDK
+        id: sdk
+        uses: actions/cache/restore@v4
+        with:
+          path: sdk
+          key: linux-sdk-${{ env.SITK_TAG }}-${{ hashFiles('.github/linux/build_sdk.sh') }}
+          lookup-only: true
+
+      # ccache keeps the work of a build that fails or is cancelled
+      - name: Restore ccache
+        if: steps.sdk.outputs.cache-hit != 'true'
+        uses: actions/cache/restore@v4
+        with:
+          path: ccache
+          key: linux-ccache-${{ env.SITK_TAG }}-${{ github.run_id }}
+          restore-keys: linux-ccache-${{ env.SITK_TAG }}-
+
+      - name: Build ITK and SimpleITK
+        if: steps.sdk.outputs.cache-hit != 'true'
+        run: |
+          docker run --rm -v "$PWD:/work" -e SITK_TAG -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" \
+            "$MANYLINUX_IMAGE" bash /work/.github/linux/build_sdk.sh
+
+      - name: Save the SDK
+        if: steps.sdk.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: sdk
+          key: linux-sdk-${{ env.SITK_TAG }}-${{ hashFiles('.github/linux/build_sdk.sh') }}
+
+      - name: Save ccache
+        if: always() && steps.sdk.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ccache
+          key: linux-ccache-${{ env.SITK_TAG }}-${{ github.run_id }}
+
+  build-linux:
+    name: Linux (manylinux_2_28), Python ${{ matrix.python }}
+    needs: linux-sdk
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Restore the SDK
+        uses: actions/cache/restore@v4
+        with:
+          path: sdk
+          key: linux-sdk-${{ env.SITK_TAG }}-${{ hashFiles('.github/linux/build_sdk.sh') }}
+          fail-on-cache-miss: true
+
+      - name: Build the wheel
+        env:
+          PYTHON: ${{ matrix.python }}
+        run: |
+          tag="cp${PYTHON//./}-cp${PYTHON//./}"
+          docker run --rm -v "$PWD:/work" -e PYTAG="$tag" -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" \
+            "$MANYLINUX_IMAGE" bash /work/.github/linux/build_wheel.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheel-${{ runner.os }}-${{ runner.arch }}-py${{ matrix.python }}
           path: wheelhouse/*.whl
           if-no-files-found: error
           retention-days: 7
@@ -156,27 +259,27 @@ jobs:
   # build used) on the machine's search paths.
   test-wheel:
     name: Test the wheel, ${{ matrix.platform }}, Python ${{ matrix.python }}
-    needs: build
+    needs: [build, build-linux]
+    # also when another platform's build failed (or is still the first, slow Linux SDK build
+    # failing), so that every platform reports its own result
+    if: ${{ !cancelled() }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-15, macos-15-intel, windows-latest]
-        python: ["3.10", "3.11", "3.12", "3.13"]
+        # the oldest Linux runner, since the wheel is meant to run on older distributions too
+        os: [ubuntu-22.04, macos-15, macos-15-intel, windows-latest]
+        python: ["3.10", "3.11", "3.12", "3.13", "3.14"]
         include:
-          - os: ubuntu-latest
+          - os: ubuntu-22.04
             platform: Linux
-            artifact: ci-only
           - os: macos-15
             platform: macOS (arm64)
-            artifact: wheel
           - os: macos-15-intel
             platform: macOS (x86_64)
-            artifact: wheel
           - os: windows-latest
             platform: Windows
-            artifact: wheel
 
     steps:
       - name: Allow long paths (the vendored Eigen tree has very long file names)
@@ -192,7 +295,7 @@ jobs:
 
       - uses: actions/download-artifact@v4
         with:
-          name: ${{ matrix.artifact }}-${{ runner.os }}-${{ runner.arch }}-py${{ matrix.python }}
+          name: wheel-${{ runner.os }}-${{ runner.arch }}-py${{ matrix.python }}
           path: wheelhouse
 
       - name: Install and test
