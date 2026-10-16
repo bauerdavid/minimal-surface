@@ -106,10 +106,16 @@ public:
 	void Calculate(sitk::Image distanceMap, const sitk::Image& initialSlice, int initialSliceIdx, realnum distanceMax, int maxIterations)
 	{
 		_PROFILING;
+		_SECTION_BEGIN(init_timer, "transport.Initialize");
 		Initialize(distanceMap, initialSlice, initialSliceIdx, distanceMax);
+		_SECTION_END(init_timer);
 		if (!m_active) return;
 		for (int ii = 0; ii < maxIterations; ++ii) {
-			bool updated = Iterate();
+			bool updated;
+			{
+				_SECTION("transport.Iterate");
+				updated = Iterate();
+			}
 			if (!updated) {
 				FinishedEvent();
 				return;

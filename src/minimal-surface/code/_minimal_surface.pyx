@@ -1,6 +1,7 @@
 # distutils: language = c++
 from libcpp.functional cimport function
 from libcpp.vector cimport vector
+from libcpp.string cimport string
 from libc.string cimport memcpy
 from libcpp cimport bool
 cimport numpy as np
@@ -167,6 +168,19 @@ cdef object _validated_point(object point, str name, tuple shape):
                 "%d, order z, y, x) must be in [-0.5, %s)"
                 % (name, p64.tolist(), shape, i, i, shape[i] - 0.5))
     return p64
+
+
+cdef extern from "Utils.h":
+    cdef string profile_report_cpp "profile_report"(bool) nogil
+
+
+def _profile_report(reset=False):
+    """The time spent in each instrumented section, as text.
+
+    Only builds made with MINIMAL_SURFACE_PROFILE=1 collect anything; other builds return an
+    empty string. reset clears what was collected so far.
+    """
+    return profile_report_cpp(reset).decode()
 
 
 cdef class MinimalSurfaceCalculator:

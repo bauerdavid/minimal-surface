@@ -84,9 +84,15 @@ void AreaEikonal::FitMeetingPlane() {
 	double* distance1_buffer = mDistanceMap[1].GetBufferAsDouble();
 	int* meeting_plane_buffer = mMeetingPointsMap.GetBufferAsInt32();
 	int xs(size[0]), ys(size[1]), zs(size[2]);
+	// The points each thread finds. They go into mMeetingPoints in thread order below, not in
+	// the order the threads finish: the plane is fitted to the points in the set's iteration
+	// order, which depends on the order of insertion, so a varying order changed the result in
+	// the last bits from run to run. Each thread's points are a contiguous range of the volume,
+	// so this is the order a single thread would insert them in.
+	vector<vector<POINT3D>> found(omp_get_max_threads());
 OMP_PARALLEL
 	{
-		vector<POINT3D> temp;
+		vector<POINT3D>& temp = found[omp_get_thread_num()];
 OMP_FOR
 		for (int zyx = 0; zyx < zs * ys * xs; zyx++)
 		{
@@ -119,9 +125,9 @@ OMP_FOR
 				}
 			}
 		}
-OMP_CRITICAL(fill_meeting_plane)
-		mMeetingPoints.insert(temp.begin(), temp.end());
 	}
+	for (const vector<POINT3D>& temp : found)
+		mMeetingPoints.insert(temp.begin(), temp.end());
 	vector<vector<double>> meeting_plane_vec;
 	meeting_plane_vec.reserve(mMeetingPoints.size());
 
@@ -236,6 +242,8 @@ void AreaEikonal::InitializeContainers(const sitk::Image& image) {
 
 	mCurvatureMap[0] = sitk::Image(size, sitk::sitkFloat64);
 	mCurvatureMap[1] = sitk::Image(size, sitk::sitkFloat64);
+	mCurvatureBand[0].clear();
+	mCurvatureBand[1].clear();
 #ifdef DEBUG_CURVATURE
 
 	m_new_update[0] = sitk::Image(size, sitk::sitkUInt8);
@@ -424,501 +432,453 @@ std::vector<double> AreaEikonal::TransformPhysicalPointToContinuousIndex(const s
 std::vector<double> AreaEikonal::TransformContinuousIndexToPhysicalPoint(const std::vector<double>& point) const {
 	return mSampleImage.TransformContinuousIndexToPhysicalPoint(point);
 }
-// The number of threads the parallel loops are sized from, never less than 2. The two sides of
-// the evolution run at the same time, each with an inner team of half the threads (n_threads / 2).
-// With a single thread available (OMP_NUM_THREADS=1, a single core) that is zero: a team of
-// num_threads(0), an empty vector of per-thread heaps, and a division by zero in GetMinS. The
-// process crashed with SIGFPE or a segmentation fault; two threads give a team of one.
-static int ThreadsAvailable() {
-	return std::max(2, omp_get_max_threads());
+// The number of threads for a parallel loop over `work` points: the default team, but not more
+// than one thread for every kPointsPerThread points, so that the loops over the few points of the
+// first iterations do not wake the whole team.
+static const size_t kPointsPerThread = 256;
+static int TeamSize(size_t work) {
+	size_t by_work = work / kPointsPerThread;
+	return (int)std::max<size_t>(1, std::min<size_t>(std::max(1, omp_get_max_threads()), by_work));
 }
 
 int current_iteration = 0;
 
-void AreaEikonal::UpdateCurvature(int i) {
-	static int n_threads = ThreadsAvailable();
-	sitk::Image& field = mPhaseFieldMap[i];
-	auto& act_set = mActivePoints[i];
-	const vector<unsigned>& size = mPhaseFieldMap[i].GetSize();
-	int xs = size[0], ys = size[1], zs = size[2]; 
-	sitk::Image& temp_sdist = FMSigned::build_for_neighbors(i, field, act_set, 2, 1);
-	double* sdist_buffer = temp_sdist.GetBufferAsDouble();
-	double* curvature_buffer = mCurvatureMap[i].GetBufferAsDouble();
-	memset(curvature_buffer, 0, xs * ys * zs * sizeof(double));
-OMP_PARALLEL_FOR_NUM_THREADS(n_threads/2)
-#ifdef USE_VECTOR_AS_SET
-	for (int i = 0; i < act_set.size(); i++)
-	{
-		{
-			POINT3D pn = act_set[i];
-#else
-	for (int b = 0; b < act_set.bucket_count(); b++)
-	{
-		for (auto bi = act_set.begin(b); bi != act_set.end(b); bi++) {
-			POINT3D pn = *bi;
-#endif
-			{
+// The steps of an iteration below go over the points of both sides in one loop: the points of side
+// 0 first, then those of side 1 (index k; side s = k >= n0, point k - n0 of side 1). All of the
+// threads of the team work on both sides at the same time, without nested parallel regions.
 
-				auto [xx, yy, zz] = representation_to_point<int>(pn);
-				if (zz < 0 || zz >= zs) continue;
-				if (yy < 0 || yy >= ys) continue;
-				if (xx < 0 || xx >= xs) continue;
-				
-				int zp = zz < zs - 1 ? zz + 1: zs - 1;
-				int zm = zz > 0 ? zz - 1 : 0;
-				int yp = yy < ys - 1 ? yy + 1 : ys - 1;
-				int ym = yy > 0 ? yy - 1 : 0;
-				int xp = xx < xs - 1 ? xx + 1 : xs - 1;
-				int xm = xx > 0 ? xx - 1 : 0;
-				realnum sumcur =
-					BUF_IDX3D(sdist_buffer, xs, ys, zs, xp, yy, zz) +
-					BUF_IDX3D(sdist_buffer, xs, ys, zs, xm, yy, zz) +
-					BUF_IDX3D(sdist_buffer, xs, ys, zs, xx, yp, zz) +
-					BUF_IDX3D(sdist_buffer, xs, ys, zs, xx, ym, zz) +
-					BUF_IDX3D(sdist_buffer, xs, ys, zs, xx, yy, zp) +
-					BUF_IDX3D(sdist_buffer, xs, ys, zs, xx, yy, zm) -
-					6 * BUF_IDX3D(sdist_buffer, xs, ys, zs, xx, yy, zz);
-				//if (sumcur < -2) sumcur == -2;
-				BUF_IDX3D(curvature_buffer, xs, ys, zs, xx, yy, zz) = sumcur;
-			}
-		} 
+void AreaEikonal::UpdateCurvatures() {
+	const vector<unsigned>& size = mPhaseFieldMap[0].GetSize();
+	int xs = size[0], ys = size[1], zs = size[2];
+	const int n0 = (int)mActivePoints[0].size();
+	const int total = n0 + (int)mActivePoints[1].size();
+	const int team = TeamSize(total);
+	_SECTION_BEGIN(sdist_timer, "evolve.1a signed distance");
+	const sitk::Image* inputs[2] = { &mPhaseFieldMap[0], &mPhaseFieldMap[1] };
+	const vector<POINT3D>* bands[2] = { &mActivePoints[0], &mActivePoints[1] };
+	const sitk::Image* sdist_maps[2];
+	FMSigned::build_for_neighbors_both(inputs, bands, 2, 1, team, sdist_maps);
+	_SECTION_END(sdist_timer);
+	const double* sdist_buffer[2];
+	double* curvature_buffer[2];
+	_SECTION("evolve.1b curvature");
+	for (int s = 0; s < 2; s++) {
+		sdist_buffer[s] = sdist_maps[s]->GetBufferAsDouble();
+		curvature_buffer[s] = mCurvatureMap[s].GetBufferAsDouble();
 	}
+	// Only the points of the band are written below, and the map is zero everywhere else. So
+	// instead of clearing the whole volume, the points the last call wrote are cleared: the map
+	// ends up the same. The old and the new list of points live side by side until both loops
+	// are done.
+	const int c0 = (int)mCurvatureBand[0].size();
+	const int clear_total = c0 + (int)mCurvatureBand[1].size();
+OMP_PARALLEL_NUM_THREADS(team)
+	{
+OMP_FOR
+		for (int k = 0; k < clear_total; k++) {
+			const int s = k >= c0 ? 1 : 0;
+			POINT3D pn = mCurvatureBand[s][s ? k - c0 : k];
+			auto [xx, yy, zz] = representation_to_point<int>(pn);
+			if (zz < 0 || zz >= zs || yy < 0 || yy >= ys || xx < 0 || xx >= xs) continue;
+			BUF_IDX3D(curvature_buffer[s], xs, ys, zs, xx, yy, zz) = 0;
+		}
+OMP_FOR_NOWAIT
+		for (int k = 0; k < total; k++) {
+			const int s = k >= n0 ? 1 : 0;
+			POINT3D pn = mActivePoints[s][s ? k - n0 : k];
+			auto [xx, yy, zz] = representation_to_point<int>(pn);
+			if (zz < 0 || zz >= zs) continue;
+			if (yy < 0 || yy >= ys) continue;
+			if (xx < 0 || xx >= xs) continue;
+
+			int zp = zz < zs - 1 ? zz + 1: zs - 1;
+			int zm = zz > 0 ? zz - 1 : 0;
+			int yp = yy < ys - 1 ? yy + 1 : ys - 1;
+			int ym = yy > 0 ? yy - 1 : 0;
+			int xp = xx < xs - 1 ? xx + 1 : xs - 1;
+			int xm = xx > 0 ? xx - 1 : 0;
+			const double* sdist = sdist_buffer[s];
+			realnum sumcur =
+				BUF_IDX3D(sdist, xs, ys, zs, xp, yy, zz) +
+				BUF_IDX3D(sdist, xs, ys, zs, xm, yy, zz) +
+				BUF_IDX3D(sdist, xs, ys, zs, xx, yp, zz) +
+				BUF_IDX3D(sdist, xs, ys, zs, xx, ym, zz) +
+				BUF_IDX3D(sdist, xs, ys, zs, xx, yy, zp) +
+				BUF_IDX3D(sdist, xs, ys, zs, xx, yy, zm) -
+				6 * BUF_IDX3D(sdist, xs, ys, zs, xx, yy, zz);
+			//if (sumcur < -2) sumcur == -2;
+			BUF_IDX3D(curvature_buffer[s], xs, ys, zs, xx, yy, zz) = sumcur;
+		}
+	}
+	for (int s = 0; s < 2; s++)
+		mCurvatureBand[s].assign(mActivePoints[s].begin(), mActivePoints[s].end());
+	OnCurvatureUpdated(0);
+	OnCurvatureUpdated(1);
 }
 
-realnum AreaEikonal::GetMinS(int i) const {
-
-	static int n_threads = ThreadsAvailable();
-	const sitk::Image& field = mPhaseFieldMap[i];
-	auto& act_set = mActivePoints[i];
-	int n_top = 5000;
-	//int n_top = act_set.size();
-	vector<double> topSs;
-	topSs.reserve(n_top + 1);
-	const double* field_buffer = field.GetBufferAsDouble();
-	const double* phi_buffer = mPhiMap.GetBufferAsDouble();
-	const double* curvature_buffer = mCurvatureMap[i].GetBufferAsDouble();
-	const vector<unsigned>& size = mPhaseFieldMap[i].GetSize();
-	int xs = size[0], ys = size[1], zs = size[2];
-	int n_outliers(0);
-	realnum minS(DBL_MAX);
-	if (act_set.size() == 0)
-		return minS;
-	vector<vector<double>> heaps(n_threads / 2);
-
-OMP_PARALLEL_NUM_THREADS(n_threads/2)
-	{
-		//double temp_minS(DBL_MAX);
-		vector<double>& temp = heaps[omp_get_thread_num()];
-		temp.reserve(act_set.size()/(n_threads/2));
-OMP_FOR_REDUCTION(+, n_outliers)
-#ifdef USE_VECTOR_AS_SET
-		for (int i = 0; i < (int)act_set.size(); i++)
-		{
-			{
-				POINT3D pn = act_set[i];
-#else
-		for (int b = 0; b < act_set.bucket_count(); b++)
-		{
-			for (auto bi = act_set.begin(b); bi != act_set.end(b); bi++) {
-				POINT3D pn = *bi;
-#endif
-				{
-					auto [xx, yy, zz] = representation_to_point<int>(pn);
-					if (zz < 0 || zz >= zs) continue;
-					if (yy < 0 || yy >= ys) continue;
-					if (xx < 0 || xx >= xs) continue;
-					
-					int zp = zz < zs - 1 ? zz + 1 : zs - 1;
-					int zm = zz > 0 ? zz - 1 : 0;
-					int yp = yy < ys - 1 ? yy + 1 : ys - 1;
-					int ym = yy > 0 ? yy - 1 : 0;
-					int xp = xx < xs - 1 ? xx + 1 : xs - 1;
-					int xm = xx > 0 ? xx - 1 : 0;
-
-					realnum phi = phi_buffer[xx + xs * (yy + ys * zz)];
-					if (phi < 1e-33) phi = 1e-33;
-					double sumcur = BUF_IDX3D(curvature_buffer, xs, ys, zs, xx, yy, zz);
-					realnum&& xn = field_buffer[xp + xs * (yy + ys * zz)] - field_buffer[xm + xs * (yy + ys * zz)];
-					realnum&& yn = field_buffer[xx + xs * (yp + ys * zz)] - field_buffer[xx + xs * (ym + ys * zz)];
-					realnum&& zn = field_buffer[xx + xs * (yy + ys * zp)] - field_buffer[xx + xs * (yy + ys * zm)];
-					realnum gradlen = sqrt(xn * xn + yn * yn + zn * zn + 1e-99);
-
-					if (is_outlier(sumcur, 2/gradlen))
-					{
-						n_outliers++;
-					}
-					realnum S = calculate_S(sumcur, phi, 2/gradlen);
-					temp.push_back(S);
-				}
-			} // for zz
-		}
-		std::sort(temp.begin(), temp.end());
-	}
-	vector<int> indices(heaps.size());
-	for (int i = 0; i < n_top; i++) {
-		double next_elem(DBL_MAX);
-		int heap_idx;
-		for (size_t h = 0; h < heaps.size(); h++) {
-			int idx = indices[h];
-			if (idx >= (int)heaps[h].size()) continue;
-			double top = heaps[h][idx];
-			if (top < next_elem) {
-				heap_idx = h;
-				next_elem = top;
-			}
-		}
-		if (next_elem == DBL_MAX) break;
-		topSs.push_back(next_elem);
-		indices[heap_idx]++;
-	}
-	if (topSs.empty()) {
+// The idx-th smallest of the n_top smallest values of S, which is the idx-th smallest value
+// overall: nth_element finds it without sorting them all. (This used to sort per-thread lists and
+// merge their first n_top values, a merge that stopped at the first value not below DBL_MAX; such
+// values, and NaN, are left out here too.) DBL_MAX if there is none.
+static double SelectMinS(vector<double>& s_values, int n_outliers, int n_top) {
+	if (s_values.empty())
 		return DBL_MAX;
-	}
-	/*minS = 0;
-	std::for_each(topSs.begin(), topSs.end(), [&minS](double val) {minS += val; });
-	minS /= topSs.size();*/
-	/*if (n_outliers == 0)
-		minS = topSs[0];
-	else
-		minS = topSs[n_outliers*2];*/
-	size_t idx = min((size_t)max(200, n_outliers/20), topSs.size()-1);
-	minS = topSs[idx];
-	return minS;
+	auto valid_end = std::partition(s_values.begin(), s_values.end(), [](double v) { return v < DBL_MAX; });
+	size_t valid_count = valid_end - s_values.begin();
+	if (valid_count == 0)
+		return DBL_MAX;
+	size_t top_count = min((size_t)n_top, valid_count);
+	size_t idx = min((size_t)max(200, n_outliers / 20), top_count - 1);
+	std::nth_element(s_values.begin(), s_values.begin() + idx, valid_end);
+	return s_values[idx];
 }
-realnum AreaEikonal::UpdateVelo(int i, double S) {
-	static int n_threads = ThreadsAvailable();
-	//_PROFILING;
-	sitk::Image& field = mPhaseFieldMap[i];
-	double* field_buffer = field.GetBufferAsDouble();
 
-	// UpdateVelo runs for both sides at the same time and both read mPhiMap. The non-const
-	// GetBufferAsDouble() makes the image unique first (copy-on-write): if its data is still shared
-	// with another copy, such as the caller's, it clones the data and swaps its own internal
-	// pointer. Two threads doing that to the same image race, and one can free the buffer the other
-	// is still reading. Going through a const reference never modifies the image.
-	const double* phi_buffer = std::as_const(mPhiMap).GetBufferAsDouble();
-	
-
-	const vector<unsigned>& size = mPhaseFieldMap[i].GetSize();
+void AreaEikonal::GetMinS(double min_s[2]) const {
+	_SECTION("evolve.2 minS");
+	int n_top = 5000;
+	const double* phi_buffer = mPhiMap.GetBufferAsDouble();
+	const double* field_buffer[2];
+	const double* curvature_buffer[2];
+	const vector<unsigned>& size = mPhaseFieldMap[0].GetSize();
 	int xs = size[0], ys = size[1], zs = size[2];
+	const int n0 = (int)mActivePoints[0].size();
+	const int total = n0 + (int)mActivePoints[1].size();
+	// S of every point of the bands, in band order. Points outside the volume get DBL_MAX, which
+	// the selection below leaves out.
+	vector<double> s_values[2] = { vector<double>(mActivePoints[0].size(), DBL_MAX), vector<double>(mActivePoints[1].size(), DBL_MAX) };
+	double* s_data[2] = { s_values[0].data(), s_values[1].data() };
+	int n_outliers[2] = { 0, 0 };
+	for (int s = 0; s < 2; s++) {
+		field_buffer[s] = mPhaseFieldMap[s].GetBufferAsDouble();
+		curvature_buffer[s] = mCurvatureMap[s].GetBufferAsDouble();
+	}
 
-	////////////////////////////////////////////////////////////////////
-	// evolution logic
-	////////////////////////////////////////////////////////////////////
-	auto& act_set = mActivePoints[i];
-	
-	//realnum max_velocity(0);
-	double* curvature_buffer = mCurvatureMap[i].GetBufferAsDouble();
+OMP_PARALLEL_NUM_THREADS(TeamSize(total))
+	{
+		int outliers[2] = { 0, 0 };
+OMP_FOR_NOWAIT
+		for (int k = 0; k < total; k++) {
+			const int s = k >= n0 ? 1 : 0;
+			const int j = s ? k - n0 : k;
+			POINT3D pn = mActivePoints[s][j];
+			auto [xx, yy, zz] = representation_to_point<int>(pn);
+			if (zz < 0 || zz >= zs) continue;
+			if (yy < 0 || yy >= ys) continue;
+			if (xx < 0 || xx >= xs) continue;
+
+			int zp = zz < zs - 1 ? zz + 1 : zs - 1;
+			int zm = zz > 0 ? zz - 1 : 0;
+			int yp = yy < ys - 1 ? yy + 1 : ys - 1;
+			int ym = yy > 0 ? yy - 1 : 0;
+			int xp = xx < xs - 1 ? xx + 1 : xs - 1;
+			int xm = xx > 0 ? xx - 1 : 0;
+
+			const double* field = field_buffer[s];
+			realnum phi = phi_buffer[xx + xs * (yy + ys * zz)];
+			if (phi < 1e-33) phi = 1e-33;
+			double sumcur = BUF_IDX3D(curvature_buffer[s], xs, ys, zs, xx, yy, zz);
+			realnum&& xn = field[xp + xs * (yy + ys * zz)] - field[xm + xs * (yy + ys * zz)];
+			realnum&& yn = field[xx + xs * (yp + ys * zz)] - field[xx + xs * (ym + ys * zz)];
+			realnum&& zn = field[xx + xs * (yy + ys * zp)] - field[xx + xs * (yy + ys * zm)];
+			realnum gradlen = sqrt(xn * xn + yn * yn + zn * zn + 1e-99);
+
+			if (is_outlier(sumcur, 2/gradlen))
+			{
+				outliers[s]++;
+			}
+			s_data[s][j] = calculate_S(sumcur, phi, 2/gradlen);
+		}
+OMP_CRITICAL_NO_TAG
+		{
+			n_outliers[0] += outliers[0];
+			n_outliers[1] += outliers[1];
+		}
+	}
+	// The selections for the two sides are independent: one thread for each.
+OMP_PARALLEL_SECTIONS_NUM_THREADS(2)
+	{
+OMP_SECTION
+		min_s[0] = SelectMinS(s_values[0], n_outliers[0], n_top);
+OMP_SECTION
+		min_s[1] = SelectMinS(s_values[1], n_outliers[1], n_top);
+	}
+}
+
+void AreaEikonal::UpdateVelo(double S, double max_velocity[2]) {
+	_SECTION("evolve.3 velocity");
+	const vector<unsigned>& size = mPhaseFieldMap[0].GetSize();
+	int xs = size[0], ys = size[1], zs = size[2];
+	// Both sides read mPhiMap. The non-const GetBufferAsDouble() makes the image unique first
+	// (copy-on-write): if its data is still shared with another copy, such as the caller's, it
+	// clones the data and swaps its own internal pointer, which races with another thread doing
+	// the same or reading the buffer. Going through a const reference never modifies the image.
+	const double* phi_buffer = std::as_const(mPhiMap).GetBufferAsDouble();
+	const double* field_buffer[2];
+	const double* curvature_buffer[2];
+	for (int s = 0; s < 2; s++) {
+		field_buffer[s] = mPhaseFieldMap[s].GetBufferAsDouble();
+		curvature_buffer[s] = mCurvatureMap[s].GetBufferAsDouble();
+		mVelocities[s].resize(mActivePoints[s].size());
+	}
+	const int n0 = (int)mActivePoints[0].size();
+	const int total = n0 + (int)mActivePoints[1].size();
+	max_velocity[0] = max_velocity[1] = 0;
 
 	// Inhomogeneous
 	// Calculate the velocity at every point (velo[zz][yy][xx]), and the maximum velocity (maxv)
-	auto& changed_velo = mVelocities[i];
-#ifdef USE_VECTOR_AS_SET
-	changed_velo.resize(act_set.size());
-#else
-	changed_velo.reserve(act_set.size());
-#endif
-	double maxv(0);
-
-OMP_PARALLEL_NUM_THREADS(n_threads/2)
+OMP_PARALLEL_NUM_THREADS(TeamSize(total))
 	{
-		double temp_maxv(0);
-OMP_FOR
-#ifdef USE_VECTOR_AS_SET
-		for (int i = 0; i < (int)act_set.size(); i++)
-		{
-			{
-				POINT3D pn = act_set[i];
-#else
-		for (int b = 0; b < act_set.bucket_count(); b++)
-		{
-			for (auto bi = act_set.begin(b); bi != act_set.end(b); bi++) {
-				POINT3D pn = *bi;
-#endif
-				{
+		double thread_max[2] = { 0, 0 };
+OMP_FOR_NOWAIT
+		for (int k = 0; k < total; k++) {
+			const int s = k >= n0 ? 1 : 0;
+			const int j = s ? k - n0 : k;
+			POINT3D pn = mActivePoints[s][j];
+			auto [xx, yy, zz] = representation_to_point<int>(pn);
+			if (zz < 0 || zz >= zs) continue;
+			if (yy < 0 || yy >= ys) continue;
+			if (xx < 0 || xx >= xs) continue;
 
-					auto [xx, yy, zz] = representation_to_point<int>(pn);
-					if (zz < 0 || zz >= zs) continue;
-					if (yy < 0 || yy >= ys) continue;
-					if (xx < 0 || xx >= xs) continue;
+			int zp = zz < zs - 1 ? zz + 1 : zs - 1;
+			int zm = zz > 0 ? zz - 1 : 0;
+			int yp = yy < ys - 1 ? yy + 1 : ys - 1;
+			int ym = yy > 0 ? yy - 1 : 0;
+			int xp = xx < xs - 1 ? xx + 1 : xs - 1;
+			int xm = xx > 0 ? xx - 1 : 0;
 
-					int zp = zz < zs - 1 ? zz + 1 : zs - 1;
-					int zm = zz > 0 ? zz - 1 : 0;
-					int yp = yy < ys - 1 ? yy + 1 : ys - 1;
-					int ym = yy > 0 ? yy - 1 : 0;
-					int xp = xx < xs - 1 ? xx + 1 : xs - 1;
-					int xm = xx > 0 ? xx - 1 : 0;
+			const double* field = field_buffer[s];
+			realnum&& xn = field[xp + xs * (yy + ys * zz)] - field[xm + xs * (yy + ys * zz)];
+			realnum&& yn = field[xx + xs * (yp + ys * zz)] - field[xx + xs * (ym + ys * zz)];
+			realnum&& zn = field[xx + xs * (yy + ys * zp)] - field[xx + xs * (yy + ys * zm)];
+			realnum gradlen = sqrt(xn * xn + yn * yn + zn * zn + 1e-99);
 
-					realnum&& xn = field_buffer[xp + xs * (yy + ys * zz)] - field_buffer[xm + xs * (yy + ys * zz)];
-					realnum&& yn = field_buffer[xx + xs * (yp + ys * zz)] - field_buffer[xx + xs * (ym + ys * zz)];
-					realnum&& zn = field_buffer[xx + xs * (yy + ys * zp)] - field_buffer[xx + xs * (yy + ys * zm)];
-					realnum gradlen = sqrt(xn * xn + yn * yn + zn * zn + 1e-99);
+			realnum eikon;
 
+			realnum phi = phi_buffer[xx + xs * (yy + ys * zz)];
+			if (phi < 1e-33) phi = 1e-33;
+			if (mUsesCorrection) {
+				realnum sumcur = BUF_IDX3D(curvature_buffer[s], xs, ys, zs, xx, yy, zz);
+				eikon = calculate_speed(sumcur, phi, S);
+			}
+			else {
+				eikon = 1 / phi;
+			}
+			eikon *= gradlen; // normalize
+			if (eikon < 1e-11) eikon = 1e-11;
 
-					realnum eikon;
-
-					realnum phi = phi_buffer[xx + xs * (yy + ys * zz)];
-					if (phi < 1e-33) phi = 1e-33;
-					if (mUsesCorrection) {
-						realnum sumcur = BUF_IDX3D(curvature_buffer, xs, ys, zs, xx, yy, zz);
-						eikon = calculate_speed(sumcur, phi, S);
-					}
-					else {
-						eikon = 1 / phi;
-					}
-					eikon *= gradlen; // normalize
-					if (eikon < 1e-11) eikon = 1e-11;
-
-#ifdef USE_VECTOR_AS_SET
-					changed_velo[i] = make_pair(pn, eikon);
-#else
-OMP_CRITICAL_NO_TAG
-					changed_velo[pn] = eikon;
-#endif
-					if (eikon > temp_maxv) temp_maxv = eikon;
-				}
-			} // for zz
+			mVelocities[s][j] = make_pair(pn, eikon);
+			if (eikon > thread_max[s]) thread_max[s] = eikon;
 		}
 OMP_CRITICAL(maxS_selection)
 		{
-			if (temp_maxv > maxv) maxv = temp_maxv;
+			for (int s = 0; s < 2; s++)
+				if (thread_max[s] > max_velocity[s]) max_velocity[s] = thread_max[s];
 		}
 	}
-#ifdef DEBUG_CURVATURE
-	{
-		if (current_iteration % 50 == 0) {
-			save_image(debug_curvature_folder + "dbg_" + std::to_string(i) + "_" + std::to_string(current_iteration) + "_curv.tif", mCurvatureMap[i]);
-			save_image(debug_curvature_folder + "dbg_" + std::to_string(i) + "_" + std::to_string(current_iteration) + "_dist.tif", m_distance[i]);
-			save_image(debug_curvature_folder + "dbg_" + std::to_string(i) + "_" + std::to_string(current_iteration) + "_field.tif", field);
-			save_image(debug_curvature_folder + "dbg_" + std::to_string(i) + "_" + std::to_string(current_iteration) + "_sdist.tif", temp_sdist);
-		}
-	}
-#endif
-	return maxv;
 }
-void AreaEikonal::UpdateField(int idx, double maxv) {
-	static int n_threads = ThreadsAvailable();
-	_PROFILING;
-	double* field_buffer = mPhaseFieldMap[idx].GetBufferAsDouble();
-	vector<unsigned> size = mPhaseFieldMap[idx].GetSize();
-	int xs = size[0], ys = size[1], zs = size[2]; 
-	auto& changed_velo = mVelocities[idx];
-	auto& act_set = mActivePoints[idx];
-#ifdef DEBUG_CURVATURE
-	uint8_t* new_update_buffer = m_new_update[idx].GetBufferAsUInt8();
-	memset(new_update_buffer, 0, xs * ys * zs);
-	double* distance_buffer = m_distance[idx].GetBufferAsDouble();
-#endif
-OMP_PARALLEL_NUM_THREADS(n_threads/2)
-	{
-OMP_FOR
-#ifdef USE_VECTOR_AS_SET
-		for (int i = 0; i < (int)changed_velo.size(); i++) {
 
-			POINT3D pn = changed_velo[i].first;
-			double velo = changed_velo[i].second;
-#else
-		for (int b = 0; b < changed_velo.bucket_count(); b++)
-			for (auto bi = changed_velo.begin(b); bi != changed_velo.end(b); bi++) {
-				POINT3D pn = bi->first;
-				double velo = bi->second;
-#endif
+void AreaEikonal::UpdateFields(double maxv) {
+	_SECTION("evolve.4 field");
+	const vector<unsigned>& size = mPhaseFieldMap[0].GetSize();
+	int xs = size[0], ys = size[1], zs = size[2];
+	double* field_buffer[2] = { mPhaseFieldMap[0].GetBufferAsDouble(), mPhaseFieldMap[1].GetBufferAsDouble() };
+	const int n0 = (int)mVelocities[0].size();
+	const int total = n0 + (int)mVelocities[1].size();
+OMP_PARALLEL_FOR_NUM_THREADS(TeamSize(total))
+	for (int k = 0; k < total; k++) {
+		const int s = k >= n0 ? 1 : 0;
+		const int j = s ? k - n0 : k;
+		POINT3D pn = mVelocities[s][j].first;
+		double velo = mVelocities[s][j].second;
 
-				auto [xx, yy, zz] = representation_to_point<int>(pn);
-#ifdef DEBUG_CURVATURE
-				if (BUF_IDX(distance_buffer, xs, ys, zs, xx, yy, zz) < -0.5)
-					BUF_IDX(new_update_buffer, xs, ys, zs, xx, yy, zz) = 1;
-#endif
-				BUF_IDX3D(field_buffer, xs, ys, zs, xx, yy, zz) += velo;
-				if (BUF_IDX3D(field_buffer, xs, ys, zs, xx, yy, zz) >= MAX_FIELD_VAL) {
-
-#ifdef USE_VECTOR_AS_SET
-					act_set[i] = REMOVABLE_POINT;
-#else
-OMP_CRITICAL_NO_TAG
-					act_set.erase(pn);
-#endif
-					if (BUF_IDX3D(field_buffer, xs, ys, zs, xx, yy, zz) >= 1.25)
-						BUF_IDX3D(field_buffer, xs, ys, zs, xx, yy, zz) = 1.25;
-				}
+		auto [xx, yy, zz] = representation_to_point<int>(pn);
+		BUF_IDX3D(field_buffer[s], xs, ys, zs, xx, yy, zz) += velo;
+		if (BUF_IDX3D(field_buffer[s], xs, ys, zs, xx, yy, zz) >= MAX_FIELD_VAL) {
+			mActivePoints[s][j] = REMOVABLE_POINT;
+			if (BUF_IDX3D(field_buffer[s], xs, ys, zs, xx, yy, zz) >= 1.25)
+				BUF_IDX3D(field_buffer[s], xs, ys, zs, xx, yy, zz) = 1.25;
 		}
 	}
-#ifdef DEBUG_CURVATURE
-OMP_CRITICAL_NO_TAG
-	{
-		if (current_iteration % 50 == 0)
-			save_image(debug_curvature_folder + "dbg_" + std::to_string(idx) + "_" + std::to_string(current_iteration) + "_updated_pos.tif", m_new_update[idx]);
-		if (idx)
-			current_iteration++;
-	}
-#endif
+	OnFieldUpdated(0);
+	OnFieldUpdated(1);
 }
-void AreaEikonal::UpdateDistance(int idx, realnum current_distance) {
 
-	static int n_threads = ThreadsAvailable();
-	_PROFILING;
-	Vec3<double> origin_point = !idx ? mStartPoint : mEndPoint;
-	auto& changed_velo = mVelocities[idx];
+void AreaEikonal::UpdateDistances(double current_distance) {
+	_SECTION_BEGIN(loop_timer, "evolve.5a distance");
+	const vector<unsigned>& size = mPhaseFieldMap[0].GetSize();
+	int xs = size[0], ys = size[1], zs = size[2];
+	const Vec3<double> origin_point[2] = { mStartPoint, mEndPoint };
+	double* field_buffer[2];
+	double* distance_buffer[2];
+	for (int s = 0; s < 2; s++) {
+		field_buffer[s] = mPhaseFieldMap[s].GetBufferAsDouble();
+		distance_buffer[s] = mDistanceMap[s].GetBufferAsDouble();
+	}
+	const int n0 = (int)mVelocities[0].size();
+	const int total = n0 + (int)mVelocities[1].size();
+	const int team = TeamSize(total);
+	// The new points each thread finds, for each side, appended to the bands in thread order below.
+	vector<vector<POINT3D>> found(2 * team);
+OMP_PARALLEL_NUM_THREADS(team)
+	{
+OMP_FOR_NOWAIT
+		for (int k = 0; k < total; k++) {
+			const int s = k >= n0 ? 1 : 0;
+			vector<POINT3D>& temp = found[2 * omp_get_thread_num() + s];
+			POINT3D pn = mVelocities[s][s ? k - n0 : k].first;
+			auto [xx, yy, zz] = representation_to_point<int>(pn);
+			if (field_buffer[s][xx + xs * (yy + ys * zz)] > 0 && distance_buffer[s][xx + xs * (yy + ys * zz)] < -0.5f) {
+				distance_buffer[s][xx + xs * (yy + ys * zz)] = current_distance;
+				for (int dk = -1; dk <= 1; dk++) {
+					if (zz + dk >= zs || zz + dk < 0) continue;
+					for (int dj = -1; dj <= 1; dj++) {
+						if (yy + dj >= ys || yy + dj < 0) continue;
+						for (int di = -1; di <= 1; di++) {
+							if (xx + di >= xs || xx + di < 0) continue;
+							if ((di + 1) % 2 + (dj + 1) % 2 + (dk + 1) % 2 == 2) {
+								if (BUF_IDX3D(field_buffer[s], xs, ys, zs, xx + di, yy + dj, zz + dk) < MAX_FIELD_VAL
+									&& (mMeetingPlaneCenter.x() < -0.5 || -sgn((mMeetingPlaneNormal * origin_point[s]).Sum() + mMeetingPlaneOffset) * ((mMeetingPlaneNormal * Vec3<double>({ (double)xx + di, (double)yy + dj, (double)zz + dk })).Sum() + mMeetingPlaneOffset) < MAX_DIST_FROM_PLANE))
+								{
+									if (xx + di > 0 && xx + di < xs - 1 && yy + dj > 0 && yy + dj < ys - 1 && zz + dk > 0 && zz + dk < zs - 1) {
+										temp.push_back(point_to_representation(xx + di, yy + dj, zz + dk));
+									}
+								} // end if
+							} // end if
+						} // end for di
+					} // end for dj
+				} // end for dk
+			}
+		}
+	}
+	for (int t = 0; t < team; t++)
+		for (int s = 0; s < 2; s++)
+			mActivePoints[s].insert(mActivePoints[s].end(), found[2 * t + s].begin(), found[2 * t + s].end());
+
+	_SECTION_END(loop_timer);
+	_SECTION("evolve.5b remove duplicates");
+	mVelocities[0].clear();
+	mVelocities[1].clear();
+	_RECORD_VALUE("evolve.5b size before removing duplicates", mActivePoints[0].size() + mActivePoints[1].size());
+	// The two sides are independent: one thread for each.
+OMP_PARALLEL_SECTIONS_NUM_THREADS(2)
+	{
+OMP_SECTION
+		RemoveDuplicatesFromBand(0);
+OMP_SECTION
+		RemoveDuplicatesFromBand(1);
+	}
+}
+
+void AreaEikonal::RemoveDuplicatesFromBand(int idx) {
+	// The band now holds the points UpdateField marked as REMOVABLE_POINT, and new neighbours,
+	// many of them more than once or already in the band. Drop both. The order of the band does
+	// not matter to any step of the evolution (each treats its points independently; the only
+	// reductions are a maximum and an order statistic), so instead of sorting it, keep the first
+	// occurrence of each point, found with a per-voxel flag that is cleared again afterwards.
+	// The band ends up with the same points as a sort and unique would leave.
 	auto& act_set = mActivePoints[idx];
-	double* field_buffer = mPhaseFieldMap[idx].GetBufferAsDouble();
-	// mAreaEikonal.m_distance[i]
-	double* distance_buffer = mDistanceMap[idx].GetBufferAsDouble();
-
-	// mAreaEikonal.m_distance[(i+1)&1]
-	//unsigned int* connectivity_buffer = m_distance_connectivity.GetBufferAsUInt32();
 	vector<unsigned> size = mPhaseFieldMap[idx].GetSize();
 	int xs = size[0], ys = size[1], zs = size[2];
-OMP_PARALLEL_NUM_THREADS(n_threads/2)
-	{
-#ifdef USE_VECTOR_AS_SET
-		vector<POINT3D> temp;
-		vector<POINT3D> temp_inact;
-#else
-		unordered_set<POINT3D_SET> temp;
-#endif
-		temp.reserve(1000);
-
-OMP_FOR_NOWAIT
-#ifdef USE_VECTOR_AS_SET
-		for (int i = 0; i < (int)changed_velo.size(); i++) {
-			POINT3D pn = changed_velo[i].first;
-#else
-		for (int b = 0; b < changed_velo.bucket_count(); b++)
-			for (auto bi = changed_velo.begin(b); bi != changed_velo.end(b); bi++) {
-				POINT3D pn = bi->first;
-
-#endif
-				auto [xx, yy, zz] = representation_to_point<int>(pn);
-				if (field_buffer[xx + xs * (yy + ys * zz)] > 0 && distance_buffer[xx + xs * (yy + ys * zz)] < -0.5f) {
-					distance_buffer[xx + xs * (yy + ys * zz)] = current_distance;
-					for (int k = -1; k <= 1; k++) {
-						if (zz + k >= zs || zz + k < 0) continue;
-						for (int j = -1; j <= 1; j++) {
-							if (yy + j >= ys || yy + j < 0) continue;
-							for (int i = -1; i <= 1; i++) {
-								if (xx + i >= xs || xx + i < 0) continue;
-								if ((i + 1) % 2 + (j + 1) % 2 + (k + 1) % 2 == 2) {
-									if (BUF_IDX3D(field_buffer, xs, ys, zs, xx + i, yy + j, zz + k) < MAX_FIELD_VAL
-										&& (mMeetingPlaneCenter.x() < -0.5 || -sgn((mMeetingPlaneNormal * origin_point).Sum() + mMeetingPlaneOffset) * ((mMeetingPlaneNormal * Vec3<double>({ (double)xx + i, (double)yy + j, (double)zz + k })).Sum() + mMeetingPlaneOffset) < MAX_DIST_FROM_PLANE))
-									{
-										if (xx + i > 0 && xx + i < xs - 1 && yy + j > 0 && yy + j < ys - 1 && zz + k > 0 && zz + k < zs - 1) {
-
-#ifdef USE_VECTOR_AS_SET
-											temp.push_back(point_to_representation(xx + i, yy + j, zz + k));
-#else
-											temp.insert(point_to_representation(xx + i, yy + j, zz + k));
-#endif
-										}
-										else {
-											temp_inact.push_back(point_to_representation(xx + i, yy + j, zz + k));
-										}
-									} // end if
-								} // end if
-							} // end for i
-						} // end for j
-					} // end for k
-				}
-		} // end for i
-OMP_CRITICAL_NO_TAG
-		{
-#ifdef USE_VECTOR_AS_SET
-			act_set.insert(act_set.end(), temp.begin(), temp.end());
-#else
-			act_set.insert(temp.begin(), temp.end());
-#endif
+	size_t voxel_count = (size_t)xs * ys * zs;
+	for (POINT3D pn : act_set) {
+		if (pn == REMOVABLE_POINT) continue;
+		auto [xx, yy, zz] = representation_to_point<int>(pn);
+		if (xx < 0 || xx >= xs || yy < 0 || yy >= ys || zz < 0 || zz >= zs) {
+			// Not a voxel (a band rotated from another volume can have such points): fall back
+			// to sorting, which keeps them as they were kept before.
+			sort(act_set.begin(), act_set.end());
+			act_set.erase(unique(act_set.begin(), act_set.end()), act_set.end());
+			if (!act_set.empty() && act_set.back() == REMOVABLE_POINT)
+				act_set.pop_back();
+			return;
 		}
 	}
-
-
-	changed_velo.clear();
-#ifdef USE_VECTOR_AS_SET
-	sort(act_set.begin(), act_set.end());
-	act_set.erase(unique(act_set.begin(), act_set.end()), act_set.end());
-	if (!act_set.empty() && act_set.back() == REMOVABLE_POINT)
-		act_set.pop_back();
-#endif
+	vector<unsigned char>& in_band = mInBand[idx];
+	if (in_band.size() != voxel_count)
+		in_band.assign(voxel_count, 0);
+	size_t kept = 0;
+	for (POINT3D pn : act_set) {
+		if (pn == REMOVABLE_POINT) continue;
+		auto [xx, yy, zz] = representation_to_point<int>(pn);
+		unsigned char& seen = in_band[xx + (size_t)xs * (yy + (size_t)ys * zz)];
+		if (seen) continue;
+		seen = 1;
+		act_set[kept++] = pn;
+	}
+	act_set.resize(kept);
+	for (POINT3D pn : act_set) {
+		auto [xx, yy, zz] = representation_to_point<int>(pn);
+		in_band[xx + (size_t)xs * (yy + (size_t)ys * zz)] = 0;
+	}
 }
 
 bool AreaEikonal::IsDone() const {
 	_PROFILING;
+	_SECTION("iter.IsDone");
 	if (mActivePoints[0].empty() && mActivePoints[1].empty())
 		return true;
 	vector<unsigned> size = mPhaseFieldMap[0].GetSize();
 	int xs = size[0], ys = size[1], zs = size[2];
 	const double* dist0_buffer = mDistanceMap[0].GetBufferAsDouble();
 	const double* dist1_buffer = mDistanceMap[1].GetBufferAsDouble();
-	bool is_done = true;
-OMP_PARALLEL
-{
-	OMP_FOR
-	for (int zyx = 0; zyx < zs*ys*xs; zyx++) {
-#ifndef _MSC_VER
-		// OpenMP 4.0, which MSVC (OpenMP 2.0) does not compile. Cancellation is off unless
-		// OMP_CANCELLATION=true is set, so leaving these out changes nothing by default.
-		#pragma omp cancellation point for
-#endif
-		if (dist0_buffer[zyx] < 0 && dist1_buffer[zyx] < 0){
-			is_done = false;
-#ifndef _MSC_VER
-			#pragma omp cancel for
-#endif
+	// Done when no voxel is left that neither side has reached. Look for one, starting at the
+	// one found last time and wrapping around: that one is usually still unreached, so most
+	// calls look at a single voxel instead of the whole volume. The answer is the same as a
+	// scan from the start, since every voxel is looked at before deciding that it is done.
+	int voxel_count = zs * ys * xs;
+	int start = mUnreachedVoxel < voxel_count ? mUnreachedVoxel : 0;
+	for (int offset = 0; offset < voxel_count; offset++) {
+		int zyx = start + offset < voxel_count ? start + offset : start + offset - voxel_count;
+		if (dist0_buffer[zyx] < 0 && dist1_buffer[zyx] < 0) {
+			mUnreachedVoxel = zyx;
+			return false;
 		}
 	}
-}
-	
-	return is_done;
+	return true;
 }
 void AreaEikonal::Iterate()
 {
 	_PROFILING;
+	_SECTION("iter.Iterate");
+	_RECORD_VALUE("band.side0", mActivePoints[0].size());
+	_RECORD_VALUE("band.side1", mActivePoints[1].size());
 	// mAreaEikonal.m_field[i]
 	if (mUseMeetingPoints && !mPlaneFinalized && ++mIterationCount > REFRESH_ITERS) {
+		_SECTION("iter.UpdateMeetingPlane");
 		mIterationCount = 0;
 		UpdateMeetingPlane();
 	}
 	//Calculate the value of capital S
-	realnum min_capital_s = 1e-11;
-	vector<double> min_capital_s_vals(2);
-	_BLOCK_PROFILING;
-	OMP_PARALLEL_FOR_NUM_THREADS(2)
-		for (int i = 0; i < 2; i++) {
-			UpdateCurvature(i);
-			min_capital_s_vals[i] = GetMinS(i);
-		}
-	_UNBLOCK_PROFILING;
-	min_capital_s = min_capital_s_vals[0] < min_capital_s_vals[1] ? min_capital_s_vals[0] : min_capital_s_vals[1];
+	UpdateCurvatures();
+	double min_capital_s_vals[2];
+	GetMinS(min_capital_s_vals);
+	realnum min_capital_s = min_capital_s_vals[0] < min_capital_s_vals[1] ? min_capital_s_vals[0] : min_capital_s_vals[1];
 	if (min_capital_s < 1e-11) min_capital_s = 1e-11;
-	
+
 	//Calculate the velocity along the front
-	vector<double> max_velocities(2);
-	_BLOCK_PROFILING;
-OMP_PARALLEL_FOR_NUM_THREADS(2)
-	for (int i = 0; i < 2; i++) {
-		max_velocities[i] = UpdateVelo(i, min_capital_s);
-	}
-	_UNBLOCK_PROFILING;
+	double max_velocities[2];
+	UpdateVelo(min_capital_s, max_velocities);
 	double max_velocity = max_velocities[0] > max_velocities[1] ? max_velocities[0] : max_velocities[1];
-	realnum mdatspedmax = 2; 
+	realnum mdatspedmax = 2;
 	max_velocity = mdatspedmax/max_velocity;
 	mCurrentDistance += max_velocity;
 
 	// update phase field and distance values
-	_BLOCK_PROFILING;
-OMP_PARALLEL_FOR_NUM_THREADS(2)
-	for (int i = 0; i < 2; i++) {
-		UpdateField(i, max_velocity);
-		UpdateDistance(i, mCurrentDistance);
-	}
-	_UNBLOCK_PROFILING;
+	UpdateFields(max_velocity);
+	UpdateDistances(mCurrentDistance);
 }
 void AreaEikonal::Calculate(const sitk::Image& image, Vec3<double>& point1, Vec3<double>& point2) {
 	Initialize(image, point1, point2);
 	Calculate();
 }
 void AreaEikonal::Calculate() {
+	_SECTION("eik.Calculate");
+	int iterations = 0;
 	while (!IsDone()) {
 		Iterate();
+		iterations++;
 	}
+	_RECORD_VALUE("eik.iterations per Calculate", iterations);
 }
 void AreaEikonal::CombineDistance(int slice, double p0_x, double p1_x) {
 	_PROFILING;

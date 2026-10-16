@@ -1,9 +1,11 @@
 """The extension has to work, and give the same result, whatever number of OpenMP threads there is.
 
-The evolution runs the two sides in parallel, each with an inner team of half the available
-threads. With a single thread that half was zero, and the process crashed (SIGFPE or a
-segmentation fault, depending on the platform). OMP_NUM_THREADS is read when the OpenMP runtime
-is loaded, so each case runs in a fresh interpreter.
+The evolution used to run the two sides in parallel, each with an inner team of half the
+available threads. With a single thread that half was zero, and the process crashed (SIGFPE or a
+segmentation fault, depending on the platform). The two sides now share one team, but a small
+number of threads is still the case most likely to break, and the result must not depend on the
+number of threads. OMP_NUM_THREADS is read when the OpenMP runtime is loaded, so each case runs
+in a fresh interpreter.
 """
 import os
 import subprocess

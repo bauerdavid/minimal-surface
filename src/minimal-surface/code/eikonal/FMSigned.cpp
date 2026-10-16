@@ -26,6 +26,7 @@ bool FMSigned::finished() {
 
 void FMSigned::initialize(sitk::Image& input_map, double max_distance, double velo) {
 	_PROFILING;
+	m_band_maps_clean = false;
 	double* input_buffer = input_map.GetBufferAsDouble();
 	m_max_dist = max_distance;
 	mVelocityMap = velo;
@@ -82,7 +83,13 @@ OMP_CRITICAL(build_narrow_band)
 
 
 
-bool FMSigned::compute_distance(vector<int> p, double& out) {
+// The same offsets as NEIGH6_OFFSET, as a plain array: compute_distance runs for every
+// neighbour of every point of the band in every iteration, and must not allocate.
+static const int NEIGH6[6][3] = {
+	{-1, 0, 0}, {1, 0, 0}, {0, -1, 0}, {0, 1, 0}, {0, 0, -1}, {0, 0, 1}
+};
+
+bool FMSigned::compute_distance(int x, int y, int z, double& out) {
 	//_PROFILING;
 	double coeff[] = { -1. / (mVelocityMap * mVelocityMap), 0, 0 };
 	bool neg = false;
@@ -90,16 +97,15 @@ bool FMSigned::compute_distance(vector<int> p, double& out) {
 		double val1 = INF;
 		double val2 = INF;
 		for (int i = 0; i < 2; i++) {
-			const vector<int>& offset = NEIGH6_OFFSET[2 * dim + i];
-			int xn(p[0] + offset[0]), yn(p[1] + offset[1]), zn(p[2] + offset[2]);
+			const int* offset = NEIGH6[2 * dim + i];
+			int xn(x + offset[0]), yn(y + offset[1]), zn(z + offset[2]);
 			if (xn < 0 || xn >=xs || yn < 0 || yn >=ys || zn < 0 || zn >= zs ||
 				!BUF_IDX3D(m_frozen_buffer, xs, ys, zs, xn, yn, zn)) continue;
 			double _val1 = BUF_IDX3D(m_distance_buffer, xs, ys, zs, xn, yn, zn);
 			if (abs(_val1) < abs(val1)) {
 				val1 = _val1;
 #ifdef HIGH_ACCURACY
-				vector<int> pn2;
-				transform(p.begin(), p.end(), offset.begin(), back_inserter(pn2), [](int p, int o) { return p + 2 * o; });
+				int pn2[] = { x + 2 * offset[0], y + 2 * offset[1], z + 2 * offset[2] };
 
 				double _val2 = BUF_IDX3D(m_distance_buffer, xs, ys, zs, pn2[0], pn2[1], pn2[2]);
 				if (BUF_IDX3D(m_frozen_buffer, xs, ys, zs, pn2[0], pn2[1], pn2[2]) && _val2 <= val2)
@@ -144,73 +150,68 @@ void FMSigned::iterate() {
 	BUF_IDX3D(m_distance_buffer, xs, ys, zs, x, y, z) = dist;
 //OMP_PARALLEL_FOR
 	for (int i = 0; i < 6; i++) {
-		const vector<int> &offset = NEIGH6_OFFSET[i];
+		const int* offset = NEIGH6[i];
 		int xn = x + offset[0], yn = y + offset[1], zn = z + offset[2];
 		if (xn < 0 || xn >= xs || yn < 0 || yn >= ys || zn < 0 || zn >= zs
 			|| BUF_IDX3D(m_frozen_buffer, xs, ys, zs, xn, yn, zn)) continue;
 		double dist_n;
-		bool solved = compute_distance({ xn, yn, zn }, dist_n);
+		bool solved = compute_distance(xn, yn, zn, dist_n);
 		if (solved)
 //OMP_CRITICAL(push_to_narrow_band)
 			m_narrow_band.push_or_promote(point_to_representation(xn, yn, zn), dist_n);
 	}
 }
 
-void FMSigned::calculateForNeighbors() {
-	_PROFILING;
-	auto& v = m_narrow_band_v;
-	int n = (int)v.size();
-OMP_PARALLEL
-	{
-		vector< std::pair<POINT3D, double>> temp;
-OMP_FOR
-		for (int i = 0; i < n; i++) {
-			POINT3D p;
-			double dist;
-			tie(p, dist) = v[i];
-			auto [x, y, z] = representation_to_point<int>(p);
-			//OMP_PARALLEL_FOR
-			for (int i = 0; i < 6; i++) {
-				const vector<int>& offset = NEIGH6_OFFSET[i];
-				int xn = x + offset[0], yn = y + offset[1], zn = z + offset[2];
-				if (xn < 0 || xn >= xs || yn < 0 || yn >= ys || zn < 0 || zn >= zs
-					|| BUF_IDX3D(m_distance_buffer, xs, ys, zs, xn, yn, zn) < INF) continue;
-				double dist_n;
-				bool solved = compute_distance({ xn, yn, zn }, dist_n);
-				if (solved) {
-					BUF_IDX3D(m_distance_buffer, xs, ys, zs, xn, yn, zn) = dist_n;
-					temp.push_back(make_pair(point_to_representation(xn, yn, zn), dist_n));
-				}
+// The distances of the neighbours of the i-th band point that have none yet, appended to found.
+// Threads work on different band points that can have the same neighbour. A thread takes a
+// neighbour with an atomic exchange on its claim flag, and only that thread calculates and writes
+// its distance; the others skip it without reading its distance, which the thread may be writing.
+// (The test for "has a distance already" is made on the frozen map, which this does not write:
+// the band points are frozen and have a distance, the neighbours are not.) The distance of a
+// neighbour only depends on the frozen band points around it, so who calculates it does not matter.
+void FMSigned::relax_neighbors_of(int i, std::vector<std::pair<POINT3D, double>>& found) {
+	POINT3D p = m_narrow_band_v[i].first;
+	auto [x, y, z] = representation_to_point<int>(p);
+	for (int i = 0; i < 6; i++) {
+		const int* offset = NEIGH6[i];
+		int xn = x + offset[0], yn = y + offset[1], zn = z + offset[2];
+		if (xn < 0 || xn >= xs || yn < 0 || yn >= ys || zn < 0 || zn >= zs) continue;
+		const size_t voxel = xn + (size_t)xs * (yn + (size_t)ys * zn);
+		if (m_frozen_buffer[voxel]) continue;
+		if (m_claimed[voxel].load(std::memory_order_relaxed) || m_claimed[voxel].exchange(1, std::memory_order_acq_rel)) continue;
+		double dist_n;
+		bool solved = compute_distance(xn, yn, zn, dist_n);
+		if (solved) {
+			m_distance_buffer[voxel] = dist_n;
+			found.push_back(make_pair(point_to_representation(xn, yn, zn), dist_n));
+		}
+		else {
+			// no distance: it stays free for the next band point, as before
+			m_claimed[voxel].store(0, std::memory_order_release);
+		}
+	}
+}
 
-			}
+// The distances of the neighbours of the band points of both instances, in one team. The band
+// lists only grow once every thread is done reading them.
+void FMSigned::calculate_for_neighbors_both(FMSigned* f[2], int team_size) {
+	_SECTION("evolve.signed_distance.neighbors");
+	const int n0 = (int)f[0]->m_narrow_band_v.size();
+	const int total = n0 + (int)f[1]->m_narrow_band_v.size();
+OMP_PARALLEL_NUM_THREADS(team_size)
+	{
+		vector< std::pair<POINT3D, double>> temp[2];
+OMP_FOR
+		for (int k = 0; k < total; k++) {
+			int s = k >= n0 ? 1 : 0;
+			f[s]->relax_neighbors_of(s ? k - n0 : k, temp[s]);
 		}
 OMP_CRITICAL_NO_TAG
-		m_narrow_band_v.insert(m_narrow_band_v.end(), temp.begin(), temp.end());
-	}
-	/*sort(m_narrow_band_v.begin() + n, m_narrow_band_v.end());
-	m_narrow_band_v.erase(unique(m_narrow_band_v.begin()+n, m_narrow_band_v.end()), m_narrow_band_v.end());
-	m_narrow_band = IndexedPriorityQueue<POINT3D_MAP(double), std::greater<double>>(m_narrow_band_v.begin() + n, m_narrow_band_v.end());
-	while (!finished()) {
-		POINT3D p;
-		double dist;
-		tie(p, dist) = m_narrow_band.top();
-		auto [x, y, z] = representation_to_point<int>(p);
-		m_narrow_band.pop();
-		BUF_IDX3D(m_frozen_buffer, xs, ys, zs, x, y, z) = 1;
-		BUF_IDX3D(m_distance_buffer, xs, ys, zs, x, y, z) = dist;
-		for (int i = 0; i < 6; i++) {
-			const vector<int>& offset = NEIGH6_OFFSET[i];
-			int xn = x + offset[0], yn = y + offset[1], zn = z + offset[2];
-			POINT3D neighb = point_to_representation(xn, yn, zn);
-			if (xn < 0 || xn >= xs || yn < 0 || yn >= ys || zn < 0 || zn >= zs
-				|| BUF_IDX3D(m_frozen_buffer, xs, ys, zs, xn, yn, zn) || !m_narrow_band.contains(neighb)) continue;
-			double dist_n;
-			bool solved = compute_distance({ xn, yn, zn }, dist_n);
-			if (solved && abs(m_narrow_band[neighb]) > abs(dist_n)) {
-				m_narrow_band.changeAtKey(neighb, dist_n);
-			}
+		{
+			for (int s = 0; s < 2; s++)
+				f[s]->m_narrow_band_v.insert(f[s]->m_narrow_band_v.end(), temp[s].begin(), temp[s].end());
 		}
-	}*/
+	}
 }
 
 
@@ -226,6 +227,7 @@ void FMSigned::build(int id, sitk::Image& input_map, sitk::Image& output, double
 }
 
 void FMSigned::smooth_distances() {
+	m_band_maps_clean = false;
 	if(temp.GetSize() != m_distance_map.GetSize())
 		temp = sitk::Image(m_distance_map.GetSize(), m_distance_map.GetPixelID());
 	double* temp_buffer = temp.GetBufferAsDouble();
@@ -239,7 +241,7 @@ OMP_PARALLEL_FOR
 		int n_neighbors = 0;
 		auto [x, y, z] = representation_to_point<int>(p);
 		for (int i = 0; i < 6; i++) {
-			const vector<int>& offset = NEIGH6_OFFSET[i];
+			const int* offset = NEIGH6[i];
 			int xn = x + offset[0], yn = y + offset[1], zn = z + offset[2];
 			double dist_n;
 			if (xn < 0 || xn >= xs || yn < 0 || yn >= ys || zn < 0 || zn >= zs || (dist_n = BUF_IDX3D(m_distance_buffer, xs, ys, zs, xn, yn, zn)) >= INF) continue;

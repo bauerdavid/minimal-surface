@@ -37,7 +37,65 @@ double profiler::get_execution_time() {
 	auto now = std::chrono::steady_clock::now();
 	return std::chrono::duration_cast<std::chrono::nanoseconds>(now - start_time).count();
 }
+
+section_profile& section_profile::get() {
+	static section_profile instance;
+	return instance;
+}
+
+void section_profile::add(std::map<std::string, entry>& entries, const char* name, double value) {
+	std::lock_guard<std::mutex> lock(get().mutex);
+	entry& e = entries[name];
+	e.n++;
+	e.sum += value;
+	if (value < e.min) e.min = value;
+	if (value > e.max) e.max = value;
+}
+
+void section_profile::add_time(const char* name, double ns) {
+	add(get().timers, name, ns / 1e6);
+}
+
+void section_profile::add_value(const char* name, double value) {
+	add(get().values, name, value);
+}
+
+void section_profile::report(std::ostream& os) {
+	section_profile& instance = get();
+	std::lock_guard<std::mutex> lock(instance.mutex);
+	os << std::left << std::setw(48) << "section" << std::right << std::setw(9) << "calls"
+		<< std::setw(12) << "total ms" << std::setw(12) << "mean ms" << std::setw(12) << "max ms" << std::endl;
+	for (auto& [name, e] : instance.timers)
+		os << std::left << std::setw(48) << name << std::right << std::setw(9) << e.n << std::fixed
+			<< std::setprecision(2) << std::setw(12) << e.sum << std::setprecision(4) << std::setw(12) << e.sum / e.n
+			<< std::setw(12) << e.max << std::endl;
+	os << std::endl << std::left << std::setw(48) << "value" << std::right << std::setw(9) << "count"
+		<< std::setw(12) << "mean" << std::setw(12) << "min" << std::setw(12) << "max" << std::endl;
+	for (auto& [name, e] : instance.values)
+		os << std::left << std::setw(48) << name << std::right << std::setw(9) << e.n << std::fixed
+			<< std::setprecision(1) << std::setw(12) << e.sum / e.n << std::setw(12) << e.min
+			<< std::setw(12) << e.max << std::endl;
+}
+
+void section_profile::reset() {
+	section_profile& instance = get();
+	std::lock_guard<std::mutex> lock(instance.mutex);
+	instance.timers.clear();
+	instance.values.clear();
+}
 #endif
+
+std::string profile_report(bool reset) {
+#ifdef PROFILE_FUNCTIONS
+	std::ostringstream os;
+	section_profile::report(os);
+	if (reset)
+		section_profile::reset();
+	return os.str();
+#else
+	return std::string();
+#endif
+}
 
 void rotate(const std::vector<double>& rotation_matrix, const std::vector<double> value, std::vector<double>& dest) {
 	dest.clear();
