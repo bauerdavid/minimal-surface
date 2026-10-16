@@ -83,6 +83,8 @@ jobs:
       - name: Check the distributions
         run: |
           ls -l dist
+          # 4 platforms (Windows, Linux, macOS arm64 and x86-64) times 5 Python versions
+          test "$(ls dist/*.whl | wc -l)" = 20 || { echo "::error::Expected 20 wheels"; exit 1; }
           python -m pip install twine
           python -m twine check dist/*
 
