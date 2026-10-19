@@ -165,6 +165,14 @@ def first_files(root):
             yield os.path.join(dirpath, name)
 
 
+def rpm(*args):
+    return subprocess.run(["rpm", *args], capture_output=True, text=True, check=True).stdout
+
+
+def rpm_license_files(pkg):
+    return [f for f in rpm("-qL", pkg).split() if os.path.isfile(f)]
+
+
 def collect_linux(wheel, sdk_licenses, eigen_dir):
     parts = []
     for path in sorted(first_files(sdk_licenses)):
@@ -186,12 +194,26 @@ def collect_linux(wheel, sdk_licenses, eigen_dir):
         if not paths:
             raise SystemExit("Cannot find the bundled library %s (tried %s) on this system" % (lib, ", ".join(candidates)))
         real = os.path.realpath(paths[0])
-        pkg = subprocess.run(["rpm", "-qf", real], capture_output=True, text=True, check=True).stdout.split()[0]
-        files = subprocess.run(["rpm", "-qL", pkg], capture_output=True, text=True, check=True).stdout.split()
-        print("%s: %s, package %s, license files %s" % (lib, real, pkg, files))
-        texts = ["--- %s ---\n%s" % (os.path.basename(f), read_text(f).strip("\n")) for f in files if os.path.isfile(f)]
+        pkg = rpm("-qf", real).split()[0]
+        files = rpm_license_files(pkg)
+        owner = pkg
+        if not files:
+            # Some packages leave the license text to another package built from the same source
+            # (on RHEL-like systems libgomp's is in libgcc's)
+            source = rpm("-q", "--qf", "%{SOURCERPM}", pkg).strip()
+            siblings = [line.split()[0] for line in rpm("-qa", "--qf", "%{NAME} %{SOURCERPM}\n").splitlines()
+                        if line.split()[1:] == [source]]
+            for name in sorted(set(siblings)):
+                files = rpm_license_files(name)
+                if files:
+                    owner = name
+                    break
+        print("%s: %s, package %s, license files from %s: %s" % (lib, real, pkg, owner, files))
+        texts = ["--- %s ---\n%s" % (os.path.basename(f), read_text(f).strip("\n")) for f in files]
         if not texts:
-            raise SystemExit("The package %s that provides %s has no license files" % (pkg, lib))
+            listing = subprocess.run("ls /usr/share/licenses | head -80", shell=True, capture_output=True, text=True).stdout
+            raise SystemExit("No license files for %s (package %s, nor any package built from %s). In /usr/share/licenses:\n%s"
+                             % (lib, pkg, source, listing))
         parts.append(section("%s (package %s, bundled in the wheel)" % (lib, pkg), "", "", "\n\n".join(texts)))
     parts.append(eigen_section(eigen_dir))
     return "".join(parts)
