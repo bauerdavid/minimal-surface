@@ -174,14 +174,21 @@ def collect_linux(wheel, sdk_licenses, eigen_dir):
         raise SystemExit("No SDK license files in %s" % sdk_licenses)
 
     # libraries the repair step copied in come from the system: find the packages that own them
+    cache = subprocess.run(["ldconfig", "-p"], capture_output=True, text=True, check=True).stdout
     for lib in bundled_libraries(wheel):
-        out = subprocess.run(["ldconfig", "-p"], capture_output=True, text=True, check=True).stdout
-        paths = [line.split("=>")[1].strip() for line in out.splitlines() if line.strip().startswith(lib + " ")]
+        # auditwheel names a copy after the file (libgomp.so.1.0.0), but the system's library
+        # cache lists sonames (libgomp.so.1), so also try the name with version parts removed
+        candidates = [lib]
+        while re.search(r"\.so\.\d+(\.\d+)+$", candidates[-1]):
+            candidates.append(candidates[-1].rsplit(".", 1)[0])
+        paths = [line.split("=>")[1].strip() for line in cache.splitlines()
+                 if "=>" in line and line.split()[0] in candidates]
         if not paths:
-            raise SystemExit("Cannot find the bundled library %s on this system" % lib)
+            raise SystemExit("Cannot find the bundled library %s (tried %s) on this system" % (lib, ", ".join(candidates)))
         real = os.path.realpath(paths[0])
         pkg = subprocess.run(["rpm", "-qf", real], capture_output=True, text=True, check=True).stdout.split()[0]
         files = subprocess.run(["rpm", "-qL", pkg], capture_output=True, text=True, check=True).stdout.split()
+        print("%s: %s, package %s, license files %s" % (lib, real, pkg, files))
         texts = ["--- %s ---\n%s" % (os.path.basename(f), read_text(f).strip("\n")) for f in files if os.path.isfile(f)]
         if not texts:
             raise SystemExit("The package %s that provides %s has no license files" % (pkg, lib))
