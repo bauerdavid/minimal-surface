@@ -1,0 +1,111 @@
+name: release
+
+# Publishes to PyPI when a GitHub release is published, and never otherwise.
+#
+# To make a release:
+#   1. raise `version` in setup.cfg and merge it,
+#   2. create a GitHub release whose tag is v<version> (for example v0.0.3) on that commit.
+#
+# The workflow checks that the tag matches setup.cfg, builds the source distribution and the
+# wheels for Windows, macOS and Linux (build.yml, which also tests each wheel on a plain Python install),
+# and uploads them. Run by hand from the Actions tab (workflow_dispatch) it does everything
+# except the upload, which is a dry run.
+#
+# Uploading uses PyPI trusted publishing, so there is no token to store. One-time setup:
+#   * PyPI: project minimal-surface > Publishing > add a trusted publisher
+#     (GitHub; owner bauerdavid, repository minimal-surface, workflow release.yml,
+#     environment pypi).
+#   * GitHub: Settings > Environments > create an environment named `pypi`. Requiring a
+#     reviewer there adds a manual approval before every upload.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sdist:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: The tag matches the version in setup.cfg
+        if: github.event_name == 'release'
+        run: |
+          version="$(python -c "import configparser; c = configparser.ConfigParser(); c.read('setup.cfg'); print(c['metadata']['version'])")"
+          echo "setup.cfg: $version, tag: $GITHUB_REF_NAME"
+          if [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error::Release tag $GITHUB_REF_NAME does not match version $version in setup.cfg (expected v$version)"
+            exit 1
+          fi
+
+      - name: Build the source distribution
+        run: |
+          python -m pip install build twine
+          python -m build --sdist
+          python -m twine check dist/*
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sdist
+          path: dist/*.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+
+  wheels:
+    uses: ./.github/workflows/build.yml
+
+  # Gathers and checks the distributions on every run, so that a dry run exercises this too.
+  collect:
+    needs: [sdist, wheels]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Collect the source distribution
+        uses: actions/download-artifact@v4
+        with:
+          name: sdist
+          path: dist
+
+      - name: Collect the wheels
+        uses: actions/download-artifact@v4
+        with:
+          pattern: wheel-*
+          path: dist
+          merge-multiple: true
+
+      - name: Check the distributions
+        run: |
+          ls -l dist
+          # 4 platforms (Windows, Linux, macOS arm64 and x86-64) times 5 Python versions
+          test "$(ls dist/*.whl | wc -l)" = 20 || { echo "::error::Expected 20 wheels"; exit 1; }
+          python -m pip install twine
+          python -m twine check dist/*
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    needs: collect
+    if: github.event_name == 'release'
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+
+      - uses: pypa/gh-action-pypi-publish@release/v1

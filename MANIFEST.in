@@ -1,0 +1,6 @@
+# The extension is compiled from these when installing from the source distribution.
+recursive-include src/minimal-surface/code *.pyx *.cpp *.h *.hpp
+# Eigen is header-only and vendored; its headers have no file extension.
+graft src/minimal-surface/code/eigen-3.4.0/Eigen
+include src/minimal-surface/code/eigen-3.4.0/COPYING.*
+include tests/*.py
