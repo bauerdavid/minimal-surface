@@ -27,7 +27,27 @@ permissions:
   contents: read
 
 jobs:
+  # Artifacts of earlier runs count against the Actions storage quota until they expire, and an
+  # upload that hits the quota fails the release. So the release starts by deleting what is left
+  # over. Artifacts less than two hours old are kept, since a run of build.yml may still be using
+  # them.
+  cleanup:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - name: Delete old artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api --paginate "repos/$GITHUB_REPOSITORY/actions/artifacts?per_page=100" \
+            -q '.artifacts[] | select(.expired | not) | select(.created_at < (now - 7200 | todate)) | .id' |
+            while read -r id; do
+              gh api -X DELETE "repos/$GITHUB_REPOSITORY/actions/artifacts/$id" --silent
+            done
+
   sdist:
+    needs: cleanup
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -57,12 +77,14 @@ jobs:
           name: sdist
           path: dist/*.tar.gz
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 1
 
   wheels:
+    needs: cleanup
     uses: ./.github/workflows/build.yml
 
   # Gathers and checks the distributions on every run, so that a dry run exercises this too.
+  # Nothing is uploaded again: publish downloads the same artifacts.
   collect:
     needs: [sdist, wheels]
     runs-on: ubuntu-latest
@@ -88,13 +110,6 @@ jobs:
           python -m pip install twine
           python -m twine check dist/*
 
-      - uses: actions/upload-artifact@v4
-        with:
-          name: dist
-          path: dist/*
-          if-no-files-found: error
-          retention-days: 7
-
   publish:
     needs: collect
     if: github.event_name == 'release'
@@ -103,9 +118,17 @@ jobs:
     permissions:
       id-token: write
     steps:
-      - uses: actions/download-artifact@v4
+      - name: Collect the source distribution
+        uses: actions/download-artifact@v4
         with:
-          name: dist
+          name: sdist
           path: dist
+
+      - name: Collect the wheels
+        uses: actions/download-artifact@v4
+        with:
+          pattern: wheel-*
+          path: dist
+          merge-multiple: true
 
       - uses: pypa/gh-action-pypi-publish@release/v1

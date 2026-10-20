@@ -1,0 +1,36 @@
+name: keep-sdk-cache
+
+# GitHub evicts a cache that was not used for 7 days, and the Linux SDK that build.yml caches
+# takes hours to rebuild, which a release would then have to wait for. Restoring it twice a week
+# counts as a use and keeps it. This does not build anything: if the cache is gone, it only says so.
+
+on:
+  schedule:
+    - cron: "17 5 * * 1,4"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  keep:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # the same key as in build.yml
+      - name: Read the SimpleITK release from build.yml
+        id: tag
+        run: |
+          echo "tag=$(sed -n 's/^  SITK_TAG: *//p' .github/workflows/build.yml)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore the SDK
+        id: sdk
+        uses: actions/cache/restore@v4
+        with:
+          path: sdk
+          key: linux-sdk-${{ steps.tag.outputs.tag }}-${{ hashFiles('.github/linux/build_sdk.sh') }}
+
+      - name: The cache is gone
+        if: steps.sdk.outputs.cache-hit != 'true'
+        run: echo "::warning::The Linux SDK is not cached. The next push to master, release or manual run of build.yml rebuilds it, which takes hours."
