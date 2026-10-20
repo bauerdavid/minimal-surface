@@ -63,15 +63,34 @@ defaults:
     shell: bash -el {0}
 
 jobs:
+  # The Python versions to build for. Pull requests only take the oldest and the newest, which
+  # keeps the wheels they upload (and the runner time) down; everything else, including a release
+  # (release.yml calls this workflow, and `github.event_name` is then `release`), builds all five.
+  pythons:
+    name: Python versions
+    runs-on: ubuntu-latest
+    outputs:
+      versions: ${{ steps.pick.outputs.versions }}
+    steps:
+      - id: pick
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = pull_request ]; then
+            echo 'versions=["3.10","3.14"]' >> "$GITHUB_OUTPUT"
+          else
+            echo 'versions=["3.10","3.11","3.12","3.13","3.14"]' >> "$GITHUB_OUTPUT"
+          fi
+
   build:
     name: ${{ matrix.platform }}, Python ${{ matrix.python }}
+    needs: pythons
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-15, macos-15-intel, windows-latest]
-        python: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+        python: ${{ fromJSON(needs.pythons.outputs.versions) }}
         include:
           - os: ubuntu-latest
             platform: Linux (conda SDK)
@@ -176,7 +195,7 @@ jobs:
           name: wheel-${{ runner.os }}-${{ runner.arch }}-py${{ matrix.python }}
           path: wheelhouse/*.whl
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 1
 
   # Static ITK and SimpleITK for the Linux wheels, built in the manylinux container. The result is
   # cached under a key made from the SimpleITK release and the build script. A job that finds it
@@ -234,14 +253,14 @@ jobs:
 
   build-linux:
     name: Linux (manylinux_2_28), Python ${{ matrix.python }}
-    needs: linux-sdk
+    needs: [pythons, linux-sdk]
     if: ${{ needs.linux-sdk.outputs.available == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
-        python: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+        python: ${{ fromJSON(needs.pythons.outputs.versions) }}
     steps:
       - uses: actions/checkout@v4
 
@@ -265,13 +284,13 @@ jobs:
           name: wheel-${{ runner.os }}-${{ runner.arch }}-py${{ matrix.python }}
           path: wheelhouse/*.whl
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 1
 
   # The wheel on a plain Python, with no conda environment (and so none of the libraries the
   # build used) on the machine's search paths.
   test-wheel:
     name: Test the wheel, ${{ matrix.platform }}, Python ${{ matrix.python }}
-    needs: build
+    needs: [pythons, build]
     # also when another platform's build failed, so that every platform reports its own result
     if: ${{ !cancelled() }}
     runs-on: ${{ matrix.os }}
@@ -280,7 +299,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [macos-15, macos-15-intel, windows-latest]
-        python: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+        python: ${{ fromJSON(needs.pythons.outputs.versions) }}
         include:
           - os: macos-15
             platform: macOS (arm64)
@@ -314,7 +333,7 @@ jobs:
 
   test-wheel-linux:
     name: Test the wheel, Linux, Python ${{ matrix.python }}
-    needs: build-linux
+    needs: [pythons, build-linux]
     if: ${{ !cancelled() && needs.build-linux.result != 'skipped' }}
     # the oldest Linux runner, since the wheel is meant to run on older distributions too
     runs-on: ubuntu-22.04
@@ -322,7 +341,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+        python: ${{ fromJSON(needs.pythons.outputs.versions) }}
 
     steps:
       - name: Allow long paths (the vendored Eigen tree has very long file names)
