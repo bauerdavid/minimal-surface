@@ -42,6 +42,9 @@ cdef extern from "SimpleITK.h" namespace "itk::simple":
     cdef enum PixelIDValueEnum:
         sitkFloat64 = 9
     ctypedef PixelIDValueEnum sitkFloat64_ "sitk::sitkFloat64"
+    cdef enum InterpolatorEnum:
+        sitkNearestNeighbor
+        sitkLinear
     cdef cppclass Image:
         Image()
         Image(int, int, PixelIDValueEnum)
@@ -114,12 +117,19 @@ cdef extern from "MinimalSurfaceEstimator.h":
         void Calculate(Image, Image, Vec3[double], Vec3[double], int) except + nogil
         void Calculate(Image, Vec3[double], Vec3[double], int) except + nogil
         void SetInitialContourCalculatorFunc(init_contour_callback_type)
+        void SetInitialContourFromDistance(bool)
+        void SetAlignSurface(bool)
+        const vector[double]& GetSurfaceOffsets() nogil const
         const TransportFunctionES& GetTransportFunctionCalculator() nogil const
         Image GetTransportSliceFromPoints(Image, Vec3[double], Vec3[double]) except + nogil
         Image CalculateEikonalAndTransportInit(Image, Image, Vec3[double], Vec3[double]) except + nogil
         void SetTransportInitSlice(Image) nogil
         Image GetCombinedDistanceMap() nogil
         Image GetTempInitContour() nogil
+        const Image& GetRotatedDistanceMap(int) nogil const
+        int GetTransportInitPlaneSlice() nogil const
+        vector[double] GetRotatedPoint(int) nogil const
+        Image SampleInitPlane(const Image&, InterpolatorEnum) except + nogil
     cdef vector[Vec3[int]] ResolvePath(Vec3[int], const Image&) nogil
 
 cdef object _as_float64_volume(object arr, str name):
@@ -251,6 +261,37 @@ cdef class MinimalSurfaceCalculator:
             return
         cdef InitialContourCalculatorWrapper wrapper = InitialContourCalculatorWrapper(func)
         self.calculator.SetInitialContourCalculatorFunc(<init_contour_callback_type> wrapper)
+
+    cpdef void set_initial_plane_method(self, str method):
+        # How the initial contour in the meeting plane is found when no function was given to
+        # set_initial_plane_calculator (that one is used if there is one, whatever the method):
+        # "distance" (the default) from the distances of the two points in the plane, which is
+        # instant, falling back to "phase_field" when they give nothing usable; "phase_field"
+        # evolves a phase field in the plane, which is slow. Also drops a function set before.
+        if method == "distance":
+            self.calculator.SetInitialContourFromDistance(True)
+        elif method == "phase_field":
+            self.calculator.SetInitialContourFromDistance(False)
+        else:
+            raise ValueError("method must be 'distance' or 'phase_field', got %r" % (method,))
+
+    cpdef void set_align_surface(self, bool align):
+        # The propagation of the transport function settles at the bottom of the valley of the
+        # distances in the meeting plane, whatever the contour in the plane was; a contour of the
+        # edge of the object (from set_initial_plane_calculator, say) is a pixel or two inside of it,
+        # and the surface has a notch at the plane. With align=True the propagation starts from the
+        # contour at the bottom of the valley and the surface is shifted by the distance between it
+        # and the given contour, so that it passes through the given contour in the plane and has no
+        # notch. calculate() then returns a signed distance (clamped to +-25) instead of the
+        # propagated field; its sign is the same. Off by default. Nothing is aligned when the
+        # valley cannot be found.
+        self.calculator.SetAlignSurface(align)
+
+    cpdef object get_surface_offsets(self):
+        # How far the surface was moved, in pixels, on each of the rays from the middle of the
+        # meeting plane (positive: inwards) when set_align_surface is on; empty if nothing was.
+        cdef vector[double] offsets = self.calculator.GetSurfaceOffsets()
+        return np.array([offsets[i] for i in range(offsets.size())])
 
     cpdef np.ndarray[np.int64_t, ndim=2] resolve_shortest_paths(self, np.ndarray[np.int64_t, ndim=1] point, np.ndarray[np.float_t, ndim=3] data):
         # point and the returned path are in array index order, (z, y, x), like
@@ -384,6 +425,27 @@ cdef class MinimalSurfaceCalculator:
         cdef Image distance_map = self.calculator.GetCombinedDistanceMap()
         cdef object arr = sitk_2_np(distance_map).copy()
         return arr
+
+    cpdef object get_rotated_distance_maps(self):
+        # The distance maps of point1 and point2 in the rotated volume, where the meeting plane
+        # is the slice [:, :, plane_slice]; returns (distance1, distance2, plane_slice).
+        cdef object d1 = sitk_2_np(self.calculator.GetRotatedDistanceMap(0)).copy()
+        cdef object d2 = sitk_2_np(self.calculator.GetRotatedDistanceMap(1)).copy()
+        return d1, d2, self.calculator.GetTransportInitPlaneSlice()
+
+    cpdef object get_rotated_points(self):
+        # point1 and point2 in the rotated volume, as (z, y, x) continuous indices.
+        cdef vector[double] a = self.calculator.GetRotatedPoint(0)
+        cdef vector[double] b = self.calculator.GetRotatedPoint(1)
+        return (np.array([a[2], a[1], a[0]]), np.array([b[2], b[1], b[0]]))
+
+    cpdef object sample_init_plane(self, object volume, bool nearest=False):
+        # volume (the shape of the arrays given to calc_eikonal_and_transport_init) resampled
+        # onto the meeting plane, on the grid of the initial plane image.
+        cdef object arr = _as_float64_volume(volume, "volume")
+        cdef Image sitk_volume = np_2_sitk[sitkFloat64_](arr)
+        cdef Image plane = self.calculator.SampleInitPlane(sitk_volume, sitkNearestNeighbor if nearest else sitkLinear)
+        return sitk_2_np(plane).copy()
 
     cpdef object get_init_plane(self):
         cdef Image init_plane = Cast(self.calculator.GetTempInitContour(), sitkFloat64)

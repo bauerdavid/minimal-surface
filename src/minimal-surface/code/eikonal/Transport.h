@@ -59,6 +59,8 @@ public:
 	void RotateTransportFunction(const std::vector<double>& rotation_matrix, std::vector<unsigned> sample_size);
 	const sitk::Image& GetTransportFunction(int) const;
 	const sitk::Image& GetTransportFunction() const;
+	// Replaces the result (both of the buffers it alternates between) with `image`.
+	void SetTransportFunction(const sitk::Image& image);
 
 	const sitk::Image& GetReadOnlyMap() const;
 	const sitk::Image& GetGradX() const;
