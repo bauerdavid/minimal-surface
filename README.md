@@ -127,6 +127,35 @@ plt.imshow(mask[35], cmap="plasma")
 plt.show()
 ```
 
+## The initial contour in the meeting plane
+The result is grown from a 2D contour of the object in the plane where the fronts of the two points meet. Unless
+you give a function to `set_initial_plane_calculator` (like `segment_slice` above, which can ask a user or threshold
+the image), the contour is found from the distances of the two points: on the plane, their sum is the length of the
+cheapest path from one point through the pixel to the other, which is lowest along the surface of the object, so the
+surface is a valley of it, and the contour follows that valley. This takes a fraction of a second, and needs
+nothing but the two points and `phi`. It relies on the surface being cheaper to travel along than the inside of
+the object, which is what `phi` in the example above does.
+
+If the distances give nothing usable (for example when the line between the points runs along the surface, so that
+the valley cannot be told from it), the contour is found by evolving a phase field in the plane instead, which
+takes seconds. `calculator.set_initial_plane_method("phase_field")` always does that, and
+`set_initial_plane_method("distance")` is the default.
+
+### The surface at the meeting plane
+Away from the plane, the result is carried along the paths of the distances, and ends up at the bottom of the valley
+of the distances, whatever contour the plane started from: a contour that is off by 4 pixels is forgotten within two
+slices. A contour of the edge of the object (a threshold, a drawing, the phase field) is usually a pixel or two
+inside of the valley, so the surface used to have a notch at the plane. The contour that is found from the distances
+is therefore corrected: the surface that the result settles at is read off, extrapolated to the plane, and the result is
+calculated again from a contour there. This costs a second, short calculation of the result.
+
+For a contour of your own (`set_initial_plane_calculator`, or `set_initial_plane_method("phase_field")`) the result
+is left as it is, unless you ask for more: after `calculator.set_align_surface(True)` the surface is moved by the
+difference between the two contours, so that it passes through yours in the plane and is smooth through it. The
+returned transport function is then a signed distance (clamped to +-25) and not the carried field, with the same
+sign; `calculator.get_surface_offsets()` gives how far, in pixels, the surface was moved on each ray from the middle
+of the plane. Nothing is moved when the surface cannot be read off (the object is cut by the volume, say).
+
 ## Inputs
 `calculate`, `calc_eikonal_and_transport_init` and `init_transport_slice` take 3D arrays of any real numeric dtype (bool, integer or floating point) and any memory layout; they are converted to C-contiguous `float64` internally, and your arrays are not modified. Anything else (complex, strings, objects, `None` for `phi`) raises a `TypeError`, and `phi` and `image` must have the same shape.
 

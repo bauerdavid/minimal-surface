@@ -301,6 +301,11 @@ void TransportFunction::RotateTransportFunction(const std::vector<double>& rotat
 	resample_img(mTransportFunctionMap[1], mTransportFunctionMap[1], rotation_matrix, sample_size, true);
 }
 
+void TransportFunction::SetTransportFunction(const sitk::Image& image) {
+	mTransportFunctionMap[0] = image;
+	mTransportFunctionMap[1] = image;
+}
+
 sitk::Image& TransportFunction::GetTransportFunction() {
 	return mTransportFunctionMap[(mIterationCount + 1) % 2];
 }
