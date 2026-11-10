@@ -38,40 +38,41 @@ void PlanePhaseField::Iterate()
 {
 	_PROFILING;
 
+	// One step of the phase field. The derivatives of the field are taken in place from its
+	// neighbours (with the border repeated, like the zero-flux boundary of the SimpleITK filters
+	// that this used to call), so nothing is allocated: a step used to allocate three images,
+	// which cost more than the arithmetic.
 	int xs = mPhaseField.GetWidth(), ys = mPhaseField.GetHeight();
-	sitk::Image field_grad_x = sitk::Derivative(mPhaseField, 0, 1, false);
-	sitk::Image field_grad_y = sitk::Derivative(mPhaseField, 1, 1, false);
-	sitk::Image laplacian = sitk::Laplacian(mPhaseField, false);
 	double* velo_buffer = mVelocity.GetBufferAsDouble();
-	double* laplacian_buffer = laplacian.GetBufferAsDouble();
 	double* phasefield_buffer = mPhaseField.GetBufferAsDouble();
-	double* field_gx_buffer = field_grad_x.GetBufferAsDouble();
-	double* field_gy_buffer = field_grad_y.GetBufferAsDouble();
-	double* gx_buffer = mGradX.GetBufferAsDouble();
-	double* gy_buffer = mGradY.GetBufferAsDouble();
-	//sitk::Image velocity = sitk::Laplacian(mPhaseField, false) * 4 + mPhaseField - sitk::Pow(mPhaseField, 3) + 10 * (mGradX * field_grad_x + mGradY * field_grad_y);
+	const double* gx_buffer = mGradX.GetBufferAsDouble();
+	const double* gy_buffer = mGradY.GetBufferAsDouble();
 
 	realnum maxv(0);
 OMP_PARALLEL
 	{
 		double temp_max = 0;
 OMP_FOR
-		for (int yx = 0; yx < xs * ys; yx++) {
-			int y = yx / xs;
-			int x = yx % xs;
-			double& phase = BUF_IDX2D(phasefield_buffer, xs, ys, x, y);
-			double& lapl = BUF_IDX2D(laplacian_buffer, xs, ys, x, y);
-			double& velo = BUF_IDX2D(velo_buffer, xs, ys, x, y);
-			double& field_gx = BUF_IDX2D(field_gx_buffer, xs, ys, x, y);
-			double& field_gy = BUF_IDX2D(field_gy_buffer, xs, ys, x, y);
-			double& gx = BUF_IDX2D(gx_buffer, xs, ys, x, y);
-			double& gy = BUF_IDX2D(gy_buffer, xs, ys, x, y);
-			velo = lapl * 4 + phase - pow(phase, 3) + (gx * field_gx + gy * field_gy);
-			if (abs(velo) > temp_max)
-				temp_max = abs(velo);
+		for (int y = 0; y < ys; y++) {
+			const double* row = phasefield_buffer + (size_t)y * xs;
+			const double* up = phasefield_buffer + (size_t)(y > 0 ? y - 1 : 0) * xs;
+			const double* down = phasefield_buffer + (size_t)(y < ys - 1 ? y + 1 : ys - 1) * xs;
+			for (int x = 0; x < xs; x++) {
+				const double phase = row[x];
+				const double left = row[x > 0 ? x - 1 : 0], right = row[x < xs - 1 ? x + 1 : xs - 1];
+				const double lapl = left + right + up[x] + down[x] - 4 * phase;
+				const double field_gx = 0.5 * (right - left), field_gy = 0.5 * (down[x] - up[x]);
+				const size_t yx = (size_t)y * xs + x;
+				const double velo = lapl * 4 + phase - phase * phase * phase + (gx_buffer[yx] * field_gx + gy_buffer[yx] * field_gy);
+				velo_buffer[yx] = velo;
+				if (fabs(velo) > temp_max)
+					temp_max = fabs(velo);
+			}
 		}
-		if (temp_max > maxv) {
-			maxv = temp_max;
+OMP_CRITICAL_NO_TAG
+		{
+			if (temp_max > maxv)
+				maxv = temp_max;
 		}
 	}
 	if (maxv <= 1e-5f)
