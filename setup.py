@@ -1,4 +1,5 @@
 from setuptools import setup, Extension
+from setuptools.command.build_ext import build_ext
 import glob
 import os
 import subprocess
@@ -174,10 +175,6 @@ else:
         sitk_path = os.path.expanduser("~/SimpleITK-build")
         os.environ["CC"] = "g++"
 
-sdk = describe_sdk(sitk_path)
-omp_compile_args, omp_link_args = openmp_flags(sitk_path)
-extra_compile_args = (["/std:c++17"] if WINDOWS else ["-std=c++17"]) + omp_compile_args
-
 # Compile against the modern NumPy C API only, so that use of the NumPy 1
 # legacy API is a build error rather than a silent numpy 1 pin.
 define_macros = [("NPY_NO_DEPRECATED_API", "NPY_1_7_API_VERSION")]
@@ -205,16 +202,32 @@ extension = Extension(
         "src/minimal-surface/code/eikonal",
         "src/minimal-surface/code/pythonwrapper",
         "src/minimal-surface/code/eigen-3.4.0",
-        *sdk["include_dirs"],
     ],
     depends=["MinimalSurfaceEstimator.h", "SimpleITK.h", "sitkImage.h"],
     define_macros=define_macros,
-    library_dirs=sdk["library_dirs"],
-    extra_objects=sdk["extra_objects"],
-    extra_compile_args=extra_compile_args,
-    extra_link_args=sdk["extra_link_args"] + omp_link_args + macos_link_args,
+    extra_compile_args=["/std:c++17"] if WINDOWS else ["-std=c++17"],
+    extra_link_args=list(macos_link_args),
     language="c++"
 )
+
+
+class build_ext_with_sdk(build_ext):
+    """build_ext that adds the SimpleITK and OpenMP flags to the extension just before compiling.
+
+    Looking for the SDK only here keeps the commands that compile nothing, such as building
+    the source distribution, working on a machine without SimpleITK.
+    """
+
+    def run(self):
+        sdk = describe_sdk(sitk_path)
+        omp_compile_args, omp_link_args = openmp_flags(sitk_path)
+        for ext in self.extensions:
+            ext.include_dirs += sdk["include_dirs"]
+            ext.library_dirs += sdk["library_dirs"]
+            ext.extra_objects += sdk["extra_objects"]
+            ext.extra_compile_args += omp_compile_args
+            ext.extra_link_args[:0] = sdk["extra_link_args"] + omp_link_args
+        super().run()
 
 CYTHONIZE = cythonize is not None
 
@@ -226,5 +239,6 @@ else:
 
 setup(name='minimal_surface',
     description='Python Package with minimalsurface C++ extension',
-    ext_modules=extensions
+    ext_modules=extensions,
+    cmdclass={"build_ext": build_ext_with_sdk},
 )
